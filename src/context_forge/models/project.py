@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from context_forge.models.directory import Directory
 from context_forge.models.file import File
+from context_forge.models.relationship import Relationship
 from context_forge.models.symbol import Symbol
 
 
@@ -32,6 +33,8 @@ class Project:
 
     symbols: list[Symbol] = field(default_factory=list)
 
+    relationships: list[Relationship] = field(default_factory=list)
+
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("Project name cannot be empty")
@@ -55,3 +58,6 @@ class Project:
         if symbol.file_id not in {file.id for file in self.files}:
             raise ValueError("Symbol file does not belong to project")
         self.symbols.append(symbol)
+
+    def add_relationship(self, relationship: Relationship) -> None:
+        self.relationships.append(relationship)
