@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from context_forge.models.directory import Directory
 from context_forge.models.file import File
+from context_forge.models.symbol import Symbol
 
 
 @dataclass
@@ -29,6 +30,8 @@ class Project:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
+    symbols: list[Symbol] = field(default_factory=list)
+
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("Project name cannot be empty")
@@ -47,3 +50,8 @@ class Project:
             raise ValueError("File belongs to a different project")
 
         self.files.append(file)
+
+    def add_symbol(self, symbol: Symbol) -> None:
+        if symbol.file_id not in {file.id for file in self.files}:
+            raise ValueError("Symbol file does not belong to project")
+        self.symbols.append(symbol)
