@@ -45,3 +45,12 @@ def test_classifier_detects_uv(tmp_path: Path) -> None:
     ProjectClassifier().classify(project)
 
     assert project.package_manager == "uv"
+
+
+def test_classifier_detects_ruby(tmp_path: Path) -> None:
+    (tmp_path / "main.rb").write_text("puts 'hello'")
+
+    project = RepositoryScanner(tmp_path).scan()
+    ProjectClassifier().classify(project)
+
+    assert "Ruby" in project.languages

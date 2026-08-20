@@ -15,9 +15,10 @@ LANGUAGE_BY_EXTENSION = {
     ".h": "C",
     ".go": "Go",
     ".rs": "Rust",
-    ".rb": "PHP",
+    ".rb": "Ruby",
     ".swift": "Swift",
     ".kt": "Kotlin",
+    ".php": "PHP",
 }
 
 DOCUMENTATION_EXTENSIONS = {".md", ".rst", ".txt"}
