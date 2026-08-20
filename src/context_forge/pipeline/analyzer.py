@@ -40,6 +40,9 @@ class ProjectAnalyzer:
             for symbol in result.symbols:
                 project.add_symbol(symbol)
 
+            for import_reference in result.imports:
+                project.imports.append(import_reference)
+
             for relationship in result.relationships:
                 project.add_relationship(relationship)
 

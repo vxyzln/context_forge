@@ -140,3 +140,14 @@ class Calculator:
 
     assert method.start_line == 2
     assert method.end_line == 3
+
+
+def test_python_parser_records_import_references() -> None:
+    source = """
+from app.utils import hello
+"""
+
+    result = PythonParser().parse(source, create_python_file())
+
+    assert len(result.imports) == 1
+    assert result.imports[0].module_name == "app.utils"

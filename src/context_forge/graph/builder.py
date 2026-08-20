@@ -1,5 +1,3 @@
-import ast
-
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
 
@@ -26,52 +24,16 @@ class RelationshipBuilder:
             if file.extension == ".py"
         }
 
-        for file in project.files:
-            if file.extension != ".py":
+        for import_reference in project.imports:
+            target_file = file_by_module.get(import_reference.module_name)
+
+            if target_file is None:
                 continue
 
-            path = project.root_path / file.path
+            relationship = Relationship(
+                source_id=import_reference.file_id,
+                target_id=target_file.id,
+                relationship_type="imports",
+            )
 
-            try:
-                source = path.read_text(encoding="utf-8")
-                tree = ast.parse(source)
-            except (OSError, UnicodeDecodeError, SyntaxError):
-                continue
-
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    for alias in node.names:
-                        self._add_import_relationship(
-                            project,
-                            file,
-                            alias.name,
-                            file_by_module,
-                        )
-
-                elif isinstance(node, ast.ImportFrom) and node.module is not None:
-                    self._add_import_relationship(
-                        project,
-                        file,
-                        node.module,
-                        file_by_module,
-                    )
-
-    def _add_import_relationship(
-        self,
-        project: Project,
-        source_file,
-        module_name: str,
-        file_by_module: dict[str, object],
-    ) -> None:
-        target_file = file_by_module.get(module_name)
-
-        if target_file is None:
-            return
-
-        relationship = Relationship(
-            source_id=source_file.id,
-            target_id=target_file.id,
-            relationship_type="imports",
-        )
-
-        project.add_relationship(relationship)
+            project.add_relationship(relationship)

@@ -7,6 +7,7 @@ from context_forge.models.directory import Directory
 from context_forge.models.file import File
 from context_forge.models.relationship import Relationship
 from context_forge.models.symbol import Symbol
+from context_forge.parser.result import ImportReference
 
 
 @dataclass
@@ -32,6 +33,7 @@ class Project:
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     symbols: list[Symbol] = field(default_factory=list)
+    imports: list[ImportReference] = field(default_factory=list)
 
     relationships: list[Relationship] = field(default_factory=list)
 

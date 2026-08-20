@@ -4,7 +4,11 @@ from context_forge.models.file import File
 from context_forge.models.symbol import Symbol
 from context_forge.parser.base import Parser
 from context_forge.parser.language import Language
-from context_forge.parser.result import ParseError, ParseResult
+from context_forge.parser.result import (
+    ImportReference,
+    ParseError,
+    ParseResult,
+)
 
 
 class PythonParser(Parser):
@@ -32,6 +36,7 @@ class PythonParser(Parser):
 
         return ParseResult(
             symbols=visitor.symbols,
+            imports=visitor.imports,
         )
 
 
@@ -39,6 +44,7 @@ class SymbolVisitor(ast.NodeVisitor):
     def __init__(self, file: File) -> None:
         self.file = file
         self.symbols: list[Symbol] = []
+        self.imports: list[ImportReference] = []
         self.parent_stack: list[Symbol] = []
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
@@ -93,6 +99,13 @@ class SymbolVisitor(ast.NodeVisitor):
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
+            self.imports.append(
+                ImportReference(
+                    file_id=self.file.id,
+                    module_name=alias.name,
+                )
+            )
+
             symbol = Symbol(
                 file_id=self.file.id,
                 name=alias.name,
@@ -108,6 +121,14 @@ class SymbolVisitor(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         module = node.module or ""
+
+        if module:
+            self.imports.append(
+                ImportReference(
+                    file_id=self.file.id,
+                    module_name=module,
+                )
+            )
 
         for alias in node.names:
             name = f"{module}.{alias.name}" if module else alias.name

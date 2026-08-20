@@ -13,10 +13,17 @@ class ParseError:
     column: int | None = None
 
 
+@dataclass(frozen=True)
+class ImportReference:
+    file_id: UUID
+    module_name: str
+
+
 @dataclass
 class ParseResult:
     symbols: list[Symbol] = field(default_factory=list)
     relationships: list[Relationship] = field(default_factory=list)
+    imports: list[ImportReference] = field(default_factory=list)
     errors: list[ParseError] = field(default_factory=list)
 
     @property

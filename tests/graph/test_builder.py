@@ -19,6 +19,9 @@ def parse_project(project: Project) -> None:
         for symbol in result.symbols:
             project.add_symbol(symbol)
 
+        for import_reference in result.imports:
+            project.imports.append(import_reference)
+
 
 def test_builder_creates_definition_relationships(tmp_path: Path) -> None:
     source = tmp_path / "main.py"
