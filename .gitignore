@@ -34,6 +34,7 @@ dist/
 
 # Local project data
 data/
+.context_forge.db
 
 #other test files
 tp*.py

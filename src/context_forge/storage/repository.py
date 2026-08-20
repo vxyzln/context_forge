@@ -111,10 +111,9 @@ class ProjectRepository:
                         start_line,
                         end_line,
                         parent_symbol_id,
-                        signature,
-                        visibility
+                        signature
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(symbol.id),
@@ -128,7 +127,6 @@ class ProjectRepository:
                         if symbol.parent_symbol_id
                         else None,
                         symbol.signature,
-                        symbol.visibility,
                     ),
                 )
 

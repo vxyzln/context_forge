@@ -12,6 +12,10 @@ IGNORED_DIRECTORIES = {
     ".ruff_cache",
 }
 
+IGNORED_FILES = {
+    ".context_forge.db",
+}
+
 GENERATED_DIRECTORIES = {
     "__pycache__",
     "build",
@@ -53,6 +57,7 @@ class RepositoryScanner:
             path
             for path in self.root_path.rglob("*")
             if path.is_file()
+            and path.name not in IGNORED_FILES
             and not any(part in IGNORED_DIRECTORIES for part in path.parts)
         ]
 

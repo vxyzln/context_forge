@@ -72,3 +72,18 @@ def test_scanner_ignores_git_and_venv(tmp_path: Path) -> None:
     assert Path("src/main.py") in paths
     assert Path(".git/config") not in paths
     assert Path(".venv/python") not in paths
+
+
+def test_scanner_ignores_context_forge_database(tmp_path: Path) -> None:
+    database = tmp_path / ".context_forge.db"
+    database.write_text("database")
+
+    source = tmp_path / "main.py"
+    source.write_text("print('hello')")
+
+    project = RepositoryScanner(tmp_path).scan()
+
+    paths = {file.path for file in project.files}
+
+    assert Path("main.py") in paths
+    assert Path(".context_forge.db") not in paths
