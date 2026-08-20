@@ -1,8 +1,23 @@
 from pathlib import Path
 
-from context_forge.extractor.python import PythonExtractor
 from context_forge.graph.builder import RelationshipBuilder
+from context_forge.models.project import Project
+from context_forge.parser.python import PythonParser
 from context_forge.scanner.repository import RepositoryScanner
+
+
+def parse_project(project: Project) -> None:
+    parser = PythonParser()
+
+    for file in project.files:
+        if file.extension != ".py":
+            continue
+
+        source = (project.root_path / file.path).read_text(encoding="utf-8")
+        result = parser.parse(source, file)
+
+        for symbol in result.symbols:
+            project.add_symbol(symbol)
 
 
 def test_builder_creates_definition_relationships(tmp_path: Path) -> None:
@@ -15,7 +30,7 @@ def hello():
     )
 
     project = RepositoryScanner(tmp_path).scan()
-    PythonExtractor().extract(project)
+    parse_project(project)
     RelationshipBuilder().build(project)
 
     definitions = [
@@ -47,7 +62,7 @@ from app.utils import hello
     )
 
     project = RepositoryScanner(tmp_path).scan()
-    PythonExtractor().extract(project)
+    parse_project(project)
     RelationshipBuilder().build(project)
 
     imports = [

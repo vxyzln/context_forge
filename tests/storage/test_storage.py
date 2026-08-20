@@ -1,12 +1,26 @@
 from pathlib import Path
 from uuid import uuid4
 
-from context_forge.extractor.python import PythonExtractor
 from context_forge.graph.builder import RelationshipBuilder
 from context_forge.models.project import Project
+from context_forge.parser.python import PythonParser
 from context_forge.scanner.repository import RepositoryScanner
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
+
+
+def parse_project(project: Project) -> None:
+    parser = PythonParser()
+
+    for file in project.files:
+        if file.extension != ".py":
+            continue
+
+        source = (project.root_path / file.path).read_text(encoding="utf-8")
+        result = parser.parse(source, file)
+
+        for symbol in result.symbols:
+            project.add_symbol(symbol)
 
 
 def test_database_initializes(tmp_path: Path) -> None:
@@ -59,7 +73,7 @@ def hello():
     )
 
     project = RepositoryScanner(tmp_path).scan()
-    PythonExtractor().extract(project)
+    parse_project(project)
     RelationshipBuilder().build(project)
 
     database = Database(tmp_path / "context_forge.db")

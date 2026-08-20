@@ -12,7 +12,7 @@ def test_python_parser_reports_python_language() -> None:
     assert parser.language == Language.PYTHON
 
 
-def test_python_parser_returns_parse_result() -> None:
+def test_python_parser_returns_successful_parse_result() -> None:
     file = File(
         project_id=uuid4(),
         path=Path("main.py"),
@@ -25,7 +25,8 @@ def test_python_parser_returns_parse_result() -> None:
         file,
     )
 
-    assert result.success is False
-    assert len(result.errors) == 1
-    assert result.errors[0].file_id == file.id
-    assert result.errors[0].message == "Python parsing is not implemented yet"
+    assert result.success is True
+    assert len(result.errors) == 0
+    assert len(result.symbols) == 1
+    assert result.symbols[0].name == "hello"
+    assert result.symbols[0].kind == "function"
