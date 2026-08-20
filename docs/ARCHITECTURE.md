@@ -362,3 +362,120 @@ Context Forge exists to solve one problem:
 AI agents should not need to rediscover a software project's entire context every time they perform a task.
 
 The system should build project understanding once, maintain it continuously, and use it to provide the smallest useful context required for each task.
+
+## Parser Architecture
+
+Context Forge uses a language-independent parser architecture.
+
+The core system must not depend directly on language-specific AST implementations.
+
+The parsing pipeline is:
+
+Repository
+|
+v
+Repository Scanner
+|
+v
+Language Detection
+|
+v
+Parser Registry
+|
+v
+Language Parser
+|
+v
+Common Context Forge Models
+|
+v
+Project Graph
+
+Each supported programming language is implemented as a parser that converts
+language-specific source code into the common Context Forge representation.
+
+### Language Detection
+
+Language detection initially uses file extensions.
+
+Supported language identifiers include:
+
+- Python
+- JavaScript
+- TypeScript
+- Java
+- Go
+- Rust
+- C
+- C++
+
+Unsupported files are represented as `unknown` and are not sent to a language
+parser.
+
+### Parser Registry
+
+The parser registry maps a language to its parser implementation.
+
+This allows additional languages to be added without introducing
+language-specific conditionals throughout the Context Forge codebase.
+
+### Parser Contract
+
+Every parser implements the common parser interface.
+
+A parser:
+
+- identifies the language it supports
+- accepts source text and the corresponding project file
+- returns a `ParseResult`
+
+`ParseResult` contains:
+
+- extracted symbols
+- extracted relationships
+- parsing errors
+
+### Common Representation
+
+Language-specific AST nodes must not escape their parser implementation.
+
+For example, Python AST nodes belong inside the Python parser.
+
+The rest of Context Forge works with common models such as:
+
+- `Symbol`
+- `Relationship`
+- `File`
+- `Project`
+
+This allows the Context Engine to operate independently of the programming
+language being analyzed.
+
+### Current Language Implementation
+
+Python is the first language being implemented.
+
+The parser architecture is intentionally language-independent so additional
+languages can be added later without redesigning the Context Engine.
+
+### Parser Responsibilities
+
+Parsers are responsible for source-code interpretation.
+
+They should not be responsible for:
+
+- repository scanning
+- project discovery
+- filesystem traversal
+- database persistence
+- context retrieval
+- relevance ranking
+- LLM reasoning
+
+These responsibilities belong to other Context Forge components.
+
+### Current Status
+
+The parser architecture is established in v0.3 Stage 1.
+
+The Python parser implementation will be completed in the next stage.
