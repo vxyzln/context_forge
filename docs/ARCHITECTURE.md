@@ -371,25 +371,19 @@ The core system must not depend directly on language-specific AST implementation
 
 The parsing pipeline is:
 
-Repository
-|
-v
-Repository Scanner
-|
-v
-Language Detection
-|
-v
-Parser Registry
-|
-v
-Language Parser
-|
-v
-Common Context Forge Models
-|
-v
-Project Graph
+File
+ ↓
+LanguageDetector
+ ↓
+ParserRegistry
+ ↓
+PythonParser
+ ↓
+ParseResult
+ ↓
+Project.symbols
+ ↓
+RelationshipBuilder
 
 Each supported programming language is implemented as a parser that converts
 language-specific source code into the common Context Forge representation.
