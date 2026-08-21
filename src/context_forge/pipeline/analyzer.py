@@ -34,17 +34,23 @@ class ProjectAnalyzer:
             if parser is None:
                 continue
 
-            source = (project.root_path / file.path).read_text(encoding="utf-8")
-            result = parser.parse(source, file)
+            try:
+                source = (project.root_path / file.path).read_text(encoding="utf-8")
+                result = parser.parse(source, file)
+            except (OSError, UnicodeDecodeError) as error:
+                project.errors.append(f"{file.path}: {error}")
+                continue
 
             for symbol in result.symbols:
                 project.add_symbol(symbol)
 
-            for import_reference in result.imports:
-                project.imports.append(import_reference)
+            project.imports.extend(result.imports)
+            project.relationships.extend(result.relationships)
 
-            for relationship in result.relationships:
-                project.add_relationship(relationship)
+            for error in result.errors:
+                project.errors.append(
+                    f"{file.path}:{error.line or 0}:{error.column or 0}: {error.message}"
+                )
 
         RelationshipBuilder().build(project)
 

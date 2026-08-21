@@ -125,3 +125,31 @@ def hello():
     assert file_row["count"] == len(project.files)
     assert symbol_row["count"] == len(project.symbols)
     assert relationship_row["count"] == len(project.relationships)
+
+
+def test_analysis_errors_are_persisted(tmp_path: Path) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+        errors=["main.py:1:1: Invalid syntax"],
+    )
+
+    repository.save(project)
+
+    with database.connect() as connection:
+        row = connection.execute(
+            """
+            SELECT message
+            FROM analysis_errors
+            WHERE project_id = ?
+            """,
+            (str(project.id),),
+        ).fetchone()
+
+    assert row is not None
+    assert row["message"] == "main.py:1:1: Invalid syntax"

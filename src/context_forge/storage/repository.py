@@ -152,6 +152,20 @@ class ProjectRepository:
                         json.dumps(relationship.metadata),
                     ),
                 )
+            for error in project.errors:
+                connection.execute(
+                    """
+                    INSERT INTO analysis_errors (
+                        project_id,
+                        message
+                    )
+                    VALUES (?, ?)
+                    """,
+                    (
+                        str(project.id),
+                        error,
+                    ),
+                )
 
     def load(self, project_id: UUID) -> Project | None:
         with self.database.connect() as connection:

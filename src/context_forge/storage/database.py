@@ -76,6 +76,14 @@ class Database:
                     confidence REAL NOT NULL,
                     metadata TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS analysis_errors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    FOREIGN KEY (project_id) REFERENCES projects(id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_directories_project
                 ON directories(project_id);
 

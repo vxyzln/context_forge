@@ -37,6 +37,8 @@ class Project:
 
     relationships: list[Relationship] = field(default_factory=list)
 
+    errors: list[str] = field(default_factory=list)
+
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("Project name cannot be empty")

@@ -50,3 +50,32 @@ def hello():
     assert loaded.id == project.id
     assert loaded.name == project.name
     assert loaded.root_path == project.root_path
+
+
+def test_analyzer_continues_after_python_syntax_error(tmp_path: Path) -> None:
+    valid_file = tmp_path / "valid.py"
+    valid_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    invalid_file = tmp_path / "invalid.py"
+    invalid_file.write_text(
+        """
+def broken(
+"""
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert len(project.symbols) == 1
+    assert len(project.errors) == 1
+    assert "invalid.py" in project.errors[0]
+    assert database_path.exists()
