@@ -20,39 +20,48 @@ class ProjectAnalyzer:
         self.database.initialize()
 
         project = RepositoryScanner(self.root_path).scan()
+        project.analysis_status = "analyzing"
 
-        ProjectClassifier().classify(project)
+        try:
+            ProjectClassifier().classify(project)
 
-        detector = LanguageDetector()
-        registry = ParserRegistry()
-        registry.register(PythonParser())
+            detector = LanguageDetector()
+            registry = ParserRegistry()
+            registry.register(PythonParser())
 
-        for file in project.files:
-            language = detector.detect(file.path)
-            parser = registry.get(language)
+            for file in project.files:
+                language = detector.detect(file.path)
+                parser = registry.get(language)
 
-            if parser is None:
-                continue
+                if parser is None:
+                    continue
 
-            try:
-                source = (project.root_path / file.path).read_text(encoding="utf-8")
-                result = parser.parse(source, file)
-            except (OSError, UnicodeDecodeError) as error:
-                project.errors.append(f"{file.path}: {error}")
-                continue
+                try:
+                    source = (project.root_path / file.path).read_text(encoding="utf-8")
+                    result = parser.parse(source, file)
+                except (OSError, UnicodeDecodeError) as error:
+                    project.errors.append(f"{file.path}: {error}")
+                    continue
 
-            for symbol in result.symbols:
-                project.add_symbol(symbol)
+                for symbol in result.symbols:
+                    project.add_symbol(symbol)
 
-            project.imports.extend(result.imports)
-            project.relationships.extend(result.relationships)
+                project.imports.extend(result.imports)
+                project.relationships.extend(result.relationships)
 
-            for error in result.errors:
-                project.errors.append(
-                    f"{file.path}:{error.line or 0}:{error.column or 0}: {error.message}"
-                )
+                for error in result.errors:
+                    project.errors.append(
+                        f"{file.path}:{error.line or 0}:"
+                        f"{error.column or 0}: {error.message}"
+                    )
 
-        RelationshipBuilder().build(project)
+            RelationshipBuilder().build(project)
+
+            project.analysis_status = "analyzed"
+
+        except Exception:
+            project.analysis_status = "failed"
+            raise
 
         self.repository.save(project)
 

@@ -24,6 +24,7 @@ def hello():
     assert len(project.symbols) == 1
     assert len(project.relationships) == 1
     assert project.relationships[0].relationship_type == "defines"
+    assert project.analysis_status == "analyzed"
     assert database_path.exists()
 
 
@@ -50,6 +51,7 @@ def hello():
     assert loaded.id == project.id
     assert loaded.name == project.name
     assert loaded.root_path == project.root_path
+    assert loaded.analysis_status == "analyzed"
 
 
 def test_analyzer_continues_after_python_syntax_error(tmp_path: Path) -> None:
@@ -78,4 +80,5 @@ def broken(
     assert len(project.symbols) == 1
     assert len(project.errors) == 1
     assert "invalid.py" in project.errors[0]
+    assert project.analysis_status == "analyzed"
     assert database_path.exists()
