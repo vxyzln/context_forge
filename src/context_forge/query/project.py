@@ -4,6 +4,7 @@ from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
 from context_forge.models.symbol import Symbol
+from context_forge.query.result import SearchResult, SearchResultType
 from context_forge.storage.repository import ProjectRepository
 
 
@@ -46,3 +47,48 @@ class ProjectQuery:
             if relationship.source_id == entity_id
             or relationship.target_id == entity_id
         ]
+
+    def search(self, query: str) -> list[SearchResult]:
+        normalized_query = query.strip().lower()
+
+        if not normalized_query:
+            return []
+
+        results: list[SearchResult] = []
+
+        for file in self.project.files:
+            if (
+                normalized_query in file.name.lower()
+                or normalized_query in file.path.as_posix().lower()
+            ):
+                results.append(
+                    SearchResult(
+                        result_type=SearchResultType.FILE,
+                        entity_id=file.id,
+                        name=file.name,
+                        path=file.path.as_posix(),
+                    )
+                )
+
+        file_by_id = {file.id: file for file in self.project.files}
+
+        for symbol in self.project.symbols:
+            qualified_name = symbol.qualified_name or symbol.name
+
+            if (
+                normalized_query in symbol.name.lower()
+                or normalized_query in qualified_name.lower()
+            ):
+                file = file_by_id.get(symbol.file_id)
+
+                results.append(
+                    SearchResult(
+                        result_type=SearchResultType.SYMBOL,
+                        entity_id=symbol.id,
+                        name=symbol.name,
+                        path=file.path.as_posix() if file else None,
+                        qualified_name=symbol.qualified_name,
+                    )
+                )
+
+        return results

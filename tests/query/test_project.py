@@ -5,7 +5,7 @@ from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
 from context_forge.models.symbol import Symbol
-from context_forge.query import ProjectQuery
+from context_forge.query import ProjectQuery, SearchResultType
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
 
@@ -48,7 +48,7 @@ def create_project(tmp_path: Path) -> Project:
         kind="function",
         start_line=7,
         end_line=8,
-        qualified_name="hello",
+        qualified_name="Calculator.hello",
     )
 
     utility = Symbol(
@@ -167,3 +167,60 @@ def test_query_returns_none_for_missing_project(tmp_path: Path) -> None:
     query = ProjectQuery.from_repository(repository, uuid4())
 
     assert query is None
+
+
+def test_query_searches_files_and_symbols(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("hello")
+
+    assert len(results) == 2
+
+    assert {result.result_type for result in results} == {
+        SearchResultType.SYMBOL,
+    }
+
+    assert {result.name for result in results} == {"hello"}
+
+
+def test_query_searches_files_by_path(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("main")
+
+    assert len(results) == 1
+    assert results[0].result_type == SearchResultType.FILE
+    assert results[0].name == "main.py"
+    assert results[0].path == "main.py"
+
+
+def test_query_search_is_case_insensitive(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("HELLO")
+
+    assert len(results) == 2
+    assert {result.name for result in results} == {"hello"}
+
+
+def test_query_search_returns_empty_for_blank_query(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    assert query.search("") == []
+    assert query.search("   ") == []
+
+
+def test_query_searches_qualified_symbol_name(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("Calculator.hello")
+
+    assert len(results) == 1
+    assert results[0].result_type == SearchResultType.SYMBOL
+    assert results[0].name == "hello"
+    assert results[0].qualified_name == "Calculator.hello"
