@@ -3,7 +3,12 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
+from context_forge.models.directory import Directory
+from context_forge.models.enums import DirectoryType, FileType
+from context_forge.models.file import File
 from context_forge.models.project import Project
+from context_forge.models.relationship import Relationship
+from context_forge.models.symbol import Symbol
 from context_forge.storage.database import Database
 
 
@@ -169,23 +174,140 @@ class ProjectRepository:
 
     def load(self, project_id: UUID) -> Project | None:
         with self.database.connect() as connection:
-            row = connection.execute(
+            project_row = connection.execute(
                 "SELECT * FROM projects WHERE id = ?",
                 (str(project_id),),
             ).fetchone()
 
-        if row is None:
-            return None
+            if project_row is None:
+                return None
 
-        return Project(
-            name=row["name"],
-            root_path=Path(row["root_path"]),
-            id=UUID(row["id"]),
-            repository_url=row["repository_url"],
-            default_branch=row["default_branch"],
-            project_type=row["project_type"],
-            package_manager=row["package_manager"],
-            analysis_status=row["analysis_status"],
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
+            directory_rows = connection.execute(
+                """
+                SELECT *
+                FROM directories
+                WHERE project_id = ?
+                ORDER BY depth, path
+                """,
+                (str(project_id),),
+            ).fetchall()
+
+            file_rows = connection.execute(
+                """
+                SELECT *
+                FROM files
+                WHERE project_id = ?
+                ORDER BY path
+                """,
+                (str(project_id),),
+            ).fetchall()
+
+            file_ids = [row["id"] for row in file_rows]
+
+            symbol_rows = []
+            if file_ids:
+                placeholders = ",".join("?" for _ in file_ids)
+                symbol_rows = connection.execute(
+                    f"""
+                    SELECT *
+                    FROM symbols
+                    WHERE file_id IN ({placeholders})
+                    ORDER BY file_id, start_line
+                    """,
+                    file_ids,
+                ).fetchall()
+
+            relationship_rows = connection.execute(
+                """
+                SELECT *
+                FROM relationships
+                WHERE source_id IN (
+                    SELECT id FROM files WHERE project_id = ?
+                )
+                OR target_id IN (
+                    SELECT id FROM files WHERE project_id = ?
+                )
+                """,
+                (str(project_id), str(project_id)),
+            ).fetchall()
+
+            error_rows = connection.execute(
+                """
+                SELECT message
+                FROM analysis_errors
+                WHERE project_id = ?
+                ORDER BY id
+                """,
+                (str(project_id),),
+            ).fetchall()
+
+        project = Project(
+            name=project_row["name"],
+            root_path=Path(project_row["root_path"]),
+            id=UUID(project_row["id"]),
+            repository_url=project_row["repository_url"],
+            default_branch=project_row["default_branch"],
+            project_type=project_row["project_type"],
+            package_manager=project_row["package_manager"],
+            analysis_status=project_row["analysis_status"],
+            created_at=datetime.fromisoformat(project_row["created_at"]),
+            updated_at=datetime.fromisoformat(project_row["updated_at"]),
         )
+
+        for row in directory_rows:
+            directory = Directory(
+                project_id=UUID(row["project_id"]),
+                path=Path(row["path"]),
+                name=row["name"],
+                id=UUID(row["id"]),
+                parent_id=UUID(row["parent_id"]) if row["parent_id"] else None,
+                depth=row["depth"],
+                directory_type=DirectoryType(row["directory_type"]),
+            )
+            project.add_directory(directory)
+
+        for row in file_rows:
+            file = File(
+                project_id=UUID(row["project_id"]),
+                path=Path(row["path"]),
+                name=row["name"],
+                extension=row["extension"],
+                id=UUID(row["id"]),
+                directory_id=UUID(row["directory_id"]) if row["directory_id"] else None,
+                file_type=FileType(row["file_type"]),
+                size=row["size"],
+                is_generated=bool(row["is_generated"]),
+                is_ignored=bool(row["is_ignored"]),
+            )
+            project.add_file(file)
+
+        for row in symbol_rows:
+            symbol = Symbol(
+                file_id=UUID(row["file_id"]),
+                name=row["name"],
+                kind=row["kind"],
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+                id=UUID(row["id"]),
+                qualified_name=row["qualified_name"],
+                parent_symbol_id=(
+                    UUID(row["parent_symbol_id"]) if row["parent_symbol_id"] else None
+                ),
+                signature=row["signature"],
+            )
+            project.add_symbol(symbol)
+
+        for row in relationship_rows:
+            relationship = Relationship(
+                source_id=UUID(row["source_id"]),
+                target_id=UUID(row["target_id"]),
+                relationship_type=row["relationship_type"],
+                id=UUID(row["id"]),
+                confidence=row["confidence"],
+                metadata=json.loads(row["metadata"]),
+            )
+            project.add_relationship(relationship)
+
+        project.errors.extend(row["message"] for row in error_rows)
+
+        return project

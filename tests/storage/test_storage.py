@@ -153,3 +153,51 @@ def test_analysis_errors_are_persisted(tmp_path: Path) -> None:
 
     assert row is not None
     assert row["message"] == "main.py:1:1: Invalid syntax"
+
+
+def test_project_load_rehydrates_analysis_records(tmp_path: Path) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project)
+
+    project.errors.append("example.py:1:1: Invalid syntax")
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save(project)
+
+    loaded = repository.load(project.id)
+
+    assert loaded is not None
+
+    assert loaded.id == project.id
+    assert loaded.name == project.name
+    assert loaded.root_path == project.root_path
+
+    assert len(loaded.directories) == len(project.directories)
+    assert len(loaded.files) == len(project.files)
+    assert len(loaded.symbols) == len(project.symbols)
+    assert len(loaded.relationships) == len(project.relationships)
+    assert loaded.errors == project.errors
+
+    assert loaded.files[0].id == project.files[0].id
+    assert loaded.files[0].path == project.files[0].path
+
+    assert loaded.symbols[0].id == project.symbols[0].id
+    assert loaded.symbols[0].name == project.symbols[0].name
+
+    assert loaded.relationships[0].id == project.relationships[0].id
+    assert (
+        loaded.relationships[0].relationship_type
+        == project.relationships[0].relationship_type
+    )
