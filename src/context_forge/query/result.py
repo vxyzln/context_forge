@@ -15,3 +15,4 @@ class SearchResult:
     name: str
     path: str | None = None
     qualified_name: str | None = None
+    score: float = 0.0

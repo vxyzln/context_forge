@@ -224,3 +224,75 @@ def test_query_searches_qualified_symbol_name(tmp_path: Path) -> None:
     assert results[0].result_type == SearchResultType.SYMBOL
     assert results[0].name == "hello"
     assert results[0].qualified_name == "Calculator.hello"
+
+
+def test_query_ranks_exact_symbol_match_first(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    project.add_symbol(
+        Symbol(
+            file_id=project.files[0].id,
+            name="hello_world",
+            kind="function",
+            start_line=10,
+            end_line=11,
+            qualified_name="hello_world",
+        )
+    )
+
+    query = ProjectQuery(project)
+
+    results = query.search("hello")
+
+    assert len(results) == 3
+    assert results[0].name == "hello"
+    assert results[0].score == 1.0
+    assert results[1].name == "hello"
+    assert results[1].score == 1.0
+    assert results[2].name == "hello_world"
+    assert results[2].score == 0.8
+
+
+def test_query_ranks_exact_qualified_name(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("Calculator.hello")
+
+    assert len(results) == 1
+    assert results[0].name == "hello"
+    assert results[0].qualified_name == "Calculator.hello"
+    assert results[0].score == 0.95
+
+
+def test_query_ranks_exact_file_name(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("main.py")
+
+    assert len(results) == 1
+    assert results[0].result_type == SearchResultType.FILE
+    assert results[0].name == "main.py"
+    assert results[0].score == 1.0
+
+
+def test_query_results_are_sorted_by_score(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    project.add_symbol(
+        Symbol(
+            file_id=project.files[0].id,
+            name="hello_world",
+            kind="function",
+            start_line=10,
+            end_line=11,
+            qualified_name="Calculator.hello_world",
+        )
+    )
+
+    query = ProjectQuery(project)
+
+    results = query.search("hello")
+
+    assert [result.score for result in results] == [1.0, 1.0, 0.8]

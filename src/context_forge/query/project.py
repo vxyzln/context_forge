@@ -57,28 +57,47 @@ class ProjectQuery:
         results: list[SearchResult] = []
 
         for file in self.project.files:
-            if (
-                normalized_query in file.name.lower()
-                or normalized_query in file.path.as_posix().lower()
-            ):
+            name = file.name.lower()
+            path = file.path.as_posix().lower()
+
+            score = 0.0
+
+            if name == normalized_query:
+                score = 1.0
+            elif normalized_query in name:
+                score = 0.8
+            elif normalized_query in path:
+                score = 0.5
+
+            if score > 0:
                 results.append(
                     SearchResult(
                         result_type=SearchResultType.FILE,
                         entity_id=file.id,
                         name=file.name,
                         path=file.path.as_posix(),
+                        score=score,
                     )
                 )
 
         file_by_id = {file.id: file for file in self.project.files}
 
         for symbol in self.project.symbols:
-            qualified_name = symbol.qualified_name or symbol.name
+            name = symbol.name.lower()
+            qualified_name = (symbol.qualified_name or symbol.name).lower()
 
-            if (
-                normalized_query in symbol.name.lower()
-                or normalized_query in qualified_name.lower()
-            ):
+            score = 0.0
+
+            if name == normalized_query:
+                score = 1.0
+            elif qualified_name == normalized_query:
+                score = 0.95
+            elif normalized_query in name:
+                score = 0.8
+            elif normalized_query in qualified_name:
+                score = 0.7
+
+            if score > 0:
                 file = file_by_id.get(symbol.file_id)
 
                 results.append(
@@ -88,7 +107,17 @@ class ProjectQuery:
                         name=symbol.name,
                         path=file.path.as_posix() if file else None,
                         qualified_name=symbol.qualified_name,
+                        score=score,
                     )
                 )
+
+        results.sort(
+            key=lambda result: (
+                -result.score,
+                result.result_type.value,
+                result.name.lower(),
+                result.path or "",
+            )
+        )
 
         return results
