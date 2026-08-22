@@ -6,6 +6,8 @@ from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
 from context_forge.models.symbol import Symbol
 from context_forge.query import ProjectQuery
+from context_forge.storage.database import Database
+from context_forge.storage.repository import ProjectRepository
 
 
 def create_project(tmp_path: Path) -> Project:
@@ -138,3 +140,30 @@ def test_query_returns_empty_relationships_for_unknown_entity(
     query = ProjectQuery(project)
 
     assert query.get_relationships(uuid4()) == []
+
+
+def test_query_can_load_project_from_repository(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save(project)
+
+    query = ProjectQuery.from_repository(repository, project.id)
+
+    assert query is not None
+    assert query.get_file("main.py") is not None
+    assert len(query.find_symbols("hello")) == 2
+
+
+def test_query_returns_none_for_missing_project(tmp_path: Path) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    query = ProjectQuery.from_repository(repository, uuid4())
+
+    assert query is None
