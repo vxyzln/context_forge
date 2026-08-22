@@ -201,3 +201,64 @@ def hello():
         loaded.relationships[0].relationship_type
         == project.relationships[0].relationship_type
     )
+
+def test_symbol_schema_matches_symbol_model(tmp_path: Path) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    with database.connect() as connection:
+        columns = connection.execute(
+            "PRAGMA table_info(symbols)"
+        ).fetchall()
+
+    column_names = {column["name"] for column in columns}
+
+    assert column_names == {
+        "id",
+        "file_id",
+        "name",
+        "kind",
+        "qualified_name",
+        "start_line",
+        "end_line",
+        "parent_symbol_id",
+        "signature",
+    }
+
+def test_symbol_fields_survive_repository_round_trip(tmp_path: Path) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+"""
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save(project)
+
+    loaded = repository.load(project.id)
+
+    assert loaded is not None
+    assert len(loaded.symbols) == len(project.symbols)
+
+    original = project.symbols
+    restored = loaded.symbols
+
+    for expected, actual in zip(original, restored):
+        assert actual.id == expected.id
+        assert actual.file_id == expected.file_id
+        assert actual.name == expected.name
+        assert actual.kind == expected.kind
+        assert actual.qualified_name == expected.qualified_name
+        assert actual.start_line == expected.start_line
+        assert actual.end_line == expected.end_line
+        assert actual.parent_symbol_id == expected.parent_symbol_id
+        assert actual.signature == expected.signature

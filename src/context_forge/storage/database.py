@@ -64,7 +64,6 @@ class Database:
                     end_line INTEGER NOT NULL,
                     parent_symbol_id TEXT,
                     signature TEXT,
-                    visibility TEXT,
                     FOREIGN KEY (file_id) REFERENCES files(id)
                 );
 
