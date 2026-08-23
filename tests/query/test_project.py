@@ -343,3 +343,50 @@ def test_query_searches_directories(tmp_path: Path) -> None:
     assert results[0].name == "src"
     assert results[0].path == "src"
     assert results[0].score == 1.0
+
+
+def test_query_finds_related_entity_ids(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    relationship = project.relationships[0]
+
+    related_ids = query.get_related_entity_ids(relationship.source_id)
+
+    assert related_ids == {relationship.target_id}
+
+
+def test_query_finds_related_entity_ids_in_reverse_direction(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    relationship = project.relationships[0]
+
+    related_ids = query.get_related_entity_ids(relationship.target_id)
+
+    assert related_ids == {relationship.source_id}
+
+
+def test_query_resolves_related_entities(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    relationship = project.relationships[0]
+
+    entities = query.get_related_entities(relationship.source_id)
+
+    assert len(entities) == 1
+    assert entities[0].id == relationship.target_id
+    assert entities[0].name == "utils.py"
+
+
+def test_query_returns_no_related_entities_for_unknown_entity(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    assert query.get_related_entity_ids(uuid4()) == set()
+    assert query.get_related_entities(uuid4()) == []

@@ -49,6 +49,36 @@ class ProjectQuery:
             or relationship.target_id == entity_id
         ]
 
+    def get_related_entity_ids(self, entity_id: UUID) -> set[UUID]:
+        related_ids: set[UUID] = set()
+
+        for relationship in self.project.relationships:
+            if relationship.source_id == entity_id:
+                related_ids.add(relationship.target_id)
+            elif relationship.target_id == entity_id:
+                related_ids.add(relationship.source_id)
+
+        return related_ids
+
+    def get_related_entities(self, entity_id: UUID) -> list[object]:
+        entity_ids = self.get_related_entity_ids(entity_id)
+
+        entities: list[object] = []
+
+        for file in self.project.files:
+            if file.id in entity_ids:
+                entities.append(file)
+
+        for directory in self.project.directories:
+            if directory.id in entity_ids:
+                entities.append(directory)
+
+        for symbol in self.project.symbols:
+            if symbol.id in entity_ids:
+                entities.append(symbol)
+
+        return entities
+
     def search(self, query: str) -> list[SearchResult]:
         normalized_query = query.strip().lower()
 
