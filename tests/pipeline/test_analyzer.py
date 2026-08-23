@@ -127,3 +127,27 @@ def broken(
     assert project.analysis_status == "analyzed"
     assert project.errors
     assert "broken.py" in project.errors[0]
+
+
+def test_analyzer_records_unsupported_language(tmp_path: Path) -> None:
+    source_file = tmp_path / "main.js"
+    source_file.write_text(
+        """
+function hello() {
+    return "hello";
+}
+"""
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert project.analysis_status == "analyzed"
+    assert project.errors
+    assert "main.js" in project.errors[0]
+    assert "no parser available" in project.errors[0]
+    assert "javascript" in project.errors[0]

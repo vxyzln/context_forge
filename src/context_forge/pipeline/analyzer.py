@@ -28,6 +28,10 @@ class ProjectAnalyzer:
             parser = registry.get(language)
 
             if parser is None:
+                if language.value != "unknown":
+                    project.errors.append(
+                        f"{file.path}: no parser available for language '{language.value}'"
+                    )
                 continue
 
             try:
