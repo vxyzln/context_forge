@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from context_forge.pipeline.analyzer import ProjectAnalyzer
+from context_forge.query import ProjectQuery
 
 
 def test_analyzer_runs_full_pipeline(tmp_path: Path) -> None:
@@ -151,3 +152,96 @@ function hello() {
     assert "main.js" in project.errors[0]
     assert "no parser available" in project.errors[0]
     assert "javascript" in project.errors[0]
+
+
+def test_analyzer_builds_complete_project_context(tmp_path: Path) -> None:
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+import os
+
+
+class Calculator:
+    def add(self, a, b):
+        return a + b
+
+
+def hello():
+    return os.getcwd()
+"""
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert project.analysis_status == "analyzed"
+    assert len(project.files) == 1
+    assert len(project.symbols) >= 4
+    assert len(project.imports) == 1
+    assert len(project.relationships) > 0
+    assert not project.errors
+
+
+def test_analyzer_result_can_be_queried(tmp_path: Path) -> None:
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+"""
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    project = analyzer.analyze()
+
+    query = ProjectQuery.from_repository(
+        analyzer.repository,
+        project.id,
+    )
+
+    assert query is not None
+
+    results = query.search("Calculator")
+
+    assert results
+    assert results[0].name == "Calculator"
+    assert results[0].score == 1.0
+
+
+def test_analyzer_persists_complete_context(tmp_path: Path) -> None:
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    project = analyzer.analyze()
+
+    loaded = analyzer.repository.load(project.id)
+
+    assert loaded is not None
+    assert loaded.analysis_status == "analyzed"
+    assert len(loaded.files) == len(project.files)
+    assert len(loaded.symbols) == len(project.symbols)
+    assert len(loaded.relationships) == len(project.relationships)
+    assert len(loaded.errors) == len(project.errors)
