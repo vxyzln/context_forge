@@ -19,6 +19,33 @@ class ProjectRepository:
     def save(self, project: Project) -> None:
         with self.database.connect() as connection:
             connection.execute(
+                "DELETE FROM analysis_errors WHERE project_id = ?",
+                (str(project.id),),
+            )
+
+            connection.execute(
+                """
+                DELETE FROM symbols
+                WHERE file_id IN (
+                    SELECT id FROM files WHERE project_id = ?
+                )
+                """,
+                (str(project.id),),
+            )
+
+            connection.execute(
+                """
+                DELETE FROM relationships
+                WHERE source_id IN (
+                    SELECT id FROM files WHERE project_id = ?
+                )
+                OR target_id IN (
+                    SELECT id FROM files WHERE project_id = ?
+                )
+                """,
+                (str(project.id), str(project.id)),
+            )
+            connection.execute(
                 """
                 INSERT OR REPLACE INTO projects (
                     id,

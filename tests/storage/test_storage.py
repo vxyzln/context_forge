@@ -202,14 +202,13 @@ def hello():
         == project.relationships[0].relationship_type
     )
 
+
 def test_symbol_schema_matches_symbol_model(tmp_path: Path) -> None:
     database = Database(tmp_path / "context_forge.db")
     database.initialize()
 
     with database.connect() as connection:
-        columns = connection.execute(
-            "PRAGMA table_info(symbols)"
-        ).fetchall()
+        columns = connection.execute("PRAGMA table_info(symbols)").fetchall()
 
     column_names = {column["name"] for column in columns}
 
@@ -224,6 +223,7 @@ def test_symbol_schema_matches_symbol_model(tmp_path: Path) -> None:
         "parent_symbol_id",
         "signature",
     }
+
 
 def test_symbol_fields_survive_repository_round_trip(tmp_path: Path) -> None:
     source = tmp_path / "main.py"
@@ -262,3 +262,70 @@ class Calculator:
         assert actual.end_line == expected.end_line
         assert actual.parent_symbol_id == expected.parent_symbol_id
         assert actual.signature == expected.signature
+
+
+def test_project_save_removes_stale_symbols(tmp_path: Path) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        """
+def first():
+    return 1
+
+def second():
+    return 2
+"""
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save(project)
+
+    original_symbol_count = len(project.symbols)
+    assert original_symbol_count == 2
+
+    project.symbols = project.symbols[:1]
+    repository.save(project)
+
+    loaded = repository.load(project.id)
+
+    assert loaded is not None
+    assert len(loaded.symbols) == 1
+    assert loaded.symbols[0].name == "first"
+
+
+def test_project_save_removes_stale_relationships(tmp_path: Path) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        """
+import os
+
+def hello():
+    return os.getcwd()
+"""
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project)
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save(project)
+
+    original_relationship_count = len(project.relationships)
+
+    project.relationships = []
+    repository.save(project)
+
+    loaded = repository.load(project.id)
+
+    assert loaded is not None
+    assert original_relationship_count > 0
+    assert loaded.relationships == []
