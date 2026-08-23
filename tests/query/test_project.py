@@ -324,7 +324,7 @@ def test_query_returns_none_for_unknown_directory(tmp_path: Path) -> None:
     assert query.get_directory("missing") is None
 
 
-def test_query_searches_directories(tmp_path: Path) -> None:
+def test_query_searches_src_directories(tmp_path: Path) -> None:
     project = create_project(tmp_path)
 
     directory = Directory(
@@ -446,3 +446,73 @@ def test_query_returns_empty_files_for_directory_without_files(
     query = ProjectQuery(project)
 
     assert query.get_files_in_directory(directory.id) == []
+
+
+def test_query_searches_directories(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("components"),
+        name="components",
+    )
+    project.add_directory(directory)
+
+    query = ProjectQuery(project)
+
+    results = query.search("components")
+
+    assert len(results) == 1
+    assert results[0].result_type == SearchResultType.DIRECTORY
+    assert results[0].entity_id == directory.id
+    assert results[0].name == "components"
+    assert results[0].path == "components"
+    assert results[0].score == 1.0
+
+
+def test_query_searches_directories_by_path(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("src/helpers"),
+        name="helpers",
+    )
+    project.add_directory(directory)
+
+    query = ProjectQuery(project)
+
+    results = query.search("src")
+
+    assert len(results) == 1
+    assert results[0].result_type == SearchResultType.DIRECTORY
+    assert results[0].name == "helpers"
+    assert results[0].path == "src/helpers"
+    assert results[0].score == 0.5
+
+
+def test_query_ranks_directory_exact_match(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("src"),
+        name="src",
+    )
+    project.add_directory(directory)
+
+    project.add_file(
+        File(
+            project_id=project.id,
+            path=Path("src.py"),
+            name="src.py",
+            extension=".py",
+        )
+    )
+
+    query = ProjectQuery(project)
+
+    results = query.search("src")
+
+    assert results[0].result_type == SearchResultType.DIRECTORY
+    assert results[0].score == 1.0
