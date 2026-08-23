@@ -390,3 +390,59 @@ def test_query_returns_no_related_entities_for_unknown_entity(
 
     assert query.get_related_entity_ids(uuid4()) == set()
     assert query.get_related_entities(uuid4()) == []
+
+
+def test_query_finds_directory_by_id(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("src"),
+        name="src",
+        depth=1,
+    )
+    project.add_directory(directory)
+
+    query = ProjectQuery(project)
+
+    result = query.get_directory(directory.id)
+
+    assert result is not None
+    assert result.id == directory.id
+    assert result.name == "src"
+
+
+def test_query_returns_empty_child_directories_for_leaf(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("src"),
+        name="src",
+        depth=1,
+    )
+    project.add_directory(directory)
+
+    query = ProjectQuery(project)
+
+    assert query.get_child_directories(directory.id) == []
+
+
+def test_query_returns_empty_files_for_directory_without_files(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("src"),
+        name="src",
+        depth=1,
+    )
+    project.add_directory(directory)
+
+    query = ProjectQuery(project)
+
+    assert query.get_files_in_directory(directory.id) == []

@@ -177,11 +177,32 @@ class ProjectQuery:
 
         return results
 
-    def get_directory(self, path: str) -> Directory | None:
-        normalized_path = path.replace("\\", "/").strip("/")
+    def get_directory(self, directory: UUID | str) -> Directory | None:
+        if isinstance(directory, UUID):
+            return next(
+                (item for item in self.project.directories if item.id == directory),
+                None,
+            )
 
-        for directory in self.project.directories:
-            if directory.path.as_posix().strip("/") == normalized_path:
-                return directory
+        normalized_path = directory.replace("\\", "/")
 
-        return None
+        return next(
+            (
+                item
+                for item in self.project.directories
+                if item.path.as_posix() == normalized_path
+            ),
+            None,
+        )
+
+    def get_files_in_directory(self, directory_id: UUID) -> list[File]:
+        return [
+            file for file in self.project.files if file.directory_id == directory_id
+        ]
+
+    def get_child_directories(self, directory_id: UUID) -> list[Directory]:
+        return [
+            directory
+            for directory in self.project.directories
+            if directory.parent_id == directory_id
+        ]
