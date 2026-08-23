@@ -516,3 +516,53 @@ def test_query_ranks_directory_exact_match(tmp_path: Path) -> None:
 
     assert results[0].result_type == SearchResultType.DIRECTORY
     assert results[0].score == 1.0
+
+
+def test_query_returns_project_summary(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("src"),
+        name="src",
+    )
+    project.add_directory(directory)
+
+    project.add_symbol(
+        Symbol(
+            file_id=project.files[0].id,
+            name="extra",
+            kind="function",
+            start_line=10,
+            end_line=11,
+        )
+    )
+
+    query = ProjectQuery(project)
+
+    summary = query.get_summary()
+
+    assert summary["directories"] == 1
+    assert summary["files"] == 2
+    assert summary["symbols"] == 4
+    assert summary["imports"] == 0
+    assert summary["relationships"] == 1
+    assert summary["errors"] == 0
+
+
+def test_query_returns_zero_summary_for_empty_project(tmp_path: Path) -> None:
+    project = Project(
+        name="Empty Project",
+        root_path=tmp_path,
+    )
+
+    query = ProjectQuery(project)
+
+    assert query.get_summary() == {
+        "directories": 0,
+        "files": 0,
+        "symbols": 0,
+        "imports": 0,
+        "relationships": 0,
+        "errors": 0,
+    }

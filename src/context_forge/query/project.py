@@ -206,3 +206,13 @@ class ProjectQuery:
             for directory in self.project.directories
             if directory.parent_id == directory_id
         ]
+
+    def get_summary(self) -> dict[str, int]:
+        return {
+            "directories": len(self.project.directories),
+            "files": len(self.project.files),
+            "symbols": len(self.project.symbols),
+            "imports": len(self.project.imports),
+            "relationships": len(self.project.relationships),
+            "errors": len(self.project.errors),
+        }
