@@ -82,3 +82,48 @@ def broken(
     assert "invalid.py" in project.errors[0]
     assert project.analysis_status == "analyzed"
     assert database_path.exists()
+
+
+def test_analyzer_adds_parsed_symbols_to_project(tmp_path: Path) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+"""
+    )
+
+    analyzer = ProjectAnalyzer(
+        tmp_path,
+        tmp_path / "context_forge.db",
+    )
+
+    project = analyzer.analyze()
+
+    names = {symbol.name for symbol in project.symbols}
+
+    assert "Calculator" in names
+    assert "add" in names
+
+
+def test_analyzer_records_parser_errors_without_failing_project(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "broken.py"
+    source.write_text(
+        """
+def broken(
+"""
+    )
+
+    analyzer = ProjectAnalyzer(
+        tmp_path,
+        tmp_path / "context_forge.db",
+    )
+
+    project = analyzer.analyze()
+
+    assert project.analysis_status == "analyzed"
+    assert project.errors
+    assert "broken.py" in project.errors[0]
