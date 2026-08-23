@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 
+from context_forge.models.directory import Directory
 from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
@@ -296,3 +297,49 @@ def test_query_results_are_sorted_by_score(tmp_path: Path) -> None:
     results = query.search("hello")
 
     assert [result.score for result in results] == [1.0, 1.0, 0.8]
+
+
+def test_query_finds_directory_by_path(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("src"),
+        name="src",
+    )
+    project.add_directory(directory)
+
+    query = ProjectQuery(project)
+
+    result = query.get_directory("src")
+
+    assert result is not None
+    assert result.id == directory.id
+
+
+def test_query_returns_none_for_unknown_directory(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    assert query.get_directory("missing") is None
+
+
+def test_query_searches_directories(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("src"),
+        name="src",
+    )
+    project.add_directory(directory)
+
+    query = ProjectQuery(project)
+
+    results = query.search("src")
+
+    assert len(results) == 1
+    assert results[0].result_type == SearchResultType.DIRECTORY
+    assert results[0].name == "src"
+    assert results[0].path == "src"
+    assert results[0].score == 1.0

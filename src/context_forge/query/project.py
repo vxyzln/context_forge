@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from context_forge.models.directory import Directory
 from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
@@ -55,6 +56,30 @@ class ProjectQuery:
             return []
 
         results: list[SearchResult] = []
+
+        for directory in self.project.directories:
+            name = directory.name.lower()
+            path = directory.path.as_posix().lower()
+
+            score = 0.0
+
+            if name == normalized_query:
+                score = 1.0
+            elif normalized_query in name:
+                score = 0.8
+            elif normalized_query in path:
+                score = 0.5
+
+            if score > 0:
+                results.append(
+                    SearchResult(
+                        result_type=SearchResultType.DIRECTORY,
+                        entity_id=directory.id,
+                        name=directory.name,
+                        path=directory.path.as_posix(),
+                        score=score,
+                    )
+                )
 
         for file in self.project.files:
             name = file.name.lower()
@@ -121,3 +146,12 @@ class ProjectQuery:
         )
 
         return results
+
+    def get_directory(self, path: str) -> Directory | None:
+        normalized_path = path.replace("\\", "/").strip("/")
+
+        for directory in self.project.directories:
+            if directory.path.as_posix().strip("/") == normalized_path:
+                return directory
+
+        return None

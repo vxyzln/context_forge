@@ -6,6 +6,7 @@ from uuid import UUID
 class SearchResultType(StrEnum):
     FILE = "file"
     SYMBOL = "symbol"
+    DIRECTORY = "directory"
 
 
 @dataclass(frozen=True)
