@@ -12,6 +12,7 @@ from context_forge.context.models import (
     Inference,
 )
 from context_forge.context.retrieval import ContextRetriever
+from context_forge.context.types import ContextUnitType
 
 __all__ = [
     "ContextEngine",
@@ -19,6 +20,7 @@ __all__ = [
     "ContextRetriever",
     "ContextSignal",
     "ContextUnit",
+    "ContextUnitType",
     "DefaultContextEngine",
     "DeterministicRetriever",
     "Evidence",

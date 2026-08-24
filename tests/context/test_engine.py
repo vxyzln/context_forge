@@ -6,6 +6,7 @@ from context_forge.context import (
     DefaultContextEngine,
     DeterministicRetriever,
 )
+from context_forge.context.types import ContextUnitType
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
@@ -34,7 +35,7 @@ def test_default_context_engine_builds_context_from_retriever() -> None:
     assert package.task == "auth"
     assert len(package.units) == 1
     assert package.units[0].entity_id == file.id
-    assert package.units[0].unit_type == "file"
+    assert package.units[0].unit_type == ContextUnitType.FILE
     assert package.units[0].relevance > 0
 
 

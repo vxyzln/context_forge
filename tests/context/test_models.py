@@ -10,6 +10,7 @@ from context_forge.context.models import (
     Fact,
     Inference,
 )
+from context_forge.context.types import ContextUnitType
 
 
 def test_evidence_stores_source_and_description() -> None:
@@ -46,7 +47,7 @@ def test_context_signal_stores_evidence() -> None:
 def test_context_unit_defaults_to_zero_relevance() -> None:
     unit = ContextUnit(
         entity_id=uuid4(),
-        unit_type="file",
+        unit_type=ContextUnitType.FILE,
     )
 
     assert unit.relevance == 0.0
@@ -56,7 +57,7 @@ def test_context_unit_defaults_to_zero_relevance() -> None:
 def test_context_package_stores_task_and_units() -> None:
     unit = ContextUnit(
         entity_id=uuid4(),
-        unit_type="file",
+        unit_type=ContextUnitType.FILE,
         relevance=0.9,
     )
 
@@ -108,7 +109,7 @@ def test_inference_rejects_invalid_confidence() -> None:
 def test_context_unit_can_store_facts_and_inferences() -> None:
     unit = ContextUnit(
         entity_id=uuid4(),
-        unit_type="file",
+        unit_type=ContextUnitType.FILE,
         facts=(
             Fact(
                 fact_type="language",
@@ -125,3 +126,12 @@ def test_context_unit_can_store_facts_and_inferences() -> None:
 
     assert len(unit.facts) == 1
     assert len(unit.inferences) == 1
+
+
+def test_context_unit_rejects_invalid_relevance() -> None:
+    with pytest.raises(ValueError, match="Context relevance"):
+        ContextUnit(
+            entity_id=uuid4(),
+            unit_type=ContextUnitType.FILE,
+            relevance=1.5,
+        )

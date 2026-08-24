@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from context_forge.context.types import ContextUnitType
+
 
 @dataclass(frozen=True)
 class Evidence:
@@ -36,11 +38,15 @@ class Inference:
 @dataclass(frozen=True)
 class ContextUnit:
     entity_id: UUID
-    unit_type: str
+    unit_type: ContextUnitType
     relevance: float = 0.0
     signals: tuple[ContextSignal, ...] = ()
     facts: tuple[Fact, ...] = ()
     inferences: tuple[Inference, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.relevance <= 1.0:
+            raise ValueError("Context relevance must be between 0.0 and 1.0")
 
 
 @dataclass(frozen=True)

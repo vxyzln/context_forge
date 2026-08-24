@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from context_forge.context import DeterministicRetriever
+from context_forge.context.types import ContextUnitType
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
@@ -26,5 +27,5 @@ def test_deterministic_retriever_uses_project_query() -> None:
 
     assert len(results) == 1
     assert results[0].entity_id == file.id
-    assert results[0].unit_type == "file"
+    assert results[0].unit_type == ContextUnitType.FILE
     assert results[0].relevance > 0
