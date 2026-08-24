@@ -1,5 +1,8 @@
-from context_forge.context.basic import BasicContextEngine
-from context_forge.context.engine import ContextEngine
+from context_forge.context.deterministic import DeterministicRetriever
+from context_forge.context.engine import (
+    ContextEngine,
+    DefaultContextEngine,
+)
 from context_forge.context.models import (
     ContextPackage,
     ContextSignal,
@@ -8,13 +11,16 @@ from context_forge.context.models import (
     Fact,
     Inference,
 )
+from context_forge.context.retrieval import ContextRetriever
 
 __all__ = [
-    "BasicContextEngine",
     "ContextEngine",
     "ContextPackage",
+    "ContextRetriever",
     "ContextSignal",
     "ContextUnit",
+    "DefaultContextEngine",
+    "DeterministicRetriever",
     "Evidence",
     "Fact",
     "Inference",
