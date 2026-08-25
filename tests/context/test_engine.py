@@ -3,12 +3,16 @@ from pathlib import Path
 import pytest
 
 from context_forge.context import (
+    ContextBudgetCompressor,
+    ContextCompressionPipeline,
     ContextEngine,
     ContextEnrichmentPipeline,
     ContextPackageBuilder,
     ContextSelector,
+    ContextUnitMerger,
     ContextUnitType,
     DefaultContextEngine,
+    DeterministicContextCompressor,
     DeterministicRanker,
     FileContextEnricher,
     GraphExpander,
@@ -34,6 +38,11 @@ def make_engine() -> DefaultContextEngine:
                 SymbolContextEnricher(),
                 RelationshipContextEnricher(),
             ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            merger=ContextUnitMerger(),
+            budget_compressor=ContextBudgetCompressor(),
         ),
     )
 

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from context_forge.context.candidates import CandidateGenerator
+from context_forge.context.compression_pipeline import ContextCompressionPipeline
 from context_forge.context.enrichment_pipeline import ContextEnrichmentPipeline
 from context_forge.context.expansion import GraphExpander
 from context_forge.context.models import ContextPackage
@@ -26,6 +27,7 @@ class DefaultContextEngine(ContextEngine):
         expander: GraphExpander,
         package_builder: ContextPackageBuilder,
         enrichment_pipeline: ContextEnrichmentPipeline,
+        compression_pipeline: ContextCompressionPipeline,
     ) -> None:
         self.candidate_generator = candidate_generator
         self.ranker = ranker
@@ -33,27 +35,45 @@ class DefaultContextEngine(ContextEngine):
         self.expander = expander
         self.package_builder = package_builder
         self.enrichment_pipeline = enrichment_pipeline
+        self.compression_pipeline = compression_pipeline
 
     def build(self, project: Project, task: str) -> ContextPackage:
         if not task.strip():
             raise ValueError("Task cannot be empty")
 
-        candidates = self.candidate_generator.generate(project, task)
+        candidates = self.candidate_generator.generate(
+            project,
+            task,
+        )
 
-        ranked = self.ranker.rank(candidates, {})
+        ranked = self.ranker.rank(
+            candidates,
+            {},
+        )
 
         selected = self.selector.select(ranked)
 
-        expanded = self.expander.expand(project, selected)
+        expanded = self.expander.expand(
+            project,
+            selected,
+        )
 
-        package = self.package_builder.build(task, expanded)
+        package = self.package_builder.build(
+            task,
+            expanded,
+        )
 
         enriched_units = self.enrichment_pipeline.enrich(
             project,
             list(package.units),
         )
 
-        return ContextPackage(
+        enriched_package = ContextPackage(
             task=package.task,
             units=tuple(enriched_units),
+        )
+
+        return self.compression_pipeline.compress(
+            enriched_package,
+            max_units=len(enriched_package.units),
         )

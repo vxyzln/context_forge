@@ -1,11 +1,15 @@
 from pathlib import Path
 
 from context_forge.context import (
+    ContextBudgetCompressor,
+    ContextCompressionPipeline,
     ContextEnrichmentPipeline,
     ContextPackageBuilder,
     ContextSelector,
+    ContextUnitMerger,
     ContextUnitType,
     DefaultContextEngine,
+    DeterministicContextCompressor,
     DeterministicRanker,
     FileContextEnricher,
     GraphExpander,
@@ -48,6 +52,11 @@ def test_context_engine_runs_complete_pipeline() -> None:
                 RelationshipContextEnricher(),
             ],
         ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            merger=ContextUnitMerger(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
     )
 
     package = engine.build(project, "auth")
@@ -57,3 +66,48 @@ def test_context_engine_runs_complete_pipeline() -> None:
     assert package.units[0].entity_id == file.id
     assert package.units[0].unit_type == ContextUnitType.FILE
     assert package.units[0].facts
+
+
+def test_context_engine_compresses_duplicate_units() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+        size=128,
+    )
+
+    project.add_file(file)
+
+    engine = DefaultContextEngine(
+        candidate_generator=CandidateGenerator(),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        expander=GraphExpander(),
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            merger=ContextUnitMerger(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+    )
+
+    package = engine.build(project, "auth")
+
+    assert package.units
+    assert len(package.units) == len(
+        {(unit.entity_id, unit.unit_type) for unit in package.units}
+    )

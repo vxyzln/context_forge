@@ -1,12 +1,24 @@
+from context_forge.context.budget_compression import (
+    ContextBudgetCompressor,
+)
 from context_forge.context.candidate import ContextCandidate
 from context_forge.context.candidates import CandidateGenerator
+from context_forge.context.compression import ContextCompressor
+from context_forge.context.compression_models import CompressionConfig
+from context_forge.context.compression_pipeline import (
+    ContextCompressionPipeline,
+)
 from context_forge.context.depth import ContextDepth
 from context_forge.context.deterministic import DeterministicRetriever
+from context_forge.context.deterministic_compression import (
+    DeterministicContextCompressor,
+)
 from context_forge.context.engine import ContextEngine, DefaultContextEngine
 from context_forge.context.enrichment import ContextEnricher
 from context_forge.context.enrichment_pipeline import ContextEnrichmentPipeline
 from context_forge.context.expansion import ContextExpansion, GraphExpander
 from context_forge.context.file_enrichment import FileContextEnricher
+from context_forge.context.merge import ContextUnitMerger
 from context_forge.context.models import (
     ContextPackage,
     ContextSignal,
@@ -27,7 +39,11 @@ from context_forge.context.types import ContextUnitType
 
 __all__ = [
     "CandidateGenerator",
+    "CompressionConfig",
+    "ContextBudgetCompressor",
     "ContextCandidate",
+    "ContextCompressionPipeline",
+    "ContextCompressor",
     "ContextDepth",
     "ContextEngine",
     "ContextEnricher",
@@ -40,8 +56,10 @@ __all__ = [
     "ContextSelector",
     "ContextSignal",
     "ContextUnit",
+    "ContextUnitMerger",
     "ContextUnitType",
     "DefaultContextEngine",
+    "DeterministicContextCompressor",
     "DeterministicRanker",
     "DeterministicRetriever",
     "Evidence",
