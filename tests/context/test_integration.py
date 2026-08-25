@@ -1,15 +1,23 @@
 from pathlib import Path
 
-from context_forge.context import DefaultContextEngine, DeterministicRetriever
+from context_forge.context import (
+    ContextPackageBuilder,
+    ContextSelector,
+    ContextUnitType,
+    DefaultContextEngine,
+    DeterministicRanker,
+    GraphExpander,
+)
+from context_forge.context.candidates import CandidateGenerator
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
 
 
-def test_context_engine_builds_package_from_project() -> None:
+def test_context_engine_runs_complete_pipeline() -> None:
     project = Project(
         name="demo",
-        root_path=Path("/tmp/demo"),
+        root_path=Path("/tmp/context-forge-test"),
     )
 
     file = File(
@@ -23,7 +31,11 @@ def test_context_engine_builds_package_from_project() -> None:
     project.add_file(file)
 
     engine = DefaultContextEngine(
-        retriever=DeterministicRetriever(),
+        candidate_generator=CandidateGenerator(),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        expander=GraphExpander(),
+        package_builder=ContextPackageBuilder(),
     )
 
     package = engine.build(project, "auth")
@@ -31,4 +43,4 @@ def test_context_engine_builds_package_from_project() -> None:
     assert package.task == "auth"
     assert len(package.units) == 1
     assert package.units[0].entity_id == file.id
-    assert package.units[0].relevance > 0
+    assert package.units[0].unit_type == ContextUnitType.FILE
