@@ -5,6 +5,7 @@ from context_forge.context.engine import (
     ContextEngine,
     DefaultContextEngine,
 )
+from context_forge.context.expansion import ContextExpansion, GraphExpander
 from context_forge.context.models import (
     ContextPackage,
     ContextSignal,
@@ -22,6 +23,7 @@ __all__ = [
     "ContextCandidate",
     "ContextDepth",
     "ContextEngine",
+    "ContextExpansion",
     "ContextPackage",
     "ContextRetriever",
     "ContextSelector",
@@ -33,5 +35,6 @@ __all__ = [
     "DeterministicRetriever",
     "Evidence",
     "Fact",
+    "GraphExpander",
     "Inference",
 ]
