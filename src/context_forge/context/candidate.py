@@ -13,7 +13,6 @@ class ContextCandidate:
 
     @classmethod
     def from_search_result(
-        # TODO : make a test for this
         cls,
         result: SearchResult,
     ) -> "ContextCandidate":

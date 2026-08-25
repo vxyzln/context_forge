@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from context_forge.context.candidates import CandidateGenerator
+from context_forge.context.enrichment_pipeline import ContextEnrichmentPipeline
 from context_forge.context.expansion import GraphExpander
 from context_forge.context.models import ContextPackage
 from context_forge.context.package import ContextPackageBuilder
@@ -24,12 +25,14 @@ class DefaultContextEngine(ContextEngine):
         selector: ContextSelector,
         expander: GraphExpander,
         package_builder: ContextPackageBuilder,
+        enrichment_pipeline: ContextEnrichmentPipeline,
     ) -> None:
         self.candidate_generator = candidate_generator
         self.ranker = ranker
         self.selector = selector
         self.expander = expander
         self.package_builder = package_builder
+        self.enrichment_pipeline = enrichment_pipeline
 
     def build(self, project: Project, task: str) -> ContextPackage:
         if not task.strip():
@@ -43,4 +46,14 @@ class DefaultContextEngine(ContextEngine):
 
         expanded = self.expander.expand(project, selected)
 
-        return self.package_builder.build(task, expanded)
+        package = self.package_builder.build(task, expanded)
+
+        enriched_units = self.enrichment_pipeline.enrich(
+            project,
+            list(package.units),
+        )
+
+        return ContextPackage(
+            task=package.task,
+            units=tuple(enriched_units),
+        )

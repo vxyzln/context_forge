@@ -1,12 +1,16 @@
 from pathlib import Path
 
 from context_forge.context import (
+    ContextEnrichmentPipeline,
     ContextPackageBuilder,
     ContextSelector,
     ContextUnitType,
     DefaultContextEngine,
     DeterministicRanker,
+    FileContextEnricher,
     GraphExpander,
+    RelationshipContextEnricher,
+    SymbolContextEnricher,
 )
 from context_forge.context.candidates import CandidateGenerator
 from context_forge.models.enums import FileType
@@ -26,6 +30,7 @@ def test_context_engine_runs_complete_pipeline() -> None:
         name="auth.py",
         extension=".py",
         file_type=FileType.SOURCE,
+        size=128,
     )
 
     project.add_file(file)
@@ -36,6 +41,13 @@ def test_context_engine_runs_complete_pipeline() -> None:
         selector=ContextSelector(),
         expander=GraphExpander(),
         package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
     )
 
     package = engine.build(project, "auth")
@@ -44,3 +56,4 @@ def test_context_engine_runs_complete_pipeline() -> None:
     assert len(package.units) == 1
     assert package.units[0].entity_id == file.id
     assert package.units[0].unit_type == ContextUnitType.FILE
+    assert package.units[0].facts
