@@ -1,3 +1,4 @@
+from context_forge.context.assembly import ContextAssembler
 from context_forge.context.budget_compression import (
     ContextBudgetCompressor,
 )
@@ -28,6 +29,9 @@ from context_forge.context.models import (
     Inference,
 )
 from context_forge.context.package import ContextPackageBuilder
+from context_forge.context.prioritization import DeterministicPrioritizer
+from context_forge.context.priority import ContextPriority
+from context_forge.context.priority_ordering import ContextPriorityOrdering
 from context_forge.context.ranking import DeterministicRanker
 from context_forge.context.relationship_enrichment import RelationshipContextEnricher
 from context_forge.context.retrieval import ContextRetriever
@@ -40,6 +44,7 @@ from context_forge.context.types import ContextUnitType
 __all__ = [
     "CandidateGenerator",
     "CompressionConfig",
+    "ContextAssembler",
     "ContextBudgetCompressor",
     "ContextCandidate",
     "ContextCompressionPipeline",
@@ -52,6 +57,8 @@ __all__ = [
     "ContextPackage",
     "ContextPackageBuilder",
     "ContextPackageSerializer",
+    "ContextPriority",
+    "ContextPriorityOrdering",
     "ContextRetriever",
     "ContextSelector",
     "ContextSignal",
@@ -60,6 +67,7 @@ __all__ = [
     "ContextUnitType",
     "DefaultContextEngine",
     "DeterministicContextCompressor",
+    "DeterministicPrioritizer",
     "DeterministicRanker",
     "DeterministicRetriever",
     "Evidence",

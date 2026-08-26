@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+from context_forge.context.assembly import ContextAssembler
 from context_forge.context.candidates import CandidateGenerator
 from context_forge.context.compression_pipeline import ContextCompressionPipeline
 from context_forge.context.enrichment_pipeline import ContextEnrichmentPipeline
@@ -28,6 +29,8 @@ class DefaultContextEngine(ContextEngine):
         package_builder: ContextPackageBuilder,
         enrichment_pipeline: ContextEnrichmentPipeline,
         compression_pipeline: ContextCompressionPipeline,
+        assembly: ContextAssembler,
+        max_context_units: int = 20,
     ) -> None:
         self.candidate_generator = candidate_generator
         self.ranker = ranker
@@ -36,32 +39,22 @@ class DefaultContextEngine(ContextEngine):
         self.package_builder = package_builder
         self.enrichment_pipeline = enrichment_pipeline
         self.compression_pipeline = compression_pipeline
+        self.assembly = assembly
+        self.max_context_units = max_context_units
 
     def build(self, project: Project, task: str) -> ContextPackage:
         if not task.strip():
             raise ValueError("Task cannot be empty")
 
-        candidates = self.candidate_generator.generate(
-            project,
-            task,
-        )
+        candidates = self.candidate_generator.generate(project, task)
 
-        ranked = self.ranker.rank(
-            candidates,
-            {},
-        )
+        ranked = self.ranker.rank(candidates, {})
 
         selected = self.selector.select(ranked)
 
-        expanded = self.expander.expand(
-            project,
-            selected,
-        )
+        expanded = self.expander.expand(project, selected)
 
-        package = self.package_builder.build(
-            task,
-            expanded,
-        )
+        package = self.package_builder.build(task, expanded)
 
         enriched_units = self.enrichment_pipeline.enrich(
             project,
@@ -73,7 +66,9 @@ class DefaultContextEngine(ContextEngine):
             units=tuple(enriched_units),
         )
 
-        return self.compression_pipeline.compress(
+        compressed = self.compression_pipeline.compress(
             enriched_package,
-            max_units=len(enriched_package.units),
+            max_units=self.max_context_units,
         )
+
+        return self.assembly.assemble(compressed)

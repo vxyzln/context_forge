@@ -3,16 +3,19 @@ from pathlib import Path
 import pytest
 
 from context_forge.context import (
+    ContextAssembler,
     ContextBudgetCompressor,
     ContextCompressionPipeline,
     ContextEngine,
     ContextEnrichmentPipeline,
     ContextPackageBuilder,
+    ContextPriorityOrdering,
     ContextSelector,
     ContextUnitMerger,
     ContextUnitType,
     DefaultContextEngine,
     DeterministicContextCompressor,
+    DeterministicPrioritizer,
     DeterministicRanker,
     FileContextEnricher,
     GraphExpander,
@@ -43,6 +46,11 @@ def make_engine() -> DefaultContextEngine:
             compressor=DeterministicContextCompressor(),
             merger=ContextUnitMerger(),
             budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
         ),
     )
 
@@ -118,3 +126,30 @@ def test_context_engine_enriches_package_units() -> None:
 
     assert package.units
     assert package.units[0].facts
+
+
+def test_context_engine_returns_deterministically_assembled_package() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+        size=128,
+    )
+
+    project.add_file(file)
+
+    engine = make_engine()
+
+    first = engine.build(project, "auth")
+    second = engine.build(project, "auth")
+
+    assert first == second
+    assert first.task == "auth"
+    assert first.units

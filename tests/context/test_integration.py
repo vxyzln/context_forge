@@ -1,15 +1,18 @@
 from pathlib import Path
 
 from context_forge.context import (
+    ContextAssembler,
     ContextBudgetCompressor,
     ContextCompressionPipeline,
     ContextEnrichmentPipeline,
     ContextPackageBuilder,
+    ContextPriorityOrdering,
     ContextSelector,
     ContextUnitMerger,
     ContextUnitType,
     DefaultContextEngine,
     DeterministicContextCompressor,
+    DeterministicPrioritizer,
     DeterministicRanker,
     FileContextEnricher,
     GraphExpander,
@@ -57,6 +60,11 @@ def test_context_engine_runs_complete_pipeline() -> None:
             merger=ContextUnitMerger(),
             budget_compressor=ContextBudgetCompressor(),
         ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
     )
 
     package = engine.build(project, "auth")
@@ -102,6 +110,11 @@ def test_context_engine_compresses_duplicate_units() -> None:
             compressor=DeterministicContextCompressor(),
             merger=ContextUnitMerger(),
             budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
         ),
     )
 
