@@ -25,3 +25,12 @@ class GitRepositoryInfo:
     root_path: str
     current_branch: str | None
     head_hash: str
+
+
+@dataclass(frozen=True)
+class GitActivitySummary:
+    total_commits: int
+    total_authors: int
+    files_changed: int
+    total_additions: int
+    total_deletions: int

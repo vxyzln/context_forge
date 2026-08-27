@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from context_forge.classifier.project import ProjectClassifier
+from context_forge.git import GitRepository, summarize_commits
 from context_forge.graph.builder import RelationshipBuilder
 from context_forge.models.project import Project
 from context_forge.parser import LanguageDetector, ParserRegistry
@@ -68,6 +69,12 @@ class ProjectAnalyzer:
 
             self._parse_project(project, detector, registry)
             RelationshipBuilder().build(project, project.imports)
+
+            git_repository = GitRepository(self.root_path)
+
+            if git_repository.is_repository():
+                commits = git_repository.get_commits()
+                project.git_activity = summarize_commits(commits)
 
             project.analysis_status = "analyzed"
 

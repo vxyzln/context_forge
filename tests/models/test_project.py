@@ -105,3 +105,12 @@ def test_project_rejects_relative_root() -> None:
             name="Context Forge",
             root_path=Path("context_forge"),
         )
+
+
+def test_project_git_activity_defaults_to_none() -> None:
+    project = Project(
+        name="Context Forge",
+        root_path=Path.cwd(),
+    )
+
+    assert project.git_activity is None

@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from context_forge.git.models import GitActivitySummary
 from context_forge.models.directory import Directory
 from context_forge.models.file import File
 from context_forge.models.relationship import Relationship
@@ -18,6 +19,7 @@ class Project:
     id: UUID = field(default_factory=uuid4)
     repository_url: str | None = None
     default_branch: str | None = None
+    git_activity: GitActivitySummary | None = None
     project_type: str | None = None
 
     languages: list[str] = field(default_factory=list)

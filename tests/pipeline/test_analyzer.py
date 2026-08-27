@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from context_forge.pipeline.analyzer import ProjectAnalyzer
@@ -244,3 +245,81 @@ def hello():
     assert len(loaded.symbols) == len(project.symbols)
     assert len(loaded.relationships) == len(project.relationships)
     assert len(loaded.errors) == len(project.errors)
+
+
+def run_git(path: Path, *arguments: str) -> None:
+    subprocess.run(
+        ["git", *arguments],
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_analyzer_adds_git_activity(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "initial commit")
+
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+
+def goodbye():
+    return "goodbye"
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "add goodbye")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert project.git_activity is not None
+    assert project.git_activity.total_commits == 2
+    assert project.git_activity.total_authors == 1
+    assert project.git_activity.files_changed == 1
+    assert project.git_activity.total_additions == 6
+    assert project.git_activity.total_deletions == 0
+
+
+def test_analyzer_handles_non_git_project(
+    tmp_path: Path,
+) -> None:
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert project.analysis_status == "analyzed"
+    assert project.git_activity is None
