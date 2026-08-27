@@ -159,3 +159,109 @@ def test_repository_requires_absolute_path() -> None:
         match="must be absolute",
     ):
         GitRepository(Path("relative/path"))
+
+
+def test_repository_preserves_commit_parent_chain(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    file = tmp_path / "example.py"
+
+    file.write_text("one\n")
+    run_git(tmp_path, "add", "example.py")
+    run_git(tmp_path, "commit", "-m", "first commit")
+
+    file.write_text("two\n")
+    run_git(tmp_path, "add", "example.py")
+    run_git(tmp_path, "commit", "-m", "second commit")
+
+    file.write_text("three\n")
+    run_git(tmp_path, "add", "example.py")
+    run_git(tmp_path, "commit", "-m", "third commit")
+
+    repository = GitRepository(tmp_path)
+
+    commits = repository.get_commits()
+
+    assert len(commits) == 3
+
+    assert commits[0].message == "third commit"
+    assert commits[1].message == "second commit"
+    assert commits[2].message == "first commit"
+
+    assert commits[0].parent_hashes == (commits[1].hash,)
+    assert commits[1].parent_hashes == (commits[2].hash,)
+    assert commits[2].parent_hashes == ()
+
+
+def test_repository_preserves_merge_commit_parents(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init", "-b", "main")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    file = tmp_path / "example.py"
+    file.write_text("initial\n")
+    run_git(tmp_path, "add", "example.py")
+    run_git(tmp_path, "commit", "-m", "initial commit")
+
+    run_git(tmp_path, "checkout", "-b", "feature")
+
+    feature_file = tmp_path / "feature.py"
+    feature_file.write_text("feature\n")
+    run_git(tmp_path, "add", "feature.py")
+    run_git(tmp_path, "commit", "-m", "feature commit")
+
+    run_git(tmp_path, "checkout", "main")
+
+    main_file = tmp_path / "main.py"
+    main_file.write_text("main\n")
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "main commit")
+
+    run_git(
+        tmp_path,
+        "merge",
+        "--no-ff",
+        "feature",
+        "-m",
+        "merge feature",
+    )
+
+    repository = GitRepository(tmp_path)
+
+    commits = repository.get_commits()
+
+    merge_commit = commits[0]
+
+    assert merge_commit.message == "merge feature"
+    assert len(merge_commit.parent_hashes) == 2
+
+    assert merge_commit.parent_hashes[0] == commits[1].hash
+    assert merge_commit.parent_hashes[1] == commits[2].hash
+
+
+def test_repository_history_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    file = tmp_path / "example.py"
+
+    for index in range(4):
+        file.write_text(f"{index}\n")
+        run_git(tmp_path, "add", "example.py")
+        run_git(tmp_path, "commit", "-m", f"commit {index}")
+
+    repository = GitRepository(tmp_path)
+
+    first = repository.get_commits()
+    second = repository.get_commits()
+
+    assert first == second
