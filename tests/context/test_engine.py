@@ -11,7 +11,6 @@ from context_forge.context import (
     ContextPackageBuilder,
     ContextPriorityOrdering,
     ContextSelector,
-    ContextUnitMerger,
     ContextUnitType,
     DefaultContextEngine,
     DeterministicContextCompressor,
@@ -44,7 +43,6 @@ def make_engine() -> DefaultContextEngine:
         ),
         compression_pipeline=ContextCompressionPipeline(
             compressor=DeterministicContextCompressor(),
-            merger=ContextUnitMerger(),
             budget_compressor=ContextBudgetCompressor(),
         ),
         assembly=ContextAssembler(

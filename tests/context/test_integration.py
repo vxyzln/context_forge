@@ -8,7 +8,6 @@ from context_forge.context import (
     ContextPackageBuilder,
     ContextPriorityOrdering,
     ContextSelector,
-    ContextUnitMerger,
     ContextUnitType,
     DefaultContextEngine,
     DeterministicContextCompressor,
@@ -57,7 +56,6 @@ def test_context_engine_runs_complete_pipeline() -> None:
         ),
         compression_pipeline=ContextCompressionPipeline(
             compressor=DeterministicContextCompressor(),
-            merger=ContextUnitMerger(),
             budget_compressor=ContextBudgetCompressor(),
         ),
         assembly=ContextAssembler(
@@ -108,7 +106,6 @@ def test_context_engine_compresses_duplicate_units() -> None:
         ),
         compression_pipeline=ContextCompressionPipeline(
             compressor=DeterministicContextCompressor(),
-            merger=ContextUnitMerger(),
             budget_compressor=ContextBudgetCompressor(),
         ),
         assembly=ContextAssembler(

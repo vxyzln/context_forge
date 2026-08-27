@@ -34,7 +34,7 @@ def hello():
 
     project = RepositoryScanner(tmp_path).scan()
     parse_project(project)
-    RelationshipBuilder().build(project)
+    RelationshipBuilder().build(project, project.imports)
 
     definitions = [
         relationship
@@ -66,7 +66,7 @@ from app.utils import hello
 
     project = RepositoryScanner(tmp_path).scan()
     parse_project(project)
-    RelationshipBuilder().build(project)
+    RelationshipBuilder().build(project, project.imports)
 
     imports = [
         relationship
@@ -91,10 +91,10 @@ def hello():
 
     builder = RelationshipBuilder()
 
-    builder.build(project)
+    builder.build(project, project.imports)
     first_count = len(project.relationships)
 
-    builder.build(project)
+    builder.build(project, project.imports)
     second_count = len(project.relationships)
 
     assert first_count > 0
@@ -115,7 +115,7 @@ def hello():
 
     builder = RelationshipBuilder()
 
-    builder.build(project)
+    builder.build(project, project.imports)
 
     first_relationships = [
         (
@@ -126,7 +126,7 @@ def hello():
         for relationship in project.relationships
     ]
 
-    builder.build(project)
+    builder.build(project, project.imports)
 
     second_relationships = [
         (
@@ -162,7 +162,7 @@ from app.utils import hello
 
     builder = RelationshipBuilder()
 
-    builder.build(project)
+    builder.build(project, project.imports)
 
     first_imports = [
         relationship
@@ -170,7 +170,7 @@ from app.utils import hello
         if relationship.relationship_type == "imports"
     ]
 
-    builder.build(project)
+    builder.build(project, project.imports)
 
     second_imports = [
         relationship
@@ -180,3 +180,49 @@ from app.utils import hello
 
     assert len(first_imports) == len(second_imports)
     assert len(second_imports) == 1
+
+
+def test_builder_explicit_import_references(tmp_path: Path) -> None:
+    from context_forge.parser.result import ImportReference
+
+    package = tmp_path / "app"
+    package.mkdir()
+
+    (package / "utils.py").write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    source_file = package / "main.py"
+    source_file.write_text(
+        """
+from app.utils import hello
+"""
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+
+    main_file_id = next(f.id for f in project.files if f.name == "main.py")
+    utils_file_id = next(f.id for f in project.files if f.name == "utils.py")
+
+    explicit_references = [
+        ImportReference(file_id=main_file_id, module_name="app.utils")
+    ]
+
+    project.imports.clear()
+
+    builder = RelationshipBuilder()
+    builder.build(project, explicit_references)
+
+    imports = [
+        relationship
+        for relationship in project.relationships
+        if relationship.relationship_type == "imports"
+    ]
+
+    assert len(imports) == 1
+    assert imports[0].source_id == main_file_id
+    assert imports[0].target_id == utils_file_id

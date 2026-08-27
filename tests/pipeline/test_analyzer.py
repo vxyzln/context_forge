@@ -205,10 +205,9 @@ class Calculator:
 
     project = analyzer.analyze()
 
-    query = ProjectQuery.from_repository(
-        analyzer.repository,
-        project.id,
-    )
+    loaded_project = analyzer.repository.load(project.id)
+    assert loaded_project is not None
+    query = ProjectQuery(loaded_project)
 
     assert query is not None
 

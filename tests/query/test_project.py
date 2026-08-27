@@ -143,7 +143,7 @@ def test_query_returns_empty_relationships_for_unknown_entity(
     assert query.get_relationships(uuid4()) == []
 
 
-def test_query_can_load_project_from_repository(tmp_path: Path) -> None:
+def test_query_can_use_project_loaded_from_repository(tmp_path: Path) -> None:
     project = create_project(tmp_path)
 
     database = Database(tmp_path / "context_forge.db")
@@ -152,7 +152,9 @@ def test_query_can_load_project_from_repository(tmp_path: Path) -> None:
     repository = ProjectRepository(database)
     repository.save(project)
 
-    query = ProjectQuery.from_repository(repository, project.id)
+    loaded_project = repository.load(project.id)
+    assert loaded_project is not None
+    query = ProjectQuery(loaded_project)
 
     assert query is not None
     assert query.get_file("main.py") is not None
@@ -165,9 +167,8 @@ def test_query_returns_none_for_missing_project(tmp_path: Path) -> None:
 
     repository = ProjectRepository(database)
 
-    query = ProjectQuery.from_repository(repository, uuid4())
-
-    assert query is None
+    loaded_project = repository.load(uuid4())
+    assert loaded_project is None
 
 
 def test_query_searches_files_and_symbols(tmp_path: Path) -> None:

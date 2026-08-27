@@ -74,7 +74,7 @@ def hello():
 
     project = RepositoryScanner(tmp_path).scan()
     parse_project(project)
-    RelationshipBuilder().build(project)
+    RelationshipBuilder().build(project, project.imports)
 
     database = Database(tmp_path / "context_forge.db")
     database.initialize()
@@ -166,7 +166,7 @@ def hello():
 
     project = RepositoryScanner(tmp_path).scan()
     parse_project(project)
-    RelationshipBuilder().build(project)
+    RelationshipBuilder().build(project, project.imports)
 
     project.errors.append("example.py:1:1: Invalid syntax")
 
@@ -311,7 +311,7 @@ def hello():
 
     project = RepositoryScanner(tmp_path).scan()
     parse_project(project)
-    RelationshipBuilder().build(project)
+    RelationshipBuilder().build(project, project.imports)
 
     database = Database(tmp_path / "context_forge.db")
     database.initialize()

@@ -67,7 +67,7 @@ class ProjectAnalyzer:
             registry.register(PythonParser())
 
             self._parse_project(project, detector, registry)
-            RelationshipBuilder().build(project)
+            RelationshipBuilder().build(project, project.imports)
 
             project.analysis_status = "analyzed"
 

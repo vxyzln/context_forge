@@ -10,7 +10,6 @@ from context_forge.context.compression_pipeline import (
     ContextCompressionPipeline,
 )
 from context_forge.context.depth import ContextDepth
-from context_forge.context.deterministic import DeterministicRetriever
 from context_forge.context.deterministic_compression import (
     DeterministicContextCompressor,
 )
@@ -19,7 +18,6 @@ from context_forge.context.enrichment import ContextEnricher
 from context_forge.context.enrichment_pipeline import ContextEnrichmentPipeline
 from context_forge.context.expansion import ContextExpansion, GraphExpander
 from context_forge.context.file_enrichment import FileContextEnricher
-from context_forge.context.merge import ContextUnitMerger
 from context_forge.context.models import (
     ContextPackage,
     ContextSignal,
@@ -34,7 +32,6 @@ from context_forge.context.priority import ContextPriority
 from context_forge.context.priority_ordering import ContextPriorityOrdering
 from context_forge.context.ranking import DeterministicRanker
 from context_forge.context.relationship_enrichment import RelationshipContextEnricher
-from context_forge.context.retrieval import ContextRetriever
 from context_forge.context.selection import ContextSelector
 from context_forge.context.serialization import ContextPackageSerializer
 from context_forge.context.signals import RelevanceSignals
@@ -59,17 +56,14 @@ __all__ = [
     "ContextPackageSerializer",
     "ContextPriority",
     "ContextPriorityOrdering",
-    "ContextRetriever",
     "ContextSelector",
     "ContextSignal",
     "ContextUnit",
-    "ContextUnitMerger",
     "ContextUnitType",
     "DefaultContextEngine",
     "DeterministicContextCompressor",
     "DeterministicPrioritizer",
     "DeterministicRanker",
-    "DeterministicRetriever",
     "Evidence",
     "Fact",
     "FileContextEnricher",

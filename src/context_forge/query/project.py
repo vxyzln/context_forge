@@ -6,25 +6,11 @@ from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
 from context_forge.models.symbol import Symbol
 from context_forge.query.result import SearchResult, SearchResultType
-from context_forge.storage.repository import ProjectRepository
 
 
 class ProjectQuery:
     def __init__(self, project: Project) -> None:
         self.project = project
-
-    @classmethod
-    def from_repository(
-        cls,
-        repository: ProjectRepository,
-        project_id: UUID,
-    ) -> "ProjectQuery | None":
-        project = repository.load(project_id)
-
-        if project is None:
-            return None
-
-        return cls(project)
 
     def get_file(self, path: str) -> File | None:
         normalized_path = path.replace("\\", "/")

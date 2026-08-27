@@ -5,7 +5,6 @@ from context_forge.context import (
     ContextCompressionPipeline,
     ContextPackage,
     ContextUnit,
-    ContextUnitMerger,
     ContextUnitType,
     DeterministicContextCompressor,
 )
@@ -22,7 +21,6 @@ def make_unit(relevance: float) -> ContextUnit:
 def make_pipeline() -> ContextCompressionPipeline:
     return ContextCompressionPipeline(
         compressor=DeterministicContextCompressor(),
-        merger=ContextUnitMerger(),
         budget_compressor=ContextBudgetCompressor(),
     )
 
