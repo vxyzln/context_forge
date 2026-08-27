@@ -2,7 +2,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from context_forge.git.models import GitCommit, GitRepositoryInfo
+from context_forge.git.models import GitCommit, GitFileChange, GitRepositoryInfo
 
 
 class GitRepository:
@@ -99,12 +99,12 @@ class GitRepository:
 
             fields = record.split("\x1f")
 
-            fields = record.split("\x1f")
-
             if len(fields) != 5:
                 raise RuntimeError("Unexpected Git commit format")
 
             commit_hash, author, timestamp, parents, message = fields
+
+            changes = self.get_commit_changes(commit_hash)
 
             commits.append(
                 GitCommit(
@@ -113,10 +113,97 @@ class GitRepository:
                     author=author,
                     timestamp=datetime.fromisoformat(timestamp).astimezone(UTC),
                     parent_hashes=tuple(parent for parent in parents.split() if parent),
+                    changes=tuple(changes),
                 )
             )
 
         return commits
+
+    def get_commit_changes(self, commit_hash: str) -> list[GitFileChange]:
+        status_result = self._run_git(
+            "diff-tree",
+            "--no-commit-id",
+            "--root",
+            "--name-status",
+            "-r",
+            commit_hash,
+        )
+
+        numstat_result = self._run_git(
+            "diff-tree",
+            "--no-commit-id",
+            "--root",
+            "--numstat",
+            "-r",
+            commit_hash,
+        )
+
+        statuses = self._parse_name_status(status_result.stdout)
+        statistics = self._parse_numstat(numstat_result.stdout)
+
+        changes: list[GitFileChange] = []
+
+        for path, status in statuses:
+            additions, deletions = statistics.get(path, (0, 0))
+
+            changes.append(
+                GitFileChange(
+                    path=path,
+                    status=status,
+                    additions=additions,
+                    deletions=deletions,
+                )
+            )
+
+        return changes
+
+    @staticmethod
+    def _parse_name_status(output: str) -> list[tuple[str, str]]:
+        changes: list[tuple[str, str]] = []
+
+        for line in output.splitlines():
+            if not line.strip():
+                continue
+
+            parts = line.split("\t")
+
+            if len(parts) < 2:
+                continue
+
+            status = parts[0][0]
+            path = parts[-1]
+
+            changes.append((path, status))
+
+        return changes
+
+    @staticmethod
+    def _parse_numstat(output: str) -> dict[str, tuple[int, int]]:
+        statistics: dict[str, tuple[int, int]] = {}
+
+        for line in output.splitlines():
+            if not line.strip():
+                continue
+
+            parts = line.split("\t")
+
+            if len(parts) < 3:
+                continue
+
+            additions = GitRepository._parse_line_count(parts[0])
+            deletions = GitRepository._parse_line_count(parts[1])
+            path = parts[-1]
+
+            statistics[path] = (additions, deletions)
+
+        return statistics
+
+    @staticmethod
+    def _parse_line_count(value: str) -> int:
+        try:
+            return int(value)
+        except ValueError:
+            return 0
 
     def _run_git(
         self,

@@ -3,12 +3,21 @@ from datetime import datetime
 
 
 @dataclass(frozen=True)
+class GitFileChange:
+    path: str
+    status: str
+    additions: int
+    deletions: int
+
+
+@dataclass(frozen=True)
 class GitCommit:
     hash: str
     message: str
     author: str
     timestamp: datetime
     parent_hashes: tuple[str, ...]
+    changes: tuple[GitFileChange, ...] = ()
 
 
 @dataclass(frozen=True)

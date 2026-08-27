@@ -265,3 +265,98 @@ def test_repository_history_is_deterministic(
     second = repository.get_commits()
 
     assert first == second
+
+
+def test_repository_reads_commit_file_changes(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    file = tmp_path / "example.py"
+
+    file.write_text("one\n")
+    run_git(tmp_path, "add", "example.py")
+    run_git(tmp_path, "commit", "-m", "initial commit")
+
+    file.write_text("one\ntwo\nthree\n")
+    run_git(tmp_path, "add", "example.py")
+    run_git(tmp_path, "commit", "-m", "modify example")
+
+    repository = GitRepository(tmp_path)
+
+    commits = repository.get_commits()
+
+    change = commits[0].changes[0]
+
+    assert change.path == "example.py"
+    assert change.status == "M"
+    assert change.additions == 2
+    assert change.deletions == 0
+
+
+def test_repository_reads_added_and_deleted_files(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    added = tmp_path / "added.py"
+    added.write_text("print('hello')\n")
+
+    run_git(tmp_path, "add", "added.py")
+    run_git(tmp_path, "commit", "-m", "add file")
+
+    repository = GitRepository(tmp_path)
+
+    commits = repository.get_commits()
+
+    added_change = commits[0].changes[0]
+
+    assert added_change.path == "added.py"
+    assert added_change.status == "A"
+    assert added_change.additions == 1
+    assert added_change.deletions == 0
+
+    run_git(tmp_path, "rm", "added.py")
+    run_git(tmp_path, "commit", "-m", "delete file")
+
+    commits = repository.get_commits()
+
+    deleted_change = commits[0].changes[0]
+
+    assert deleted_change.path == "added.py"
+    assert deleted_change.status == "D"
+    assert deleted_change.additions == 0
+    assert deleted_change.deletions == 1
+
+
+def test_repository_reads_multiple_file_changes(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    first = tmp_path / "first.py"
+    second = tmp_path / "second.py"
+
+    first.write_text("first\n")
+    second.write_text("second\n")
+
+    run_git(tmp_path, "add", "first.py", "second.py")
+    run_git(tmp_path, "commit", "-m", "add multiple files")
+
+    repository = GitRepository(tmp_path)
+
+    commits = repository.get_commits()
+
+    changes = commits[0].changes
+
+    assert len(changes) == 2
+    assert [change.path for change in changes] == [
+        "first.py",
+        "second.py",
+    ]
