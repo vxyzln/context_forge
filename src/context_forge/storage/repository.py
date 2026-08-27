@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
+from context_forge.git.models import GitActivitySummary
 from context_forge.models.directory import Directory
 from context_forge.models.enums import DirectoryType, FileType
 from context_forge.models.file import File
@@ -57,9 +58,14 @@ class ProjectRepository:
                     package_manager,
                     analysis_status,
                     created_at,
-                    updated_at
+                    updated_at,
+                    git_total_commits,
+                    git_total_authors,
+                    git_files_changed,
+                    git_total_additions,
+                    git_total_deletions
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(project.id),
@@ -72,6 +78,31 @@ class ProjectRepository:
                     project.analysis_status,
                     project.created_at.isoformat(),
                     project.updated_at.isoformat(),
+                    (
+                        project.git_activity.total_commits
+                        if project.git_activity is not None
+                        else None
+                    ),
+                    (
+                        project.git_activity.total_authors
+                        if project.git_activity is not None
+                        else None
+                    ),
+                    (
+                        project.git_activity.files_changed
+                        if project.git_activity is not None
+                        else None
+                    ),
+                    (
+                        project.git_activity.total_additions
+                        if project.git_activity is not None
+                        else None
+                    ),
+                    (
+                        project.git_activity.total_deletions
+                        if project.git_activity is not None
+                        else None
+                    ),
                 ),
             )
 
@@ -268,6 +299,17 @@ class ProjectRepository:
                 (str(project_id),),
             ).fetchall()
 
+        git_activity = None
+
+        if project_row["git_total_commits"] is not None:
+            git_activity = GitActivitySummary(
+                total_commits=project_row["git_total_commits"],
+                total_authors=project_row["git_total_authors"],
+                files_changed=project_row["git_files_changed"],
+                total_additions=project_row["git_total_additions"],
+                total_deletions=project_row["git_total_deletions"],
+            )
+
         project = Project(
             name=project_row["name"],
             root_path=Path(project_row["root_path"]),
@@ -279,6 +321,7 @@ class ProjectRepository:
             analysis_status=project_row["analysis_status"],
             created_at=datetime.fromisoformat(project_row["created_at"]),
             updated_at=datetime.fromisoformat(project_row["updated_at"]),
+            git_activity=git_activity,
         )
 
         for row in directory_rows:

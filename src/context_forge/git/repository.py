@@ -87,7 +87,21 @@ class GitRepository:
         if limit is not None:
             arguments.append(f"-n{limit}")
 
-        result = self._run_git(*arguments)
+        result = self._run_git(
+            *arguments,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            if "does not have any commits yet" in result.stderr:
+                return []
+
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                result.args,
+                output=result.stdout,
+                stderr=result.stderr,
+            )
 
         commits: list[GitCommit] = []
 
@@ -126,6 +140,7 @@ class GitRepository:
             "--root",
             "--name-status",
             "-r",
+            "-M",
             commit_hash,
         )
 
@@ -135,6 +150,7 @@ class GitRepository:
             "--root",
             "--numstat",
             "-r",
+            "-M",
             commit_hash,
         )
 

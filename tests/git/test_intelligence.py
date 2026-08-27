@@ -1,9 +1,21 @@
+import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 
 from context_forge.git import GitActivitySummary, summarize_commits
 from context_forge.git.models import GitCommit, GitFileChange
 
 TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def run_git(path: Path, *arguments: str) -> None:
+    subprocess.run(
+        ["git", *arguments],
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def make_commit(
@@ -202,3 +214,13 @@ def test_summarize_result_is_deterministic() -> None:
     second = summarize_commits(commits)
 
     assert first == second
+
+
+def test_summarize_empty_history_is_safe() -> None:
+    summary = summarize_commits(())
+
+    assert summary.total_commits == 0
+    assert summary.total_authors == 0
+    assert summary.files_changed == 0
+    assert summary.total_additions == 0
+    assert summary.total_deletions == 0

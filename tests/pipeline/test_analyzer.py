@@ -323,3 +323,676 @@ def hello():
 
     assert project.analysis_status == "analyzed"
     assert project.git_activity is None
+
+
+def test_analyzer_repeated_analysis_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "initial commit")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    first = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    second = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert first.git_activity == second.git_activity
+
+
+def test_analyzer_persists_git_activity(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "initial commit")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    project = analyzer.analyze()
+
+    loaded = analyzer.repository.load(project.id)
+
+    assert loaded is not None
+    assert loaded.git_activity == project.git_activity
+
+
+def test_git_activity_does_not_break_context_query(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "add calculator")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    project = analyzer.analyze()
+
+    assert project.git_activity is not None
+
+    loaded = analyzer.repository.load(project.id)
+
+    assert loaded is not None
+
+    query = ProjectQuery(loaded)
+
+    results = query.search("Calculator")
+
+    assert results
+    assert results[0].name == "Calculator"
+    assert results[0].score == 1.0
+
+
+def test_analyzer_persists_no_git_activity_for_non_git_project(
+    tmp_path: Path,
+) -> None:
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    project = analyzer.analyze()
+    loaded = analyzer.repository.load(project.id)
+
+    assert loaded is not None
+    assert project.git_activity is None
+    assert loaded.git_activity is None
+
+
+def test_analyzer_repeated_analysis_produces_identical_git_activity(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "initial commit")
+
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+
+def goodbye():
+    return "goodbye"
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "add goodbye")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    first = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    second = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert first.git_activity is not None
+    assert second.git_activity is not None
+    assert first.git_activity == second.git_activity
+
+
+def test_analyzer_repeated_analysis_does_not_duplicate_project_records(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "initial commit")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    first = analyzer.analyze()
+    second = analyzer.analyze()
+
+    assert first.git_activity is not None
+    assert second.git_activity is not None
+    assert first.git_activity == second.git_activity
+
+    loaded = analyzer.repository.load(second.id)
+
+    assert loaded is not None
+    assert loaded.git_activity == second.git_activity
+
+
+def test_analyzer_repeated_analysis_preserves_project_context(
+    tmp_path: Path,
+) -> None:
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+import os
+
+class Calculator:
+    def add(self, a, b):
+        return a + b
+
+def hello():
+    return os.getcwd()
+"""
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    first = analyzer.analyze()
+    second = analyzer.analyze()
+
+    assert first.analysis_status == "analyzed"
+    assert second.analysis_status == "analyzed"
+
+    assert [file.path for file in first.files] == [file.path for file in second.files]
+
+    assert [symbol.name for symbol in first.symbols] == [
+        symbol.name for symbol in second.symbols
+    ]
+
+    assert [relationship.relationship_type for relationship in first.relationships] == [
+        relationship.relationship_type for relationship in second.relationships
+    ]
+
+    assert first.git_activity == second.git_activity
+
+
+def test_analyzer_git_activity_is_stable_across_repeated_runs(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.name", "Context Forge Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+
+    source_file = tmp_path / "main.py"
+
+    for index in range(3):
+        source_file.write_text(f"print({index})\n")
+        run_git(tmp_path, "add", "main.py")
+        run_git(tmp_path, "commit", "-m", f"commit {index}")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    first = analyzer.analyze()
+    second = analyzer.analyze()
+
+    assert first.git_activity is not None
+    assert second.git_activity is not None
+
+    assert first.git_activity.total_commits == 3
+    assert second.git_activity.total_commits == 3
+
+    assert first.git_activity.total_authors == 1
+    assert second.git_activity.total_authors == 1
+
+    assert first.git_activity.files_changed == 1
+    assert second.git_activity.files_changed == 1
+
+    assert first.git_activity.total_additions == second.git_activity.total_additions
+    assert first.git_activity.total_deletions == second.git_activity.total_deletions
+
+
+def test_git_activity_survives_project_query(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(
+        tmp_path,
+        "config",
+        "user.name",
+        "Context Forge Test",
+    )
+    run_git(
+        tmp_path,
+        "config",
+        "user.email",
+        "test@example.com",
+    )
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "add calculator")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    project = analyzer.analyze()
+
+    assert project.git_activity is not None
+    assert project.git_activity.total_commits == 1
+
+    query = ProjectQuery(project)
+
+    results = query.search("Calculator")
+
+    assert results
+    assert results[0].name == "Calculator"
+    assert results[0].score == 1.0
+
+
+def test_git_history_does_not_distort_symbol_ranking(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(
+        tmp_path,
+        "config",
+        "user.name",
+        "Context Forge Test",
+    )
+    run_git(
+        tmp_path,
+        "config",
+        "user.email",
+        "test@example.com",
+    )
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+
+def calculator_helper():
+    return 1
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "add calculator")
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    ).analyze()
+
+    assert project.git_activity is not None
+
+    results = ProjectQuery(project).search("Calculator")
+
+    assert results
+    assert results[0].name == "Calculator"
+    assert results[0].score == 1.0
+
+
+def test_git_history_preserves_deterministic_query_ranking(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(
+        tmp_path,
+        "config",
+        "user.name",
+        "Context Forge Test",
+    )
+    run_git(
+        tmp_path,
+        "config",
+        "user.email",
+        "test@example.com",
+    )
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+
+class CalculatorFactory:
+    def create(self):
+        return Calculator()
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "add calculator")
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    ).analyze()
+
+    query = ProjectQuery(project)
+
+    first = query.search("Calculator")
+    second = query.search("Calculator")
+
+    assert first == second
+
+
+def test_git_activity_persistence_preserves_query_behavior(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(
+        tmp_path,
+        "config",
+        "user.name",
+        "Context Forge Test",
+    )
+    run_git(
+        tmp_path,
+        "config",
+        "user.email",
+        "test@example.com",
+    )
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "add calculator")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    project = analyzer.analyze()
+
+    loaded = analyzer.repository.load(project.id)
+
+    assert loaded is not None
+    assert loaded.git_activity == project.git_activity
+
+    original_results = ProjectQuery(project).search("Calculator")
+    loaded_results = ProjectQuery(loaded).search("Calculator")
+
+    assert original_results == loaded_results
+
+
+def test_non_git_project_preserves_query_behavior(
+    tmp_path: Path,
+) -> None:
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+"""
+    )
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    )
+
+    project = analyzer.analyze()
+
+    assert project.git_activity is None
+
+    results = ProjectQuery(project).search("Calculator")
+
+    assert results
+    assert results[0].name == "Calculator"
+    assert results[0].score == 1.0
+
+
+def test_analyzer_preserves_git_activity_when_analysis_has_errors(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(
+        tmp_path,
+        "config",
+        "user.name",
+        "Context Forge Test",
+    )
+    run_git(
+        tmp_path,
+        "config",
+        "user.email",
+        "test@example.com",
+    )
+
+    valid_file = tmp_path / "valid.py"
+    valid_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    invalid_file = tmp_path / "invalid.py"
+    invalid_file.write_text(
+        """
+def broken(
+"""
+    )
+
+    run_git(tmp_path, "add", "valid.py", "invalid.py")
+    run_git(tmp_path, "commit", "-m", "add valid and invalid files")
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    )
+
+    project = analyzer.analyze()
+
+    assert project.analysis_status == "analyzed"
+    assert project.git_activity is not None
+    assert project.git_activity.total_commits == 1
+    assert project.errors
+
+
+def test_git_activity_does_not_change_query_explanation(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(
+        tmp_path,
+        "config",
+        "user.name",
+        "Context Forge Test",
+    )
+    run_git(
+        tmp_path,
+        "config",
+        "user.email",
+        "test@example.com",
+    )
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "add calculator")
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    ).analyze()
+
+    assert project.git_activity is not None
+
+    results = ProjectQuery(project).search("Calculator")
+
+    assert results
+    assert results[0].score == 1.0
+    assert results[0].reason == "Exact symbol name match"
+
+
+def test_full_project_context_survives_git_persistence_and_query(
+    tmp_path: Path,
+) -> None:
+    run_git(tmp_path, "init")
+    run_git(
+        tmp_path,
+        "config",
+        "user.name",
+        "Context Forge Test",
+    )
+    run_git(
+        tmp_path,
+        "config",
+        "user.email",
+        "test@example.com",
+    )
+
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+
+def hello():
+    return "hello"
+"""
+    )
+
+    run_git(tmp_path, "add", "main.py")
+    run_git(tmp_path, "commit", "-m", "add calculator")
+
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    )
+
+    project = analyzer.analyze()
+
+    assert project.git_activity is not None
+
+    loaded = analyzer.repository.load(project.id)
+
+    assert loaded is not None
+    assert loaded.git_activity == project.git_activity
+
+    original_results = ProjectQuery(project).search("Calculator")
+    loaded_results = ProjectQuery(loaded).search("Calculator")
+
+    assert original_results == loaded_results
+
+    assert loaded_results
+    assert loaded_results[0].name == "Calculator"
+    assert loaded_results[0].score == 1.0
+    assert loaded_results[0].reason == "Exact symbol name match"

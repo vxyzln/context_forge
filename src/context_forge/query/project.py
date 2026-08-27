@@ -78,13 +78,17 @@ class ProjectQuery:
             path = directory.path.as_posix().lower()
 
             score = 0.0
+            reason = None
 
             if name == normalized_query:
                 score = 1.0
+                reason = "Exact directory name match"
             elif normalized_query in name:
                 score = 0.8
+                reason = "Directory name contains query"
             elif normalized_query in path:
                 score = 0.5
+                reason = "Directory path contains query"
 
             if score > 0:
                 results.append(
@@ -94,6 +98,7 @@ class ProjectQuery:
                         name=directory.name,
                         path=directory.path.as_posix(),
                         score=score,
+                        reason=reason,
                     )
                 )
 
@@ -102,13 +107,17 @@ class ProjectQuery:
             path = file.path.as_posix().lower()
 
             score = 0.0
+            reason = None
 
             if name == normalized_query:
                 score = 1.0
+                reason = "Exact file name match"
             elif normalized_query in name:
                 score = 0.8
+                reason = "File name contains query"
             elif normalized_query in path:
                 score = 0.5
+                reason = "File path contains query"
 
             if score > 0:
                 results.append(
@@ -118,6 +127,7 @@ class ProjectQuery:
                         name=file.name,
                         path=file.path.as_posix(),
                         score=score,
+                        reason=reason,
                     )
                 )
 
@@ -128,15 +138,20 @@ class ProjectQuery:
             qualified_name = (symbol.qualified_name or symbol.name).lower()
 
             score = 0.0
+            reason = None
 
             if name == normalized_query:
                 score = 1.0
+                reason = "Exact symbol name match"
             elif qualified_name == normalized_query:
                 score = 0.95
+                reason = "Exact qualified symbol name match"
             elif normalized_query in name:
                 score = 0.8
+                reason = "Symbol name contains query"
             elif normalized_query in qualified_name:
                 score = 0.7
+                reason = "Qualified symbol name contains query"
 
             if score > 0:
                 file = file_by_id.get(symbol.file_id)
@@ -149,6 +164,7 @@ class ProjectQuery:
                         path=file.path.as_posix() if file else None,
                         qualified_name=symbol.qualified_name,
                         score=score,
+                        reason=reason,
                     )
                 )
 

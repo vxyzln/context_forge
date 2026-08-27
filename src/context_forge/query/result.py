@@ -14,6 +14,7 @@ class SearchResult:
     result_type: SearchResultType
     entity_id: UUID
     name: str
-    path: str | None = None
+    path: str | None
+    score: float
+    reason: str | None = None
     qualified_name: str | None = None
-    score: float = 0.0

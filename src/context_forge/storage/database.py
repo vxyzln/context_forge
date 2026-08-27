@@ -25,7 +25,12 @@ class Database:
                     package_manager TEXT,
                     analysis_status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    git_total_commits INTEGER,
+                    git_total_authors INTEGER,
+                    git_files_changed INTEGER,
+                    git_total_additions INTEGER,
+                    git_total_deletions INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS directories (
@@ -102,3 +107,21 @@ class Database:
                 ON relationships(target_id);
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(projects)").fetchall()
+            }
+
+            git_columns = {
+                "git_total_commits": "INTEGER",
+                "git_total_authors": "INTEGER",
+                "git_files_changed": "INTEGER",
+                "git_total_additions": "INTEGER",
+                "git_total_deletions": "INTEGER",
+            }
+
+            for name, column_type in git_columns.items():
+                if name not in columns:
+                    connection.execute(
+                        f"ALTER TABLE projects ADD COLUMN {name} {column_type}"
+                    )

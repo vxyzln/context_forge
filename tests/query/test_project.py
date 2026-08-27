@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 
+from context_forge.git import GitActivitySummary
 from context_forge.models.directory import Directory
 from context_forge.models.file import File
 from context_forge.models.project import Project
@@ -567,3 +568,108 @@ def test_query_returns_zero_summary_for_empty_project(tmp_path: Path) -> None:
         "relationships": 0,
         "errors": 0,
     }
+
+
+def test_query_ignores_git_activity_for_existing_ranking(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+
+    project.git_activity = GitActivitySummary(
+        total_commits=10,
+        total_authors=2,
+        files_changed=5,
+        total_additions=100,
+        total_deletions=20,
+    )
+
+    query = ProjectQuery(project)
+
+    results = query.search("Calculator")
+
+    assert results
+    assert results[0].name == "Calculator"
+    assert results[0].score == 1.0
+
+
+def test_query_search_result_explains_exact_symbol_match(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("Calculator")
+
+    assert results
+    assert results[0].name == "Calculator"
+    assert results[0].score == 1.0
+    assert results[0].reason == "Exact symbol name match"
+
+
+def test_query_search_result_explains_partial_symbol_match(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("hello")
+
+    assert results
+    assert results[0].reason == "Exact symbol name match"
+
+
+def test_query_search_result_explains_qualified_symbol_match(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("Calculator.hello")
+
+    assert results
+    assert results[0].name == "hello"
+    assert results[0].score == 0.95
+    assert results[0].reason == "Exact qualified symbol name match"
+
+
+def test_query_search_result_explains_file_name_match(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    results = query.search("main.py")
+
+    assert results
+    assert results[0].result_type == SearchResultType.FILE
+    assert results[0].score == 1.0
+    assert results[0].reason == "Exact file name match"
+
+
+def test_query_result_reason_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+
+    query = ProjectQuery(project)
+
+    first = query.search("Calculator")
+    second = query.search("Calculator")
+
+    assert first == second
+    assert first
+    assert first[0].reason == "Exact symbol name match"
+
+
+def test_query_result_reason_does_not_change_score(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+
+    query = ProjectQuery(project)
+
+    results = query.search("Calculator")
+
+    assert results
+    assert results[0].score == 1.0
+    assert results[0].reason == "Exact symbol name match"

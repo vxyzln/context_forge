@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 
+from context_forge.git import GitActivitySummary
 from context_forge.graph.builder import RelationshipBuilder
 from context_forge.models.project import Project
 from context_forge.parser.python import PythonParser
@@ -329,3 +330,55 @@ def hello():
     assert loaded is not None
     assert original_relationship_count > 0
     assert loaded.relationships == []
+
+
+def test_git_activity_fields_survive_repository_round_trip(
+    tmp_path: Path,
+) -> None:
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+
+    project.git_activity = GitActivitySummary(
+        total_commits=12,
+        total_authors=3,
+        files_changed=8,
+        total_additions=145,
+        total_deletions=37,
+    )
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    repository.save(project)
+
+    loaded = repository.load(project.id)
+
+    assert loaded is not None
+    assert loaded.git_activity == project.git_activity
+
+
+def test_missing_git_activity_survives_repository_round_trip(
+    tmp_path: Path,
+) -> None:
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+
+    assert project.git_activity is None
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    repository.save(project)
+
+    loaded = repository.load(project.id)
+
+    assert loaded is not None
+    assert loaded.git_activity is None
