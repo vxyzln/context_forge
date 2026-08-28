@@ -19,6 +19,7 @@ from context_forge.context import (
     SymbolContextEnricher,
 )
 from context_forge.context.candidates import CandidateGenerator
+from context_forge.context.depth import ContextDepthSelector
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
@@ -45,6 +46,7 @@ def test_context_engine_runs_complete_pipeline() -> None:
         candidate_generator=CandidateGenerator(),
         ranker=DeterministicRanker(),
         selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
         expander=GraphExpander(),
         package_builder=ContextPackageBuilder(),
         enrichment_pipeline=ContextEnrichmentPipeline(
@@ -95,6 +97,7 @@ def test_context_engine_compresses_duplicate_units() -> None:
         candidate_generator=CandidateGenerator(),
         ranker=DeterministicRanker(),
         selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
         expander=GraphExpander(),
         package_builder=ContextPackageBuilder(),
         enrichment_pipeline=ContextEnrichmentPipeline(

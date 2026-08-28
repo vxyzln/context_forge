@@ -21,10 +21,28 @@ from context_forge.context import (
     RelationshipContextEnricher,
     SymbolContextEnricher,
 )
+from context_forge.context.candidate import ContextCandidate
 from context_forge.context.candidates import CandidateGenerator
+from context_forge.context.depth import (
+    ContextDepth,
+    ContextDepthDecision,
+    ContextDepthSelector,
+)
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
+from context_forge.models.relationship import Relationship
+
+
+class FixedDepthSelector:
+    def __init__(self, decision: ContextDepthDecision) -> None:
+        self.decision = decision
+
+    def select(
+        self,
+        candidates: list[ContextCandidate],
+    ) -> ContextDepthDecision:
+        return self.decision
 
 
 def make_engine() -> DefaultContextEngine:
@@ -32,6 +50,7 @@ def make_engine() -> DefaultContextEngine:
         candidate_generator=CandidateGenerator(),
         ranker=DeterministicRanker(),
         selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
         expander=GraphExpander(),
         package_builder=ContextPackageBuilder(),
         enrichment_pipeline=ContextEnrichmentPipeline(
@@ -151,3 +170,91 @@ def test_context_engine_returns_deterministically_assembled_package() -> None:
     assert first == second
     assert first.task == "auth"
     assert first.units
+
+
+def test_default_context_engine_uses_selected_context_depth() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("first.py"),
+        name="first.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("second.py"),
+        name="second.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    third = File(
+        project_id=project.id,
+        path=Path("third.py"),
+        name="third.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+    project.add_file(third)
+
+    project.add_relationship(
+        Relationship(
+            source_id=first.id,
+            target_id=second.id,
+            relationship_type="imports",
+        )
+    )
+
+    project.add_relationship(
+        Relationship(
+            source_id=second.id,
+            target_id=third.id,
+            relationship_type="imports",
+        )
+    )
+
+    engine = DefaultContextEngine(
+        candidate_generator=CandidateGenerator(),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=FixedDepthSelector(
+            ContextDepthDecision(
+                depth=2,
+                mode=ContextDepth.DEEP,
+                reason="test depth",
+            )
+        ),
+        expander=GraphExpander(max_depth=0),
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    package = engine.build(project, "first")
+
+    entity_ids = {unit.entity_id for unit in package.units}
+
+    assert first.id in entity_ids
+    assert second.id in entity_ids
+    assert third.id in entity_ids

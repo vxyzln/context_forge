@@ -21,6 +21,7 @@ from context_forge.context import (
     SymbolContextEnricher,
 )
 from context_forge.context.candidates import CandidateGenerator
+from context_forge.context.depth import ContextDepthSelector
 from context_forge.context.models import ContextUnit
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
@@ -32,6 +33,7 @@ def make_engine(max_context_units: int = 20) -> DefaultContextEngine:
         candidate_generator=CandidateGenerator(),
         ranker=DeterministicRanker(),
         selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
         expander=GraphExpander(),
         package_builder=ContextPackageBuilder(),
         enrichment_pipeline=ContextEnrichmentPipeline(

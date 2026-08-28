@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from context_forge.context.assembly import ContextAssembler
 from context_forge.context.candidates import CandidateGenerator
 from context_forge.context.compression_pipeline import ContextCompressionPipeline
+from context_forge.context.depth import ContextDepthSelector
 from context_forge.context.enrichment_pipeline import ContextEnrichmentPipeline
 from context_forge.context.expansion import GraphExpander
 from context_forge.context.models import ContextPackage
@@ -25,6 +26,7 @@ class DefaultContextEngine(ContextEngine):
         candidate_generator: CandidateGenerator,
         ranker: DeterministicRanker,
         selector: ContextSelector,
+        depth_selector: ContextDepthSelector,
         expander: GraphExpander,
         package_builder: ContextPackageBuilder,
         enrichment_pipeline: ContextEnrichmentPipeline,
@@ -35,6 +37,7 @@ class DefaultContextEngine(ContextEngine):
         self.candidate_generator = candidate_generator
         self.ranker = ranker
         self.selector = selector
+        self.depth_selector = depth_selector
         self.expander = expander
         self.package_builder = package_builder
         self.enrichment_pipeline = enrichment_pipeline
@@ -55,7 +58,13 @@ class DefaultContextEngine(ContextEngine):
 
         selected = self.selector.select(ranked)
 
-        expanded = self.expander.expand(project, selected)
+        depth_decision = self.depth_selector.select(selected)
+
+        expanded = self.expander.expand(
+            project,
+            selected,
+            max_depth=depth_decision.depth,
+        )
 
         selected_signals = {
             candidate.entity_id: signals[candidate.entity_id]
