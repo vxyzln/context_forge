@@ -46,15 +46,28 @@ class DefaultContextEngine(ContextEngine):
         if not task.strip():
             raise ValueError("Task cannot be empty")
 
-        candidates = self.candidate_generator.generate(project, task)
+        candidates, signals = self.candidate_generator.generate(
+            project,
+            task,
+        )
 
-        ranked = self.ranker.rank(candidates, {})
+        ranked = self.ranker.rank(candidates, signals)
 
         selected = self.selector.select(ranked)
 
         expanded = self.expander.expand(project, selected)
 
-        package = self.package_builder.build(task, expanded)
+        selected_signals = {
+            candidate.entity_id: signals[candidate.entity_id]
+            for candidate in selected
+            if candidate.entity_id in signals
+        }
+
+        package = self.package_builder.build(
+            task,
+            expanded,
+            selected_signals,
+        )
 
         enriched_units = self.enrichment_pipeline.enrich(
             project,

@@ -7,6 +7,7 @@ class RelevanceSignals:
     structural: float = 0.0
     symbol: float = 0.0
     dependency: float = 0.0
+    git: float = 0.0
 
     def total(self) -> float:
-        return self.lexical + self.structural + self.symbol + self.dependency
+        return self.lexical + self.structural + self.symbol + self.dependency + self.git

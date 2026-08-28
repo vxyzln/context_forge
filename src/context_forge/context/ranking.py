@@ -40,6 +40,7 @@ class DeterministicRanker:
                 unit_type=candidate.unit_type,
                 score=score,
                 source=candidate.source,
+                reason=candidate.reason,
             )
             for candidate, score in scored
         ]

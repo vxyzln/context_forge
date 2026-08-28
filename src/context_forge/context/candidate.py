@@ -10,6 +10,7 @@ class ContextCandidate:
     unit_type: ContextUnitType
     score: float
     source: str
+    reason: str | None = None
 
     @classmethod
     def from_search_result(
@@ -21,4 +22,5 @@ class ContextCandidate:
             unit_type=ContextUnitType(result.result_type.value),
             score=result.score,
             source="deterministic_search",
+            reason=result.reason,
         )
