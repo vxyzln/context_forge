@@ -15,6 +15,11 @@ def test_transport_config_preserves_timeout() -> None:
     assert config.timeout == 30.0
 
 
-def test_transport_config_rejects_invalid_timeout() -> None:
+def test_transport_config_rejects_zero_timeout() -> None:
     with pytest.raises(ValueError, match="timeout must be positive"):
         ProviderTransportConfig(timeout=0)
+
+
+def test_transport_config_rejects_negative_timeout() -> None:
+    with pytest.raises(ValueError, match="timeout must be positive"):
+        ProviderTransportConfig(timeout=-1.0)

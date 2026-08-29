@@ -55,6 +55,9 @@ class OllamaProvider(ContextProvider):
         except ValueError as exc:
             raise RuntimeError("Ollama provider returned invalid JSON") from exc
 
+        if not isinstance(data, dict):
+            raise TypeError("Ollama provider response must be a JSON object")
+
         message = data.get("message")
 
         if not isinstance(message, dict):

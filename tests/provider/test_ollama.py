@@ -200,3 +200,32 @@ def test_ollama_provider_raises_when_message_is_missing() -> None:
             match="missing a valid message",
         ):
             OllamaProvider().generate(make_request())
+
+
+def test_ollama_provider_rejects_non_object_json() -> None:
+    response = httpx.Response(
+        status_code=200,
+        json=[],
+        request=httpx.Request(
+            "POST",
+            "http://localhost:11434/api/chat",
+        ),
+    )
+
+    with patch("context_forge.provider.ollama.httpx.post") as post:
+        post.return_value = response
+
+        with pytest.raises(
+            TypeError,
+            match="response must be a JSON object",
+        ):
+            OllamaProvider().generate(make_request())
+
+
+def test_ollama_provider_uses_default_transport_timeout() -> None:
+    with patch("context_forge.provider.ollama.httpx.post") as post:
+        post.return_value = make_response()
+
+        OllamaProvider().generate(make_request())
+
+    assert post.call_args.kwargs["timeout"] == 60.0

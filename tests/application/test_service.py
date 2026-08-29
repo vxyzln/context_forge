@@ -8,6 +8,7 @@ from context_forge.context import (
 from context_forge.models.project import Project
 from context_forge.provider import (
     ContextProvider,
+    DeterministicProvider,
     GenerationRequest,
     GenerationResponse,
     ProviderConfig,
@@ -246,3 +247,31 @@ def test_service_is_repeatable() -> None:
     assert second is response
     assert len(provider.requests) == 2
     assert provider.requests[0] == provider.requests[1]
+
+
+def test_service_integrates_with_deterministic_provider() -> None:
+    project = make_project()
+
+    package = ContextPackage(
+        task="authenticate user",
+        units=(),
+    )
+
+    engine = StubContextEngine(package)
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=DeterministicProvider(),
+    )
+
+    response = service.generate(
+        project=project,
+        task="authenticate user",
+        config=ProviderConfig(model="deterministic-test"),
+    )
+
+    assert response.provider == "deterministic"
+    assert response.model == "deterministic-test"
+    assert response.content.startswith("Task: authenticate user")
+    assert "Context received:" in response.content
