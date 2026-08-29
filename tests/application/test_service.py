@@ -13,6 +13,11 @@ from context_forge.provider import (
     GenerationResponse,
     ProviderConfig,
 )
+from context_forge.task import (
+    TaskInterpretation,
+    TaskState,
+    TaskValidation,
+)
 
 
 class StubContextEngine:
@@ -275,3 +280,141 @@ def test_service_integrates_with_deterministic_provider() -> None:
     assert response.model == "deterministic-test"
     assert response.content.startswith("Task: authenticate user")
     assert "Context received:" in response.content
+
+
+class StubTaskUnderstanding:
+    def __init__(self, interpretation: TaskInterpretation) -> None:
+        self.interpretation = interpretation
+        self.tasks: list[str] = []
+
+    def understand(self, task: str) -> TaskInterpretation:
+        self.tasks.append(task)
+        return self.interpretation
+
+
+class StubTaskValidator:
+    def __init__(self, validation: TaskValidation) -> None:
+        self.validation = validation
+        self.interpretations: list[TaskInterpretation] = []
+
+    def validate(
+        self,
+        interpretation: TaskInterpretation,
+    ) -> TaskValidation:
+        self.interpretations.append(interpretation)
+        return self.validation
+
+
+def make_task_interpretation() -> TaskInterpretation:
+    return TaskInterpretation(
+        task="authenticate user",
+        intent="feature",
+        target="authentication",
+        concepts=("authentication",),
+        requested_action="implement",
+        constraints=(),
+        ambiguity=None,
+    )
+
+
+def test_service_validates_task_before_building_context() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    interpretation = make_task_interpretation()
+    understanding = StubTaskUnderstanding(interpretation)
+    validator = StubTaskValidator(TaskValidation(state=TaskState.CLEAR))
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+        task_understanding=understanding,
+        task_validator=validator,
+    )
+
+    service.generate(
+        project=project,
+        task="authenticate user",
+        config=ProviderConfig(model="test-model"),
+    )
+
+    assert understanding.tasks == ["authenticate user"]
+    assert validator.interpretations == [interpretation]
+    assert engine.calls == [(project, "authenticate user")]
+
+
+def test_service_rejects_ambiguous_task_before_context_generation() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    understanding = StubTaskUnderstanding(make_task_interpretation())
+    validator = StubTaskValidator(
+        TaskValidation(
+            state=TaskState.AMBIGUOUS,
+            reasons=("target is unclear",),
+        )
+    )
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+        task_understanding=understanding,
+        task_validator=validator,
+    )
+
+    try:
+        service.generate(
+            project=project,
+            task="authenticate user",
+            config=ProviderConfig(model="test-model"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "task validation failed: ambiguous"
+    else:
+        raise AssertionError("Expected ValueError")
+
+    assert engine.calls == []
+    assert provider.requests == []
+
+
+def test_service_rejects_insufficient_task_before_context_generation() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    understanding = StubTaskUnderstanding(make_task_interpretation())
+    validator = StubTaskValidator(
+        TaskValidation(
+            state=TaskState.INSUFFICIENT,
+            reasons=("task intent is missing",),
+        )
+    )
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+        task_understanding=understanding,
+        task_validator=validator,
+    )
+
+    try:
+        service.generate(
+            project=project,
+            task="authenticate user",
+            config=ProviderConfig(model="test-model"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "task validation failed: insufficient"
+    else:
+        raise AssertionError("Expected ValueError")
+
+    assert engine.calls == []
+    assert provider.requests == []
