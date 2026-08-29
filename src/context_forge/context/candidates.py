@@ -11,12 +11,17 @@ class CandidateGenerator:
         self,
         project: Project,
         task: str,
+        interpretation=None,
     ) -> tuple[list[ContextCandidate], dict[object, RelevanceSignals]]:
         results = ProjectQuery(project).search(task)
 
         candidates = [ContextCandidate.from_search_result(result) for result in results]
 
-        signals = self._build_signals(project, candidates)
+        signals = self._build_signals(
+            project,
+            candidates,
+            interpretation,
+        )
 
         return candidates, signals
 
@@ -24,6 +29,7 @@ class CandidateGenerator:
         self,
         project: Project,
         candidates: list[ContextCandidate],
+        interpretation=None,
     ) -> dict[object, RelevanceSignals]:
         git_relevance = GitRelevance(self._get_git_commits(project))
 
@@ -39,9 +45,38 @@ class CandidateGenerator:
 
             signals[candidate.entity_id] = RelevanceSignals(
                 git=git_relevance.score(file),
+                task=self._task_relevance(file, interpretation),
             )
 
         return signals
+
+    @staticmethod
+    def _task_relevance(file, interpretation) -> float:
+        if interpretation is None:
+            return 0.0
+
+        text = " ".join(
+            (
+                file.name,
+                str(file.path),
+            )
+        ).lower()
+
+        target = (interpretation.target or "").lower()
+
+        if target and target in text:
+            return 1.0
+
+        concepts = tuple(
+            concept.lower() for concept in interpretation.concepts if concept.strip()
+        )
+
+        if not concepts:
+            return 0.0
+
+        concept_matches = sum(concept in text for concept in concepts)
+
+        return min(1.0, concept_matches / len(concepts))
 
     @staticmethod
     def _get_git_commits(project: Project):

@@ -5,6 +5,7 @@ from context_forge.context import (
     ContextPackage,
     ContextPackageSerializer,
 )
+from context_forge.context.request import ContextRequest
 from context_forge.models.project import Project
 from context_forge.provider import (
     ContextProvider,
@@ -23,10 +24,10 @@ from context_forge.task import (
 class StubContextEngine:
     def __init__(self, package: ContextPackage) -> None:
         self.package = package
-        self.calls: list[tuple[Project, str]] = []
+        self.calls: list[ContextRequest] = []
 
-    def build(self, project: Project, task: str) -> ContextPackage:
-        self.calls.append((project, task))
+    def build(self, request: ContextRequest) -> ContextPackage:
+        self.calls.append(request)
         return self.package
 
 
@@ -82,7 +83,12 @@ def test_service_builds_context_with_engine() -> None:
         config=config,
     )
 
-    assert engine.calls == [(project, "authenticate user")]
+    assert engine.calls == [
+        ContextRequest(
+            project=project,
+            task="authenticate user",
+        )
+    ]
 
 
 def test_service_serializes_context_package() -> None:
@@ -343,7 +349,13 @@ def test_service_validates_task_before_building_context() -> None:
 
     assert understanding.tasks == ["authenticate user"]
     assert validator.interpretations == [interpretation]
-    assert engine.calls == [(project, "authenticate user")]
+    assert engine.calls == [
+        ContextRequest(
+            project=project,
+            task="authenticate user",
+            interpretation=interpretation
+        )
+    ]
 
 
 def test_service_rejects_ambiguous_task_before_context_generation() -> None:

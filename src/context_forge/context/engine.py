@@ -9,14 +9,14 @@ from context_forge.context.expansion import GraphExpander
 from context_forge.context.models import ContextPackage
 from context_forge.context.package import ContextPackageBuilder
 from context_forge.context.ranking import DeterministicRanker
+from context_forge.context.request import ContextRequest
 from context_forge.context.selection import ContextSelector
-from context_forge.models.project import Project
 
 
 class ContextEngine(ABC):
     @abstractmethod
-    def build(self, project: Project, task: str) -> ContextPackage:
-        """Build a context package for a project task."""
+    def build(self, request: ContextRequest) -> ContextPackage:
+        """Build a context package for a context request."""
         raise NotImplementedError
 
 
@@ -45,13 +45,14 @@ class DefaultContextEngine(ContextEngine):
         self.assembly = assembly
         self.max_context_units = max_context_units
 
-    def build(self, project: Project, task: str) -> ContextPackage:
-        if not task.strip():
+    def build(self, request: ContextRequest) -> ContextPackage:
+        if not request.task.strip():
             raise ValueError("Task cannot be empty")
 
         candidates, signals = self.candidate_generator.generate(
-            project,
-            task,
+            request.project,
+            request.task,
+            request.interpretation,
         )
 
         ranked = self.ranker.rank(candidates, signals)
@@ -61,7 +62,7 @@ class DefaultContextEngine(ContextEngine):
         depth_decision = self.depth_selector.select(selected)
 
         expanded = self.expander.expand(
-            project,
+            request.project,
             selected,
             max_depth=depth_decision.depth,
         )
@@ -73,13 +74,13 @@ class DefaultContextEngine(ContextEngine):
         }
 
         package = self.package_builder.build(
-            task,
+            request.task,
             expanded,
             selected_signals,
         )
 
         enriched_units = self.enrichment_pipeline.enrich(
-            project,
+            request.project,
             list(package.units),
         )
 

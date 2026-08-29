@@ -7,6 +7,7 @@ from context_forge.context import (
     ContextEnrichmentPipeline,
     ContextPackageBuilder,
     ContextPriorityOrdering,
+    ContextRequest,
     ContextSelector,
     ContextUnitType,
     DefaultContextEngine,
@@ -67,7 +68,12 @@ def test_context_engine_runs_complete_pipeline() -> None:
         ),
     )
 
-    package = engine.build(project, "auth")
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="auth",
+        )
+    )
 
     assert package.task == "auth"
     assert len(package.units) == 1
@@ -118,7 +124,12 @@ def test_context_engine_compresses_duplicate_units() -> None:
         ),
     )
 
-    package = engine.build(project, "auth")
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="auth",
+        )
+    )
 
     assert package.units
     assert len(package.units) == len(

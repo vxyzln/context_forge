@@ -1,4 +1,5 @@
 from context_forge.context.engine import ContextEngine
+from context_forge.context.request import ContextRequest
 from context_forge.context.serialization import ContextPackageSerializer
 from context_forge.models.project import Project
 from context_forge.provider.base import ContextProvider
@@ -8,8 +9,6 @@ from context_forge.task import TaskState, TaskUnderstandingService, TaskValidato
 
 
 class ContextGenerationService:
-    """Generate a provider response from project context."""
-
     def __init__(
         self,
         engine: ContextEngine,
@@ -30,6 +29,8 @@ class ContextGenerationService:
         task: str,
         config: ProviderConfig,
     ) -> GenerationResponse:
+        interpretation = None
+
         if self.task_understanding is not None and self.task_validator is not None:
             interpretation = self.task_understanding.understand(task)
             validation = self.task_validator.validate(interpretation)
@@ -37,7 +38,14 @@ class ContextGenerationService:
             if validation.state.value != TaskState.CLEAR:
                 raise ValueError(f"task validation failed: {validation.state.value}")
 
-        package = self.engine.build(project, task)
+        package = self.engine.build(
+            ContextRequest(
+                project=project,
+                task=task,
+                interpretation=interpretation,
+            )
+        )
+
         context = self.serializer.serialize(package)
 
         request = GenerationRequest(

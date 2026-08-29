@@ -32,6 +32,7 @@ from context_forge.context.priority import ContextPriority
 from context_forge.context.priority_ordering import ContextPriorityOrdering
 from context_forge.context.ranking import DeterministicRanker
 from context_forge.context.relationship_enrichment import RelationshipContextEnricher
+from context_forge.context.request import ContextRequest
 from context_forge.context.selection import ContextSelector
 from context_forge.context.serialization import ContextPackageSerializer
 from context_forge.context.signals import RelevanceSignals
@@ -56,6 +57,7 @@ __all__ = [
     "ContextPackageSerializer",
     "ContextPriority",
     "ContextPriorityOrdering",
+    "ContextRequest",
     "ContextSelector",
     "ContextSignal",
     "ContextUnit",

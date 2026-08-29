@@ -9,6 +9,7 @@ from context_forge.context import (
     ContextPackage,
     ContextPackageBuilder,
     ContextPriorityOrdering,
+    ContextRequest,
     ContextSelector,
     ContextUnitType,
     DefaultContextEngine,
@@ -79,7 +80,12 @@ def make_project() -> tuple[Project, File]:
 def test_stage5_engine_returns_final_context_package() -> None:
     project, file = make_project()
 
-    package = make_engine().build(project, "auth")
+    package = make_engine().build(
+        ContextRequest(
+            project=project,
+            task="auth",
+        )
+    )
 
     assert isinstance(package, ContextPackage)
     assert package.task == "auth"
@@ -90,7 +96,12 @@ def test_stage5_engine_returns_final_context_package() -> None:
 def test_stage5_engine_produces_unique_units() -> None:
     project, _ = make_project()
 
-    package = make_engine().build(project, "auth")
+    package = make_engine().build(
+        ContextRequest(
+            project=project,
+            task="auth",
+        )
+    )
 
     identities = {(unit.entity_id, unit.unit_type) for unit in package.units}
 
@@ -101,8 +112,13 @@ def test_stage5_engine_is_deterministic() -> None:
     project, _ = make_project()
     engine = make_engine()
 
-    first = engine.build(project, "auth")
-    second = engine.build(project, "auth")
+    request = ContextRequest(
+        project=project,
+        task="auth",
+    )
+
+    first = engine.build(request)
+    second = engine.build(request)
 
     assert first == second
 
@@ -110,7 +126,12 @@ def test_stage5_engine_is_deterministic() -> None:
 def test_stage5_engine_respects_context_budget() -> None:
     project, _ = make_project()
 
-    package = make_engine(max_context_units=1).build(project, "auth")
+    package = make_engine(max_context_units=1).build(
+        ContextRequest(
+            project=project,
+            task="auth",
+        )
+    )
 
     assert len(package.units) <= 1
 
@@ -118,7 +139,12 @@ def test_stage5_engine_respects_context_budget() -> None:
 def test_stage5_engine_preserves_package_task() -> None:
     project, _ = make_project()
 
-    package = make_engine().build(project, "authentication")
+    package = make_engine().build(
+        ContextRequest(
+            project=project,
+            task="authentication",
+        )
+    )
 
     assert package.task == "authentication"
 

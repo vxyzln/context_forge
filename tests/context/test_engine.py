@@ -10,6 +10,7 @@ from context_forge.context import (
     ContextEnrichmentPipeline,
     ContextPackageBuilder,
     ContextPriorityOrdering,
+    ContextRequest,
     ContextSelector,
     ContextUnitType,
     DefaultContextEngine,
@@ -92,8 +93,12 @@ def test_default_context_engine_builds_context_from_project() -> None:
 
     project.add_file(file)
 
-    package = make_engine().build(project, "auth")
-
+    package = make_engine().build(
+        ContextRequest(
+            project=project,
+            task="auth",
+        )
+    )
     assert package.task == "auth"
     assert len(package.units) == 1
     assert package.units[0].entity_id == file.id
@@ -107,7 +112,12 @@ def test_default_context_engine_rejects_empty_task() -> None:
     )
 
     with pytest.raises(ValueError, match="Task cannot be empty"):
-        make_engine().build(project, "   ")
+        make_engine().build(
+            ContextRequest(
+                project=project,
+                task="   ",
+            )
+        )
 
 
 def test_default_context_engine_returns_context_package() -> None:
@@ -116,7 +126,12 @@ def test_default_context_engine_returns_context_package() -> None:
         root_path=Path("/tmp/context-forge-test"),
     )
 
-    package = make_engine().build(project, "authentication")
+    package = make_engine().build(
+        ContextRequest(
+           project=project,
+            task="authentication",
+        )
+    )
 
     assert package.task == "authentication"
     assert isinstance(package.units, tuple)
@@ -139,7 +154,12 @@ def test_context_engine_enriches_package_units() -> None:
 
     project.add_file(file)
 
-    package = make_engine().build(project, "auth")
+    package = make_engine().build(
+        ContextRequest(
+            project=project,
+            task="auth",
+        )
+    )
 
     assert package.units
     assert package.units[0].facts
@@ -164,8 +184,13 @@ def test_context_engine_returns_deterministically_assembled_package() -> None:
 
     engine = make_engine()
 
-    first = engine.build(project, "auth")
-    second = engine.build(project, "auth")
+    request = ContextRequest(
+        project=project,
+        task="auth",
+    )
+
+    first = engine.build(request)
+    second = engine.build(request)
 
     assert first == second
     assert first.task == "auth"
@@ -251,7 +276,12 @@ def test_default_context_engine_uses_selected_context_depth() -> None:
         ),
     )
 
-    package = engine.build(project, "first")
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="first",
+        )
+    )
 
     entity_ids = {unit.entity_id for unit in package.units}
 

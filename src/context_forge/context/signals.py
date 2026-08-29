@@ -8,6 +8,14 @@ class RelevanceSignals:
     symbol: float = 0.0
     dependency: float = 0.0
     git: float = 0.0
+    task: float = 0.0
 
     def total(self) -> float:
-        return self.lexical + self.structural + self.symbol + self.dependency + self.git
+        return (
+            self.lexical
+            + self.structural
+            + self.symbol
+            + self.dependency
+            + self.git
+            + self.task
+        )
