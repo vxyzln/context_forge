@@ -19,7 +19,7 @@ from context_forge.context import (
     SymbolContextEnricher,
 )
 from context_forge.context.depth import ContextDepthSelector
-from context_forge.provider import DeterministicProvider, ProviderConfig
+from context_forge.provider import ProviderConfig, ProviderFactory
 from context_forge.task import TaskUnderstandingService, TaskValidator
 
 
@@ -50,14 +50,21 @@ def build_context_engine() -> DefaultContextEngine:
     )
 
 
-def build_generation_service() -> ContextGenerationService:
+def build_generation_service(
+    generation_config: ProviderConfig,
+) -> ContextGenerationService:
+    task_understanding_config = ProviderConfig(
+        provider="deterministic",
+        model="deterministic-task",
+    )
+
     return ContextGenerationService(
         engine=build_context_engine(),
         serializer=ContextPackageSerializer(),
-        provider=DeterministicProvider(),
+        provider=ProviderFactory.create(generation_config),
         task_understanding=TaskUnderstandingService(
-            provider=DeterministicProvider(),
-            config=ProviderConfig(model="deterministic-task"),
+            provider=ProviderFactory.create(task_understanding_config),
+            config=task_understanding_config,
         ),
         task_validator=TaskValidator(),
     )

@@ -12,8 +12,6 @@ from context_forge.provider.transport import ProviderTransportConfig
 
 
 class OllamaProvider(ContextProvider):
-    """Context provider backed by a local Ollama server."""
-
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
@@ -47,6 +45,18 @@ class OllamaProvider(ContextProvider):
                 timeout=self.transport.timeout,
             )
             response.raise_for_status()
+
+        except httpx.TimeoutException as exc:
+            raise RuntimeError(
+                f"Ollama provider request timed out after "
+                f"{self.transport.timeout:g} seconds"
+            ) from exc
+
+        except httpx.ConnectError as exc:
+            raise RuntimeError(
+                f"Ollama provider could not connect to {self.base_url}"
+            ) from exc
+
         except httpx.HTTPError as exc:
             raise RuntimeError(f"Ollama provider request failed: {exc}") from exc
 
@@ -67,6 +77,9 @@ class OllamaProvider(ContextProvider):
 
         if not isinstance(content, str):
             raise TypeError("Ollama provider response is missing message content")
+
+        if not content.strip():
+            raise ValueError("Ollama provider response contains empty message content")
 
         thinking = message.get("thinking")
         reasoning = thinking if isinstance(thinking, str) and thinking else None

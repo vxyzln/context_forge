@@ -1,6 +1,7 @@
 from context_forge.provider.base import ContextProvider
 from context_forge.provider.config import ProviderConfig
 from context_forge.provider.deterministic import DeterministicProvider
+from context_forge.provider.factory import ProviderFactory
 from context_forge.provider.models import (
     GenerationRequest,
     GenerationResponse,
@@ -16,6 +17,7 @@ __all__ = [
     "GenerationResponse",
     "OllamaProvider",
     "ProviderConfig",
+    "ProviderFactory",
     "ProviderTransportConfig",
     "ProviderUsage",
 ]

@@ -11,7 +11,12 @@ def test_generation_service_runs_end_to_end() -> None:
         root_path=Path("/tmp/context-forge-test"),
     )
 
-    service = build_generation_service()
+    service = build_generation_service(
+        ProviderConfig(
+            provider="deterministic",
+            model="deterministic",
+        )
+    )
 
     response = service.generate(
         project=project,
@@ -31,7 +36,12 @@ def test_generation_service_rejects_empty_task() -> None:
         root_path=Path("/tmp/context-forge-test"),
     )
 
-    service = build_generation_service()
+    service = build_generation_service(
+        ProviderConfig(
+            provider="deterministic",
+            model="deterministic",
+        )
+    )
 
     try:
         service.generate(

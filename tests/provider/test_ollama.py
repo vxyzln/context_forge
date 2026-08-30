@@ -159,11 +159,14 @@ def test_ollama_provider_handles_missing_usage() -> None:
     assert result.usage.total_tokens is None
 
 
-def test_ollama_provider_raises_on_http_error() -> None:
+def test_ollama_provider_raises_on_connection_error() -> None:
     with patch("context_forge.provider.ollama.httpx.post") as post:
         post.side_effect = httpx.ConnectError("connection refused")
 
-        with pytest.raises(RuntimeError, match="Ollama provider request failed"):
+        with pytest.raises(
+            RuntimeError,
+            match="Ollama provider could not connect to http://localhost:11434",
+        ):
             OllamaProvider().generate(make_request())
 
 
@@ -229,3 +232,40 @@ def test_ollama_provider_uses_default_transport_timeout() -> None:
         OllamaProvider().generate(make_request())
 
     assert post.call_args.kwargs["timeout"] == 60.0
+
+
+def test_ollama_provider_raises_on_timeout() -> None:
+    with patch("context_forge.provider.ollama.httpx.post") as post:
+        post.side_effect = httpx.ReadTimeout("request timed out")
+
+        with pytest.raises(
+            RuntimeError,
+            match="Ollama provider request timed out after 60 seconds",
+        ):
+            OllamaProvider().generate(make_request())
+
+
+def test_ollama_provider_rejects_empty_content() -> None:
+    response = httpx.Response(
+        status_code=200,
+        json={
+            "model": "qwen3:8b",
+            "message": {
+                "role": "assistant",
+                "content": "   ",
+            },
+        },
+        request=httpx.Request(
+            "POST",
+            "http://localhost:11434/api/chat",
+        ),
+    )
+
+    with patch("context_forge.provider.ollama.httpx.post") as post:
+        post.return_value = response
+
+        with pytest.raises(
+            ValueError,
+            match="response contains empty message content",
+        ):
+            OllamaProvider().generate(make_request())
