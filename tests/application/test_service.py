@@ -349,13 +349,6 @@ def test_service_validates_task_before_building_context() -> None:
 
     assert understanding.tasks == ["authenticate user"]
     assert validator.interpretations == [interpretation]
-    assert engine.calls == [
-        ContextRequest(
-            project=project,
-            task="authenticate user",
-            interpretation=interpretation
-        )
-    ]
 
 
 def test_service_rejects_ambiguous_task_before_context_generation() -> None:
@@ -430,3 +423,36 @@ def test_service_rejects_insufficient_task_before_context_generation() -> None:
 
     assert engine.calls == []
     assert provider.requests == []
+
+
+def test_service_passes_task_interpretation_to_context_engine() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    interpretation = make_task_interpretation()
+    understanding = StubTaskUnderstanding(interpretation)
+    validator = StubTaskValidator(TaskValidation(state=TaskState.CLEAR))
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+        task_understanding=understanding,
+        task_validator=validator,
+    )
+
+    service.generate(
+        project=project,
+        task="authenticate user",
+        config=ProviderConfig(model="test-model"),
+    )
+
+    assert engine.calls == [
+        ContextRequest(
+            project=project,
+            task="authenticate user",
+            interpretation=interpretation,
+        )
+    ]

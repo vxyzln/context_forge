@@ -24,6 +24,7 @@ from context_forge.context.depth import ContextDepthSelector
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
+from context_forge.task import TaskInterpretation
 
 
 def test_context_engine_runs_complete_pipeline() -> None:
@@ -135,3 +136,66 @@ def test_context_engine_compresses_duplicate_units() -> None:
     assert len(package.units) == len(
         {(unit.entity_id, unit.unit_type) for unit in package.units}
     )
+
+
+def test_context_engine_uses_task_interpretation() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(file)
+
+    interpretation = TaskInterpretation(
+        task="auth",
+        intent="feature",
+        target="auth",
+        concepts=("auth",),
+        requested_action="implement",
+        constraints=(),
+    )
+
+    engine = DefaultContextEngine(
+        candidate_generator=CandidateGenerator(),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="auth",
+            interpretation=interpretation,
+        )
+    )
+
+    assert package.task == "auth"
+    assert package.units
+    assert package.units[0].entity_id == file.id
