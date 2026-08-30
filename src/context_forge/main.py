@@ -1,6 +1,8 @@
 from pathlib import Path
 
+from context_forge.application import build_generation_service
 from context_forge.pipeline.analyzer import ProjectAnalyzer
+from context_forge.provider import ProviderConfig
 
 
 def main() -> None:
@@ -12,10 +14,16 @@ def main() -> None:
         database_path=database_path,
     ).analyze()
 
-    print(f"Analyzed: {project.name}")
-    print(f"Files: {len(project.files)}")
-    print(f"Symbols: {len(project.symbols)}")
-    print(f"Relationships: {len(project.relationships)}")
+    task = input("Task: ").strip()
+
+    service = build_generation_service()
+
+    response = service.generate(
+        project=project, task=task, config=ProviderConfig(model="deterministic")
+    )
+
+    print()
+    print(response.content)
 
 
 if __name__ == "__main__":

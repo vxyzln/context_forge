@@ -10,6 +10,9 @@ dependencies = [
     "uvicorn",
 ]
 
+[project.scripts]
+context-forge = "context_forge.main:main"
+
 [dependency-groups]
 dev = [
     "pytest",

@@ -128,7 +128,7 @@ def test_default_context_engine_returns_context_package() -> None:
 
     package = make_engine().build(
         ContextRequest(
-           project=project,
+            project=project,
             task="authentication",
         )
     )

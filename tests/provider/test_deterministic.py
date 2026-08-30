@@ -1,3 +1,5 @@
+import json
+
 from context_forge.provider import (
     DeterministicProvider,
     GenerationRequest,
@@ -30,3 +32,26 @@ def test_deterministic_provider_is_repeatable() -> None:
     second = provider.generate(make_request())
 
     assert first == second
+
+
+def test_deterministic_provider_returns_task_interpretation() -> None:
+    provider = DeterministicProvider()
+
+    request = GenerationRequest(
+        task="Interpret the following software-development task. Fix scrolling.",
+        context="",
+        config=ProviderConfig(model="deterministic-test"),
+    )
+
+    response = provider.generate(request)
+
+    assert response.provider == "deterministic"
+    assert response.model == "deterministic-test"
+    assert response.metadata["purpose"] == "task_interpretation"
+
+    data = json.loads(response.content)
+
+    assert data["intent"] == "development"
+    assert data["requested_action"] == "work"
+    assert data["ambiguity"] is None
+    assert "scrolling" in data["concepts"]
