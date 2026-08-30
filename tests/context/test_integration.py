@@ -24,7 +24,35 @@ from context_forge.context.depth import ContextDepthSelector
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
+from context_forge.pipeline.analyzer import ProjectAnalyzer
 from context_forge.task import TaskInterpretation
+
+
+def make_engine() -> DefaultContextEngine:
+    return DefaultContextEngine(
+        candidate_generator=CandidateGenerator(),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
 
 
 def test_context_engine_runs_complete_pipeline() -> None:
@@ -199,3 +227,47 @@ def test_context_engine_uses_task_interpretation() -> None:
     assert package.task == "auth"
     assert package.units
     assert package.units[0].entity_id == file.id
+
+
+def test_context_engine_selects_file_from_task_interpretation(
+    tmp_path: Path,
+) -> None:
+    source_file = tmp_path / "calculator.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+""",
+        encoding="utf-8",
+    )
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    ).analyze()
+
+    interpretation = TaskInterpretation(
+        task="Explain the Calculator class",
+        intent="question",
+        target="Calculator",
+        concepts=("Calculator",),
+        requested_action="explain",
+        constraints=(),
+        ambiguity=None,
+    )
+
+    package = make_engine().build(
+        ContextRequest(
+            project=project,
+            task="Explain the Calculator class",
+            interpretation=interpretation,
+        )
+    )
+
+    calculator_file = next(
+        file for file in project.files if file.name == "calculator.py"
+    )
+
+    assert package.units
+    assert calculator_file.id in {unit.entity_id for unit in package.units}

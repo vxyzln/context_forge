@@ -191,3 +191,53 @@ class Calculator:
     context_entity_ids = {unit["entity_id"] for unit in payload["units"]}
 
     assert str(calculator_file.id) in context_entity_ids
+
+
+def test_generation_service_runs_real_python_project_with_deterministic_provider(
+    tmp_path: Path,
+) -> None:
+    app_directory = tmp_path / "app"
+    app_directory.mkdir()
+
+    (app_directory / "__init__.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+
+    (app_directory / "auth.py").write_text(
+        """
+def authenticate(username, password):
+    return username == "admin" and password == "secret"
+""",
+        encoding="utf-8",
+    )
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    ).analyze()
+
+    assert project.files
+    assert any(file.name == "auth.py" for file in project.files)
+    assert any(symbol.name == "authenticate" for symbol in project.symbols)
+
+    service = build_generation_service(
+        ProviderConfig(
+            provider="deterministic",
+            model="deterministic-test",
+        )
+    )
+
+    response = service.generate(
+        project=project,
+        task="Explain the authenticate function",
+        config=ProviderConfig(
+            provider="deterministic",
+            model="deterministic-test",
+        ),
+    )
+
+    assert response.provider == "deterministic"
+    assert response.model == "deterministic-test"
+    assert response.content
+    assert "Explain the authenticate function" in response.content

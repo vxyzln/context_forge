@@ -7,6 +7,7 @@ from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.pipeline.analyzer import ProjectAnalyzer
+from context_forge.task import TaskInterpretation
 
 
 def run_git(path: Path, *arguments: str) -> None:
@@ -155,3 +156,45 @@ def authenticate():
     git_signal = signals[candidates[0].entity_id]
 
     assert git_signal.git == 0.1
+
+
+def test_candidate_generator_uses_task_interpretation_for_symbols(
+    tmp_path: Path,
+) -> None:
+    source_file = tmp_path / "calculator.py"
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a, b):
+        return a + b
+""",
+        encoding="utf-8",
+    )
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    ).analyze()
+
+    interpretation = TaskInterpretation(
+        task="Where is Calculator used?",
+        intent="question",
+        target="Calculator",
+        concepts=("Calculator",),
+        requested_action="find",
+        constraints=(),
+        ambiguity=None,
+    )
+
+    _, signals = CandidateGenerator().generate(
+        project,
+        "Where is Calculator used?",
+        interpretation=interpretation,
+    )
+
+    calculator_file = next(
+        file for file in project.files if file.name == "calculator.py"
+    )
+
+    assert calculator_file.id in signals
+    assert signals[calculator_file.id].task == 1.0
