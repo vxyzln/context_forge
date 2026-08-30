@@ -996,3 +996,143 @@ def hello():
     assert loaded_results[0].name == "Calculator"
     assert loaded_results[0].score == 1.0
     assert loaded_results[0].reason == "Exact symbol name match"
+
+
+def test_analyzer_builds_complete_multi_file_python_project(
+    tmp_path: Path,
+) -> None:
+    app_directory = tmp_path / "app"
+    services_directory = app_directory / "services"
+
+    services_directory.mkdir(parents=True)
+
+    (app_directory / "__init__.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+
+    (services_directory / "__init__.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+
+    (services_directory / "auth.py").write_text(
+        """
+class AuthService:
+    def authenticate(self, username: str) -> bool:
+        return bool(username)
+""",
+        encoding="utf-8",
+    )
+
+    (app_directory / "main.py").write_text(
+        """
+from app.services.auth import AuthService
+
+
+def run(username: str) -> bool:
+    service = AuthService()
+    return service.authenticate(username)
+""",
+        encoding="utf-8",
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert project.analysis_status == "analyzed"
+    assert not project.errors
+
+    file_paths = {file.path for file in project.files}
+
+    assert Path("app/__init__.py") in file_paths
+    assert Path("app/main.py") in file_paths
+    assert Path("app/services/__init__.py") in file_paths
+    assert Path("app/services/auth.py") in file_paths
+
+    symbol_names = {symbol.name for symbol in project.symbols}
+
+    assert "AuthService" in symbol_names
+    assert "authenticate" in symbol_names
+    assert "run" in symbol_names
+
+    assert project.imports
+
+    relationship_types = {
+        relationship.relationship_type for relationship in project.relationships
+    }
+
+    assert "defines" in relationship_types
+
+
+def test_analyzer_builds_relationships_across_python_files(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "auth.py").write_text(
+        """
+def authenticate(username: str) -> bool:
+    return bool(username)
+""",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "main.py").write_text(
+        """
+from auth import authenticate
+
+
+def run(username: str) -> bool:
+    return authenticate(username)
+""",
+        encoding="utf-8",
+    )
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    ).analyze()
+
+    assert project.analysis_status == "analyzed"
+    assert not project.errors
+
+    relationship_types = {
+        relationship.relationship_type for relationship in project.relationships
+    }
+
+    assert "defines" in relationship_types
+    assert "imports" in relationship_types
+
+
+def test_analyzer_persists_python_analysis(
+    tmp_path: Path,
+) -> None:
+    source_file = tmp_path / "main.py"
+
+    source_file.write_text(
+        """
+class Calculator:
+    def add(self, a: int, b: int) -> int:
+        return a + b
+""",
+        encoding="utf-8",
+    )
+
+    analyzer = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    )
+
+    project = analyzer.analyze()
+    loaded = analyzer.repository.load(project.id)
+
+    assert loaded is not None
+    assert loaded.analysis_status == "analyzed"
+
+    loaded_symbol_names = {symbol.name for symbol in loaded.symbols}
+
+    assert "Calculator" in loaded_symbol_names
+    assert "add" in loaded_symbol_names
