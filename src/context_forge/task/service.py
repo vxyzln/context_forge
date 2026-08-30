@@ -71,20 +71,27 @@ class TaskUnderstandingService:
                 "provider returned a task interpretation that is not an object"
             )
 
+        expected_fields = {
+            "intent",
+            "target",
+            "concepts",
+            "requested_action",
+            "constraints",
+            "ambiguity",
+        }
+
+        missing_fields = expected_fields - data.keys()
+        if missing_fields:
+            raise ValueError(
+                "provider returned incomplete task interpretation: "
+                + ", ".join(sorted(missing_fields))
+            )
+
         return TaskInterpretation(
             task=task,
-            intent=TaskUnderstandingService._require_string(
-                data,
-                "intent",
-            ),
-            target=TaskUnderstandingService._optional_string(
-                data,
-                "target",
-            ),
-            concepts=TaskUnderstandingService._string_tuple(
-                data,
-                "concepts",
-            ),
+            intent=TaskUnderstandingService._require_string(data, "intent"),
+            target=TaskUnderstandingService._optional_string(data, "target"),
+            concepts=TaskUnderstandingService._string_tuple(data, "concepts"),
             requested_action=TaskUnderstandingService._optional_string(
                 data,
                 "requested_action",
@@ -109,6 +116,9 @@ class TaskUnderstandingService:
         if not isinstance(value, str):
             raise TypeError(f"task interpretation field '{field}' must be a string")
 
+        if not value.strip():
+            raise ValueError(f"task interpretation field '{field}' must not be empty")
+
         return value
 
     @staticmethod
@@ -126,6 +136,9 @@ class TaskUnderstandingService:
                 f"task interpretation field '{field}' must be a string or null"
             )
 
+        if not value.strip():
+            raise ValueError(f"task interpretation field '{field}' must not be empty")
+
         return value
 
     @staticmethod
@@ -141,6 +154,11 @@ class TaskUnderstandingService:
         if not all(isinstance(item, str) for item in value):
             raise TypeError(
                 f"task interpretation field '{field}' must contain only strings"
+            )
+
+        if any(not item.strip() for item in value):
+            raise ValueError(
+                f"task interpretation field '{field}' must contain non-empty strings"
             )
 
         return tuple(value)

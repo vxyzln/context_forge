@@ -143,3 +143,91 @@ def test_understand_rejects_invalid_concepts() -> None:
         assert "concepts" in str(exc)
     else:
         raise AssertionError("Expected TypeError")
+
+
+def test_understand_rejects_missing_interpretation_field() -> None:
+    service, _ = make_service(
+        '{"intent":"bug_fix",'
+        '"target":"settings",'
+        '"concepts":["scrolling"],'
+        '"requested_action":"fix",'
+        '"constraints":[]}'
+    )
+
+    try:
+        service.understand("Fix scrolling")
+    except ValueError as exc:
+        assert str(exc) == (
+            "provider returned incomplete task interpretation: ambiguity"
+        )
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_understand_rejects_missing_intent() -> None:
+    service, _ = make_service(
+        '{"target":"settings",'
+        '"concepts":["scrolling"],'
+        '"requested_action":"fix",'
+        '"constraints":[],"ambiguity":null}'
+    )
+
+    try:
+        service.understand("Fix scrolling")
+    except ValueError as exc:
+        assert str(exc) == ("provider returned incomplete task interpretation: intent")
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_understand_rejects_blank_intent() -> None:
+    service, _ = make_service(
+        '{"intent":"",'
+        '"target":"settings",'
+        '"concepts":["scrolling"],'
+        '"requested_action":"fix",'
+        '"constraints":[],"ambiguity":null}'
+    )
+
+    try:
+        service.understand("Fix scrolling")
+    except ValueError as exc:
+        assert str(exc) == "task interpretation field 'intent' must not be empty"
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_understand_rejects_blank_optional_target() -> None:
+    service, _ = make_service(
+        '{"intent":"bug_fix",'
+        '"target":"",'
+        '"concepts":["scrolling"],'
+        '"requested_action":"fix",'
+        '"constraints":[],"ambiguity":null}'
+    )
+
+    try:
+        service.understand("Fix scrolling")
+    except ValueError as exc:
+        assert str(exc) == "task interpretation field 'target' must not be empty"
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_understand_rejects_blank_concept() -> None:
+    service, _ = make_service(
+        '{"intent":"bug_fix",'
+        '"target":"settings",'
+        '"concepts":[""],'
+        '"requested_action":"fix",'
+        '"constraints":[],"ambiguity":null}'
+    )
+
+    try:
+        service.understand("Fix scrolling")
+    except ValueError as exc:
+        assert str(exc) == (
+            "task interpretation field 'concepts' must contain non-empty strings"
+        )
+    else:
+        raise AssertionError("Expected ValueError")
