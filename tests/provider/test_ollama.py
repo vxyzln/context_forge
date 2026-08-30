@@ -86,6 +86,7 @@ def test_ollama_provider_sends_expected_request() -> None:
     assert kwargs["timeout"] == 30.0
     assert kwargs["json"]["model"] == "qwen3:8b"
     assert kwargs["json"]["stream"] is False
+    assert kwargs["json"]["think"] is False
     assert kwargs["json"]["options"]["temperature"] == 0.0
     assert kwargs["json"]["options"]["num_predict"] == 2048
 

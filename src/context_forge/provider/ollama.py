@@ -30,6 +30,7 @@ class OllamaProvider(ContextProvider):
                 }
             ],
             "stream": False,
+            "think": False,
             "options": {
                 "temperature": request.config.temperature,
             },
