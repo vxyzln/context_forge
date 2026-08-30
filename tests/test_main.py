@@ -1,9 +1,10 @@
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from context_forge.main import main
+from context_forge.main import main, resolve_project_path
 from context_forge.provider import ProviderConfig
 
 
@@ -155,3 +156,91 @@ def test_main_passes_same_configuration_to_service_and_generation() -> None:
     generation_config = build_service.return_value.generate.call_args.kwargs["config"]
 
     assert generation_config is service_config
+
+
+def test_resolve_project_path_returns_resolved_directory(tmp_path: Path) -> None:
+    project_path = tmp_path / "project"
+    project_path.mkdir()
+
+    nested_path = project_path / ".." / "project"
+
+    assert resolve_project_path(nested_path) == project_path.resolve()
+
+
+def test_resolve_project_path_expands_user_directory(tmp_path: Path) -> None:
+    with patch("context_forge.main.Path.expanduser", return_value=tmp_path):
+        assert resolve_project_path(Path("~/project")) == tmp_path.resolve()
+
+
+def test_resolve_project_path_rejects_missing_path(tmp_path: Path) -> None:
+    missing_path = tmp_path / "missing"
+
+    with pytest.raises(
+        ValueError,
+        match=r"Project path does not exist: .*missing",
+    ):
+        resolve_project_path(missing_path)
+
+
+def test_resolve_project_path_rejects_file(tmp_path: Path) -> None:
+    project_file = tmp_path / "project.py"
+    project_file.write_text("print('hello')")
+
+    with pytest.raises(
+        ValueError,
+        match=r"Project path is not a directory: .*project\.py",
+    ):
+        resolve_project_path(project_file)
+
+
+def test_main_reports_missing_project_path_without_traceback(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    missing_path = tmp_path / "missing"
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", str(missing_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == (
+        f"Error: Project path does not exist: {missing_path.resolve()}\n"
+    )
+
+
+def test_main_reports_file_project_path_without_traceback(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project_file = tmp_path / "project.py"
+    project_file.write_text("print('hello')")
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", str(project_file)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == (
+        f"Error: Project path is not a directory: {project_file.resolve()}\n"
+    )

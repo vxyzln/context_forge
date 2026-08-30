@@ -10,7 +10,7 @@ from context_forge.provider import ProviderConfig
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="context-forge",
-        description="Generate context-aware responses for software projects.",
+        description="Generate context-forge responses for software projects.",
     )
 
     parser.add_argument(
@@ -31,28 +31,40 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resolve_project_path(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+
+    if not resolved.exists():
+        raise ValueError(f"Project path does not exist: {resolved}")
+
+    if not resolved.is_dir():
+        raise ValueError(f"Project path is not a directory: {resolved}")
+
+    return resolved
+
+
 def main() -> None:
     args = parse_args()
 
-    root_path = args.path.resolve()
-    database_path = root_path / ".context_forge.db"
-
-    project = ProjectAnalyzer(
-        root_path=root_path,
-        database_path=database_path,
-    ).analyze()
-
-    task = input("Task: ").strip()
-
-    generation_config = ProviderConfig(
-        provider=args.provider,
-        model=args.model,
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
-        base_url=args.base_url,
-    )
-
     try:
+        root_path = resolve_project_path(args.path)
+        database_path = root_path / ".context_forge.db"
+
+        project = ProjectAnalyzer(
+            root_path=root_path,
+            database_path=database_path,
+        ).analyze()
+
+        task = input("Task: ").strip()
+
+        generation_config = ProviderConfig(
+            provider=args.provider,
+            model=args.model,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            base_url=args.base_url,
+        )
+
         service = build_generation_service(generation_config)
 
         response = service.generate(
