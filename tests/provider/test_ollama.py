@@ -1,5 +1,6 @@
 from unittest.mock import Mock, patch
 
+import httpx
 import pytest
 from ollama import Message, ResponseError
 
@@ -214,10 +215,19 @@ def test_ollama_provider_wraps_response_error() -> None:
             OllamaProvider().generate(make_request())
 
 
-def test_ollama_provider_wraps_timeout_error() -> None:
+@pytest.mark.parametrize(
+    "timeout_error",
+    (
+        TimeoutError("request timed out"),
+        httpx.ReadTimeout("timed out"),
+    ),
+)
+def test_ollama_provider_wraps_timeout_error(
+    timeout_error: Exception,
+) -> None:
     with patch("context_forge.provider.ollama.Client") as client_class:
         client = client_class.return_value
-        client.chat.side_effect = TimeoutError("request timed out")
+        client.chat.side_effect = timeout_error
 
         with pytest.raises(
             RuntimeError,

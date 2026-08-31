@@ -1,5 +1,6 @@
 from typing import Any
 
+import httpx
 from ollama import Client, ResponseError
 
 from context_forge.provider.base import ContextProvider
@@ -41,7 +42,7 @@ class OllamaProvider(ContextProvider):
         except ResponseError as exc:
             raise RuntimeError(f"Ollama provider request failed: {exc}") from exc
 
-        except TimeoutError as exc:
+        except (TimeoutError, httpx.TimeoutException) as exc:
             raise RuntimeError(
                 f"Ollama provider request timed out after "
                 f"{self.transport.timeout:g} seconds"
