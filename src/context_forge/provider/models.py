@@ -23,5 +23,4 @@ class GenerationResponse:
     provider: str
     model: str
     usage: ProviderUsage = field(default_factory=ProviderUsage)
-    reasoning: str | None = None
     metadata: dict[str, object] = field(default_factory=dict)

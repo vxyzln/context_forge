@@ -82,9 +82,6 @@ class OllamaProvider(ContextProvider):
         if not content.strip():
             raise ValueError("Ollama provider response contains empty message content")
 
-        thinking = message.get("thinking")
-        reasoning = thinking if isinstance(thinking, str) and thinking else None
-
         usage = ProviderUsage(
             input_tokens=_optional_int(data.get("prompt_eval_count")),
             output_tokens=_optional_int(data.get("eval_count")),
@@ -96,7 +93,6 @@ class OllamaProvider(ContextProvider):
             provider="ollama",
             model=str(data.get("model", request.config.model)),
             usage=usage,
-            reasoning=reasoning,
             metadata={
                 "done_reason": data.get("done_reason"),
             },

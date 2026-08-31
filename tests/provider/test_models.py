@@ -30,7 +30,6 @@ def test_provider_response_stores_result() -> None:
             output_tokens=20,
             total_tokens=30,
         ),
-        reasoning="test reasoning",
         metadata={"mode": "deterministic"},
     )
 
@@ -40,7 +39,6 @@ def test_provider_response_stores_result() -> None:
     assert response.usage.input_tokens == 10
     assert response.usage.output_tokens == 20
     assert response.usage.total_tokens == 30
-    assert response.reasoning == "test reasoning"
     assert response.metadata["mode"] == "deterministic"
 
 
@@ -52,5 +50,4 @@ def test_provider_response_defaults_optional_fields() -> None:
     )
 
     assert response.usage == ProviderUsage()
-    assert response.reasoning is None
     assert response.metadata == {}

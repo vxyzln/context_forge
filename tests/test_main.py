@@ -60,7 +60,7 @@ def test_main_prints_generation_response(
 def test_main_uses_default_provider_configuration() -> None:
     expected_config = ProviderConfig(
         provider="ollama",
-        model="qwen3:8b",
+        model="qwen2.5-coder:7b",
         temperature=0.0,
         max_tokens=None,
         base_url="http://localhost:11434",

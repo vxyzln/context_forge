@@ -18,7 +18,7 @@ def make_request() -> GenerationRequest:
         task="authenticate user",
         context='{"task":"authenticate user","units":[]}',
         config=ProviderConfig(
-            model="qwen3:8b",
+            model="qwen2.5-coder:7b",
             temperature=0.0,
             max_tokens=2048,
         ),
@@ -28,16 +28,14 @@ def make_request() -> GenerationRequest:
 def make_response(
     *,
     content: str = "Authentication is handled by auth.py.",
-    thinking: str | None = "The context points to auth.py.",
 ) -> httpx.Response:
     response = httpx.Response(
         status_code=200,
         json={
-            "model": "qwen3:8b",
+            "model": "qwen2.5-coder:7b",
             "message": {
                 "role": "assistant",
                 "content": content,
-                "thinking": thinking,
             },
             "done": True,
             "done_reason": "stop",
@@ -59,9 +57,8 @@ def test_ollama_provider_returns_response() -> None:
         response = OllamaProvider().generate(make_request())
 
     assert response.provider == "ollama"
-    assert response.model == "qwen3:8b"
+    assert response.model == "qwen2.5-coder:7b"
     assert response.content == "Authentication is handled by auth.py."
-    assert response.reasoning == "The context points to auth.py."
     assert response.usage.input_tokens == 100
     assert response.usage.output_tokens == 25
     assert response.usage.total_tokens == 125
@@ -84,7 +81,7 @@ def test_ollama_provider_sends_expected_request() -> None:
 
     assert args[0] == "http://localhost:11434/api/chat"
     assert kwargs["timeout"] == 30.0
-    assert kwargs["json"]["model"] == "qwen3:8b"
+    assert kwargs["json"]["model"] == "qwen2.5-coder:7b"
     assert kwargs["json"]["stream"] is False
     assert kwargs["json"]["think"] is False
     assert kwargs["json"]["options"]["temperature"] == 0.0
@@ -110,7 +107,7 @@ def test_ollama_provider_omits_num_predict_without_max_tokens() -> None:
     request = GenerationRequest(
         task="authenticate user",
         context="{}",
-        config=ProviderConfig(model="qwen3:8b"),
+        config=ProviderConfig(model="qwen2.5-coder:7b"),
     )
 
     with patch("context_forge.provider.ollama.httpx.post") as post:
@@ -123,22 +120,11 @@ def test_ollama_provider_omits_num_predict_without_max_tokens() -> None:
     assert options == {"temperature": 0.0}
 
 
-def test_ollama_provider_handles_missing_reasoning() -> None:
-    response = make_response(thinking=None)
-
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = response
-
-        result = OllamaProvider().generate(make_request())
-
-    assert result.reasoning is None
-
-
 def test_ollama_provider_handles_missing_usage() -> None:
     response = httpx.Response(
         status_code=200,
         json={
-            "model": "qwen3:8b",
+            "model": "qwen2.5-coder:7b",
             "message": {
                 "role": "assistant",
                 "content": "Done.",
@@ -189,7 +175,7 @@ def test_ollama_provider_raises_on_invalid_json() -> None:
 def test_ollama_provider_raises_when_message_is_missing() -> None:
     response = httpx.Response(
         status_code=200,
-        json={"model": "qwen3:8b"},
+        json={"model": "qwen2.5-coder:7b"},
         request=httpx.Request(
             "POST",
             "http://localhost:11434/api/chat",
@@ -250,7 +236,7 @@ def test_ollama_provider_rejects_empty_content() -> None:
     response = httpx.Response(
         status_code=200,
         json={
-            "model": "qwen3:8b",
+            "model": "qwen2.5-coder:7b",
             "message": {
                 "role": "assistant",
                 "content": "   ",
@@ -270,3 +256,32 @@ def test_ollama_provider_rejects_empty_content() -> None:
             match="response contains empty message content",
         ):
             OllamaProvider().generate(make_request())
+
+
+def test_ollama_provider_ignores_thinking_field() -> None:
+    response = httpx.Response(
+        status_code=200,
+        json={
+            "model": "qwen2.5-coder:7b",
+            "message": {
+                "role": "assistant",
+                "content": "Authentication is handled by auth.py.",
+                "thinking": "Internal model reasoning that must not escape.",
+            },
+            "done": True,
+            "done_reason": "stop",
+        },
+        request=httpx.Request(
+            "POST",
+            "http://localhost:11434/api/chat",
+        ),
+    )
+
+    with patch("context_forge.provider.ollama.httpx.post") as post:
+        post.return_value = response
+
+        result = OllamaProvider().generate(make_request())
+
+    assert result.content == "Authentication is handled by auth.py."
+    assert result.metadata.get("thinking") is None
+    assert not hasattr(result, "reasoning")

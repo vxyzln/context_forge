@@ -48,7 +48,7 @@ def test_build_generation_service_is_independent() -> None:
 def test_build_generation_service_uses_configured_provider() -> None:
     config = ProviderConfig(
         provider="ollama",
-        model="qwen3:8b",
+        model="qwen2.5-coder:7b",
     )
 
     service = build_generation_service(config)

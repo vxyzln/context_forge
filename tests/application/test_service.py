@@ -213,7 +213,7 @@ def test_service_passes_config_without_modification() -> None:
     )
 
     config = ProviderConfig(
-        model="qwen3:8b",
+        model="qwen2.5-coder:7b",
         temperature=0.0,
         max_tokens=128,
     )

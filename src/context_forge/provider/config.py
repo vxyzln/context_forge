@@ -6,7 +6,7 @@ from context_forge.provider.transport import ProviderTransportConfig
 @dataclass(frozen=True)
 class ProviderConfig:
     provider: str = "ollama"
-    model: str = "qwen3:8b"
+    model: str = "qwen2.5-coder:7b"
     temperature: float = 0.0
     max_tokens: int | None = None
     base_url: str = "http://localhost:11434"

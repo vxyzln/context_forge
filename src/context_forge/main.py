@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
         default=Path.cwd(),
     )
     parser.add_argument("--provider", default="ollama")
-    parser.add_argument("--model", default="qwen3:8b")
+    parser.add_argument("--model", default="qwen2.5-coder:7b")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=None)
     parser.add_argument(

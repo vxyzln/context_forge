@@ -4,10 +4,10 @@ from context_forge.provider import ProviderConfig
 
 
 def test_provider_config_uses_defaults() -> None:
-    config = ProviderConfig(model="qwen3:8b")
+    config = ProviderConfig(model="qwen2.5-coder:7b")
 
     assert config.provider == "ollama"
-    assert config.model == "qwen3:8b"
+    assert config.model == "qwen2.5-coder:7b"
     assert config.temperature == 0.0
     assert config.max_tokens is None
     assert config.base_url == "http://localhost:11434"
@@ -22,7 +22,7 @@ def test_provider_config_rejects_empty_provider(provider: str) -> None:
     with pytest.raises(ValueError, match="Provider name cannot be empty"):
         ProviderConfig(
             provider=provider,
-            model="qwen3:8b",
+            model="qwen2.5-coder:7b",
         )
 
 
@@ -30,7 +30,7 @@ def test_provider_config_rejects_unsupported_provider() -> None:
     with pytest.raises(ValueError, match="Unsupported provider"):
         ProviderConfig(
             provider="unknown",
-            model="qwen3:8b",
+            model="qwen2.5-coder:7b",
         )
 
 
@@ -57,7 +57,7 @@ def test_provider_config_rejects_invalid_temperature(
         match="temperature must be between 0.0 and 2.0",
     ):
         ProviderConfig(
-            model="qwen3:8b",
+            model="qwen2.5-coder:7b",
             temperature=temperature,
         )
 
@@ -65,7 +65,7 @@ def test_provider_config_rejects_invalid_temperature(
 def test_provider_config_rejects_invalid_max_tokens() -> None:
     with pytest.raises(ValueError, match="max_tokens must be positive"):
         ProviderConfig(
-            model="qwen3:8b",
+            model="qwen2.5-coder:7b",
             max_tokens=0,
         )
 
@@ -73,7 +73,7 @@ def test_provider_config_rejects_invalid_max_tokens() -> None:
 def test_provider_config_rejects_empty_base_url() -> None:
     with pytest.raises(ValueError, match="base URL cannot be empty"):
         ProviderConfig(
-            model="qwen3:8b",
+            model="qwen2.5-coder:7b",
             base_url="   ",
         )
 
@@ -81,7 +81,7 @@ def test_provider_config_rejects_empty_base_url() -> None:
 def test_provider_config_normalizes_provider_and_base_url() -> None:
     config = ProviderConfig(
         provider=" OLLAMA ",
-        model="qwen3:8b",
+        model="qwen2.5-coder:7b",
         base_url="http://localhost:11434/",
     )
 
@@ -101,14 +101,14 @@ def test_provider_config_accepts_deterministic_provider() -> None:
 def test_provider_config_preserves_explicit_values() -> None:
     config = ProviderConfig(
         provider="ollama",
-        model="qwen3:8b",
+        model="qwen2.5-coder:7b",
         temperature=0.7,
         max_tokens=2048,
         base_url="http://example.test",
     )
 
     assert config.provider == "ollama"
-    assert config.model == "qwen3:8b"
+    assert config.model == "qwen2.5-coder:7b"
     assert config.temperature == 0.7
     assert config.max_tokens == 2048
     assert config.base_url == "http://example.test"
@@ -116,11 +116,11 @@ def test_provider_config_preserves_explicit_values() -> None:
 
 def test_provider_config_is_generation_only() -> None:
     config = ProviderConfig(
-        model="qwen3:8b",
+        model="qwen2.5-coder:7b",
         temperature=0.7,
         max_tokens=2048,
     )
 
-    assert config.model == "qwen3:8b"
+    assert config.model == "qwen2.5-coder:7b"
     assert config.temperature == 0.7
     assert config.max_tokens == 2048

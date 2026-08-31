@@ -22,7 +22,7 @@ def test_factory_creates_ollama_provider() -> None:
     provider = ProviderFactory.create(
         ProviderConfig(
             provider="ollama",
-            model="qwen3:8b",
+            model="qwen2.5-coder:7b",
         )
     )
 
@@ -35,7 +35,7 @@ def test_factory_passes_ollama_configuration() -> None:
     provider = ProviderFactory.create(
         ProviderConfig(
             provider="ollama",
-            model="qwen3:8b",
+            model="qwen2.5-coder:7b",
             base_url="http://example.test/",
             transport=transport,
         )

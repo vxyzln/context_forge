@@ -13,7 +13,7 @@ from context_forge.provider import (
 from context_forge.provider.models import GenerationRequest
 
 OLLAMA_URL = "http://localhost:11434"
-OLLAMA_MODEL = "qwen3:8b"
+OLLAMA_MODEL = "qwen2.5-coder:7b"
 
 
 def ollama_available() -> bool:
