@@ -383,3 +383,119 @@ def test_build_provider_config_cli_overrides_project_and_global(
         max_tokens=2048,
         base_url="http://cli",
     )
+
+
+def test_build_provider_config_resolves_complete_configuration_stack(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    global_config_path = tmp_path / "global.toml"
+    global_config_path.write_text(
+        """
+[provider]
+provider = "deterministic"
+model = "global-model"
+base_url = "http://global"
+
+[generation]
+temperature = 0.7
+max_tokens = 1024
+""",
+        encoding="utf-8",
+    )
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    (project_root / ".contextforge.toml").write_text(
+        """
+[provider]
+model = "project-model"
+
+[generation]
+max_tokens = 2048
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "context_forge.config.loader.global_config_path",
+        lambda: global_config_path,
+    )
+
+    args = argparse.Namespace(
+        provider=None,
+        model=None,
+        temperature=None,
+        max_tokens=None,
+        base_url=None,
+    )
+
+    result = build_provider_config(args, project_root)
+
+    assert result == ProviderConfig(
+        provider="deterministic",
+        model="project-model",
+        temperature=0.7,
+        max_tokens=2048,
+        base_url="http://global",
+    )
+
+
+def test_build_provider_config_cli_values_override_all_configuration_layers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    global_config_path = tmp_path / "global.toml"
+    global_config_path.write_text(
+        """
+[provider]
+provider = "deterministic"
+model = "global-model"
+base_url = "http://global"
+
+[generation]
+temperature = 0.3
+max_tokens = 512
+""",
+        encoding="utf-8",
+    )
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    (project_root / ".contextforge.toml").write_text(
+        """
+[provider]
+model = "project-model"
+base_url = "http://project"
+
+[generation]
+temperature = 0.7
+max_tokens = 1024
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "context_forge.config.loader.global_config_path",
+        lambda: global_config_path,
+    )
+
+    args = argparse.Namespace(
+        provider="ollama",
+        model="cli-model",
+        temperature=1.2,
+        max_tokens=4096,
+        base_url="http://cli",
+    )
+
+    result = build_provider_config(args, project_root)
+
+    assert result == ProviderConfig(
+        provider="ollama",
+        model="cli-model",
+        temperature=1.2,
+        max_tokens=4096,
+        base_url="http://cli",
+    )
