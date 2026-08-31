@@ -21,6 +21,7 @@ from context_forge.config.project import (
     ProjectGenerationConfiguration,
     ProjectProviderConfiguration,
 )
+from context_forge.config.resolver import resolve_configuration
 from context_forge.config.validation import (
     ConfigurationValidationError,
     validate_project_config,
@@ -44,5 +45,6 @@ __all__ = [
     "load_project_config",
     "load_project_configuration",
     "project_config_path",
+    "resolve_configuration",
     "validate_project_config",
 ]
