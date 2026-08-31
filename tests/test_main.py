@@ -1,10 +1,20 @@
+import argparse
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from context_forge.main import main, resolve_project_path
+from context_forge.config import (
+    ProjectConfiguration,
+    ProjectGenerationConfiguration,
+    ProjectProviderConfiguration,
+)
+from context_forge.main import (
+    build_provider_config,
+    main,
+    resolve_project_path,
+)
 from context_forge.provider import ProviderConfig
 
 
@@ -243,4 +253,133 @@ def test_main_reports_file_project_path_without_traceback(
     assert captured.out == ""
     assert captured.err == (
         f"Error: Project path is not a directory: {project_file.resolve()}\n"
+    )
+
+
+def test_build_provider_config_uses_built_in_defaults() -> None:
+    args = argparse.Namespace(
+        provider=None,
+        model=None,
+        temperature=None,
+        max_tokens=None,
+        base_url=None,
+    )
+
+    config = build_provider_config(args, Path.cwd())
+
+    assert config == ProviderConfig(
+        provider="ollama",
+        model="qwen2.5-coder:7b",
+        temperature=0.0,
+        max_tokens=None,
+        base_url="http://localhost:11434",
+    )
+
+
+def test_build_provider_config_uses_project_over_global(
+    tmp_path: Path,
+) -> None:
+    project_config = ProjectConfiguration(
+        provider=ProjectProviderConfiguration(
+            model="project-model",
+        ),
+        generation=ProjectGenerationConfiguration(
+            temperature=0.2,
+        ),
+    )
+
+    global_config = ProjectConfiguration(
+        provider=ProjectProviderConfiguration(
+            provider="deterministic",
+            model="global-model",
+            base_url="http://global",
+        ),
+        generation=ProjectGenerationConfiguration(
+            temperature=0.7,
+            max_tokens=1024,
+        ),
+    )
+
+    args = argparse.Namespace(
+        provider=None,
+        model=None,
+        temperature=None,
+        max_tokens=None,
+        base_url=None,
+    )
+
+    with (
+        patch(
+            "context_forge.main.load_global_configuration",
+            return_value=global_config,
+        ),
+        patch(
+            "context_forge.main.load_project_configuration",
+            return_value=project_config,
+        ),
+    ):
+        config = build_provider_config(args, tmp_path)
+
+    assert config == ProviderConfig(
+        provider="deterministic",
+        model="project-model",
+        temperature=0.2,
+        max_tokens=1024,
+        base_url="http://global",
+    )
+
+
+def test_build_provider_config_cli_overrides_project_and_global(
+    tmp_path: Path,
+) -> None:
+    project_config = ProjectConfiguration(
+        provider=ProjectProviderConfiguration(
+            provider="ollama",
+            model="project-model",
+            base_url="http://project",
+        ),
+        generation=ProjectGenerationConfiguration(
+            temperature=0.2,
+            max_tokens=512,
+        ),
+    )
+
+    global_config = ProjectConfiguration(
+        provider=ProjectProviderConfiguration(
+            provider="deterministic",
+            model="global-model",
+            base_url="http://global",
+        ),
+        generation=ProjectGenerationConfiguration(
+            temperature=0.7,
+            max_tokens=1024,
+        ),
+    )
+
+    args = argparse.Namespace(
+        provider="deterministic",
+        model="cli-model",
+        temperature=1.0,
+        max_tokens=2048,
+        base_url="http://cli",
+    )
+
+    with (
+        patch(
+            "context_forge.main.load_global_configuration",
+            return_value=global_config,
+        ),
+        patch(
+            "context_forge.main.load_project_configuration",
+            return_value=project_config,
+        ),
+    ):
+        config = build_provider_config(args, tmp_path)
+
+    assert config == ProviderConfig(
+        provider="deterministic",
+        model="cli-model",
+        temperature=1.0,
+        max_tokens=2048,
+        base_url="http://cli",
     )
