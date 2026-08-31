@@ -1,9 +1,7 @@
-# tests/provider/test_ollama.py
-
 from unittest.mock import Mock, patch
 
-import httpx
 import pytest
+from ollama import Message, ResponseError
 
 from context_forge.provider import (
     GenerationRequest,
@@ -13,131 +11,129 @@ from context_forge.provider import (
 )
 
 
-def make_request() -> GenerationRequest:
+def make_request(
+    *,
+    max_tokens: int | None = 2048,
+) -> GenerationRequest:
     return GenerationRequest(
         task="authenticate user",
         context='{"task":"authenticate user","units":[]}',
         config=ProviderConfig(
             model="qwen2.5-coder:7b",
             temperature=0.0,
-            max_tokens=2048,
+            max_tokens=max_tokens,
         ),
     )
 
 
 def make_response(
     *,
-    content: str = "Authentication is handled by auth.py.",
-) -> httpx.Response:
-    response = httpx.Response(
-        status_code=200,
-        json={
-            "model": "qwen2.5-coder:7b",
-            "message": {
-                "role": "assistant",
-                "content": content,
-            },
-            "done": True,
-            "done_reason": "stop",
-            "prompt_eval_count": 100,
-            "eval_count": 25,
-        },
-        request=httpx.Request(
-            "POST",
-            "http://localhost:11434/api/chat",
-        ),
+    model: str | None = "qwen2.5-coder:7b",
+    content: str | None = "Authentication is handled by auth.py.",
+    thinking: str | None = None,
+    prompt_eval_count: int | None = 100,
+    eval_count: int | None = 25,
+    done_reason: str | None = "stop",
+) -> Mock:
+    response = Mock()
+    response.model = model
+    response.message = Message(
+        role="assistant",
+        content=content,
+        thinking=thinking,
     )
+    response.prompt_eval_count = prompt_eval_count
+    response.eval_count = eval_count
+    response.done_reason = done_reason
     return response
 
 
 def test_ollama_provider_returns_response() -> None:
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = make_response()
+    response = make_response()
 
-        response = OllamaProvider().generate(make_request())
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
 
-    assert response.provider == "ollama"
-    assert response.model == "qwen2.5-coder:7b"
-    assert response.content == "Authentication is handled by auth.py."
-    assert response.usage.input_tokens == 100
-    assert response.usage.output_tokens == 25
-    assert response.usage.total_tokens == 125
-    assert response.metadata["done_reason"] == "stop"
+        result = OllamaProvider().generate(make_request())
+
+    assert result.provider == "ollama"
+    assert result.model == "qwen2.5-coder:7b"
+    assert result.content == "Authentication is handled by auth.py."
+    assert result.usage.input_tokens == 100
+    assert result.usage.output_tokens == 25
+    assert result.usage.total_tokens == 125
+    assert result.metadata["done_reason"] == "stop"
 
 
-def test_ollama_provider_sends_expected_request() -> None:
-    request = make_request()
+def test_ollama_provider_configures_client() -> None:
+    transport = ProviderTransportConfig(timeout=30.0)
 
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = make_response()
-
+    with patch("context_forge.provider.ollama.Client") as client_class:
         OllamaProvider(
-            transport=ProviderTransportConfig(timeout=30.0),
-        ).generate(request)
+            base_url="http://example.test/",
+            transport=transport,
+        )
 
-    post.assert_called_once()
-
-    args, kwargs = post.call_args
-
-    assert args[0] == "http://localhost:11434/api/chat"
-    assert kwargs["timeout"] == 30.0
-    assert kwargs["json"]["model"] == "qwen2.5-coder:7b"
-    assert kwargs["json"]["stream"] is False
-    assert kwargs["json"]["think"] is False
-    assert kwargs["json"]["options"]["temperature"] == 0.0
-    assert kwargs["json"]["options"]["num_predict"] == 2048
-
-    message = kwargs["json"]["messages"][0]
-
-    assert message["role"] == "user"
-    assert "authenticate user" in message["content"]
-    assert '{"task":"authenticate user","units":[]}' in message["content"]
+    client_class.assert_called_once_with(
+        host="http://example.test",
+        timeout=30.0,
+    )
 
 
-def test_ollama_provider_uses_custom_base_url() -> None:
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = make_response()
+def test_ollama_provider_sends_expected_chat_request() -> None:
+    response = make_response()
 
-        OllamaProvider("http://example.test/").generate(make_request())
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
 
-    assert post.call_args.args[0] == "http://example.test/api/chat"
+        OllamaProvider().generate(make_request())
+
+    client.chat.assert_called_once_with(
+        model="qwen2.5-coder:7b",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Use the following task and project context to answer "
+                    "the user's request.\n\n"
+                    "Task:\nauthenticate user\n\n"
+                    'Context:\n{"task":"authenticate user","units":[]}'
+                ),
+            }
+        ],
+        stream=False,
+        options={
+            "temperature": 0.0,
+            "num_predict": 2048,
+        },
+    )
 
 
 def test_ollama_provider_omits_num_predict_without_max_tokens() -> None:
-    request = GenerationRequest(
-        task="authenticate user",
-        context="{}",
-        config=ProviderConfig(model="qwen2.5-coder:7b"),
-    )
+    response = make_response()
 
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = make_response()
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
 
-        OllamaProvider().generate(request)
+        OllamaProvider().generate(make_request(max_tokens=None))
 
-    options = post.call_args.kwargs["json"]["options"]
-
-    assert options == {"temperature": 0.0}
+    assert client.chat.call_args.kwargs["options"] == {
+        "temperature": 0.0,
+    }
 
 
 def test_ollama_provider_handles_missing_usage() -> None:
-    response = httpx.Response(
-        status_code=200,
-        json={
-            "model": "qwen2.5-coder:7b",
-            "message": {
-                "role": "assistant",
-                "content": "Done.",
-            },
-        },
-        request=httpx.Request(
-            "POST",
-            "http://localhost:11434/api/chat",
-        ),
+    response = make_response(
+        prompt_eval_count=None,
+        eval_count=None,
     )
 
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = response
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
 
         result = OllamaProvider().generate(make_request())
 
@@ -146,84 +142,82 @@ def test_ollama_provider_handles_missing_usage() -> None:
     assert result.usage.total_tokens is None
 
 
-def test_ollama_provider_raises_on_connection_error() -> None:
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.side_effect = httpx.ConnectError("connection refused")
-
-        with pytest.raises(
-            RuntimeError,
-            match="Ollama provider could not connect to http://localhost:11434",
-        ):
-            OllamaProvider().generate(make_request())
-
-
-def test_ollama_provider_raises_on_invalid_json() -> None:
-    response = Mock(spec=httpx.Response)
-    response.raise_for_status.return_value = None
-    response.json.side_effect = ValueError("invalid json")
-
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = response
-
-        with pytest.raises(
-            RuntimeError,
-            match="Ollama provider returned invalid JSON",
-        ):
-            OllamaProvider().generate(make_request())
-
-
-def test_ollama_provider_raises_when_message_is_missing() -> None:
-    response = httpx.Response(
-        status_code=200,
-        json={"model": "qwen2.5-coder:7b"},
-        request=httpx.Request(
-            "POST",
-            "http://localhost:11434/api/chat",
-        ),
+def test_ollama_provider_handles_incomplete_usage() -> None:
+    response = make_response(
+        prompt_eval_count=100,
+        eval_count=None,
     )
 
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = response
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
+
+        result = OllamaProvider().generate(make_request())
+
+    assert result.usage.input_tokens == 100
+    assert result.usage.output_tokens is None
+    assert result.usage.total_tokens is None
+
+
+def test_ollama_provider_uses_configured_model_when_response_model_missing() -> None:
+    response = make_response(model=None)
+
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
+
+        result = OllamaProvider().generate(make_request())
+
+    assert result.model == "qwen2.5-coder:7b"
+
+
+def test_ollama_provider_rejects_missing_content() -> None:
+    response = make_response(content=None)
+
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
 
         with pytest.raises(
             TypeError,
-            match="missing a valid message",
+            match="Ollama provider response is missing message content",
         ):
             OllamaProvider().generate(make_request())
 
 
-def test_ollama_provider_rejects_non_object_json() -> None:
-    response = httpx.Response(
-        status_code=200,
-        json=[],
-        request=httpx.Request(
-            "POST",
-            "http://localhost:11434/api/chat",
-        ),
-    )
+def test_ollama_provider_rejects_empty_content() -> None:
+    response = make_response(content="   ")
 
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = response
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
 
         with pytest.raises(
-            TypeError,
-            match="response must be a JSON object",
+            ValueError,
+            match="Ollama provider response contains empty message content",
         ):
             OllamaProvider().generate(make_request())
 
 
-def test_ollama_provider_uses_default_transport_timeout() -> None:
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = make_response()
+def test_ollama_provider_wraps_response_error() -> None:
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.side_effect = ResponseError(
+            "model not found",
+            status_code=404,
+        )
 
-        OllamaProvider().generate(make_request())
+        with pytest.raises(
+            RuntimeError,
+            match="Ollama provider request failed: model not found",
+        ):
+            OllamaProvider().generate(make_request())
 
-    assert post.call_args.kwargs["timeout"] == 60.0
 
-
-def test_ollama_provider_raises_on_timeout() -> None:
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.side_effect = httpx.ReadTimeout("request timed out")
+def test_ollama_provider_wraps_timeout_error() -> None:
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.side_effect = TimeoutError("request timed out")
 
         with pytest.raises(
             RuntimeError,
@@ -232,53 +226,26 @@ def test_ollama_provider_raises_on_timeout() -> None:
             OllamaProvider().generate(make_request())
 
 
-def test_ollama_provider_rejects_empty_content() -> None:
-    response = httpx.Response(
-        status_code=200,
-        json={
-            "model": "qwen2.5-coder:7b",
-            "message": {
-                "role": "assistant",
-                "content": "   ",
-            },
-        },
-        request=httpx.Request(
-            "POST",
-            "http://localhost:11434/api/chat",
-        ),
-    )
-
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = response
+def test_ollama_provider_wraps_connection_error() -> None:
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.side_effect = ConnectionError("connection refused")
 
         with pytest.raises(
-            ValueError,
-            match="response contains empty message content",
+            RuntimeError,
+            match="Ollama provider could not connect to http://localhost:11434",
         ):
             OllamaProvider().generate(make_request())
 
 
-def test_ollama_provider_ignores_thinking_field() -> None:
-    response = httpx.Response(
-        status_code=200,
-        json={
-            "model": "qwen2.5-coder:7b",
-            "message": {
-                "role": "assistant",
-                "content": "Authentication is handled by auth.py.",
-                "thinking": "Internal model reasoning that must not escape.",
-            },
-            "done": True,
-            "done_reason": "stop",
-        },
-        request=httpx.Request(
-            "POST",
-            "http://localhost:11434/api/chat",
-        ),
+def test_ollama_provider_does_not_expose_thinking() -> None:
+    response = make_response(
+        thinking="Internal model reasoning that must not escape.",
     )
 
-    with patch("context_forge.provider.ollama.httpx.post") as post:
-        post.return_value = response
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
 
         result = OllamaProvider().generate(make_request())
 

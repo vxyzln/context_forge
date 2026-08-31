@@ -1,6 +1,6 @@
 from typing import Any
 
-import httpx
+from ollama import Client, ResponseError
 
 from context_forge.provider.base import ContextProvider
 from context_forge.provider.models import (
@@ -19,62 +19,40 @@ class OllamaProvider(ContextProvider):
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.transport = transport or ProviderTransportConfig()
+        self.client = Client(
+            host=self.base_url,
+            timeout=self.transport.timeout,
+        )
 
     def generate(self, request: GenerationRequest) -> GenerationResponse:
-        payload: dict[str, Any] = {
-            "model": request.config.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": self._build_prompt(request),
-                }
-            ],
-            "stream": False,
-            "think": False,
-            "options": {
-                "temperature": request.config.temperature,
-            },
-        }
-
-        if request.config.max_tokens is not None:
-            payload["options"]["num_predict"] = request.config.max_tokens
-
         try:
-            response = httpx.post(
-                f"{self.base_url}/api/chat",
-                json=payload,
-                timeout=self.transport.timeout,
+            response = self.client.chat(
+                model=request.config.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": self._build_prompt(request),
+                    }
+                ],
+                stream=False,
+                options=self._build_options(request),
             )
-            response.raise_for_status()
 
-        except httpx.TimeoutException as exc:
+        except ResponseError as exc:
+            raise RuntimeError(f"Ollama provider request failed: {exc}") from exc
+
+        except TimeoutError as exc:
             raise RuntimeError(
                 f"Ollama provider request timed out after "
                 f"{self.transport.timeout:g} seconds"
             ) from exc
 
-        except httpx.ConnectError as exc:
+        except ConnectionError as exc:
             raise RuntimeError(
                 f"Ollama provider could not connect to {self.base_url}"
             ) from exc
 
-        except httpx.HTTPError as exc:
-            raise RuntimeError(f"Ollama provider request failed: {exc}") from exc
-
-        try:
-            data = response.json()
-        except ValueError as exc:
-            raise RuntimeError("Ollama provider returned invalid JSON") from exc
-
-        if not isinstance(data, dict):
-            raise TypeError("Ollama provider response must be a JSON object")
-
-        message = data.get("message")
-
-        if not isinstance(message, dict):
-            raise TypeError("Ollama provider response is missing a valid message")
-
-        content = message.get("content")
+        content = response.message.content
 
         if not isinstance(content, str):
             raise TypeError("Ollama provider response is missing message content")
@@ -82,21 +60,32 @@ class OllamaProvider(ContextProvider):
         if not content.strip():
             raise ValueError("Ollama provider response contains empty message content")
 
-        usage = ProviderUsage(
-            input_tokens=_optional_int(data.get("prompt_eval_count")),
-            output_tokens=_optional_int(data.get("eval_count")),
-            total_tokens=_total_tokens(data),
-        )
-
         return GenerationResponse(
             content=content,
             provider="ollama",
-            model=str(data.get("model", request.config.model)),
-            usage=usage,
+            model=response.model or request.config.model,
+            usage=ProviderUsage(
+                input_tokens=_optional_int(response.prompt_eval_count),
+                output_tokens=_optional_int(response.eval_count),
+                total_tokens=_total_tokens(response),
+            ),
             metadata={
-                "done_reason": data.get("done_reason"),
+                "done_reason": response.done_reason,
             },
         )
+
+    @staticmethod
+    def _build_options(
+        request: GenerationRequest,
+    ) -> dict[str, Any]:
+        options: dict[str, Any] = {
+            "temperature": request.config.temperature,
+        }
+
+        if request.config.max_tokens is not None:
+            options["num_predict"] = request.config.max_tokens
+
+        return options
 
     @staticmethod
     def _build_prompt(request: GenerationRequest) -> str:
@@ -112,9 +101,9 @@ def _optional_int(value: object) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _total_tokens(data: dict[str, Any]) -> int | None:
-    prompt_tokens = _optional_int(data.get("prompt_eval_count"))
-    output_tokens = _optional_int(data.get("eval_count"))
+def _total_tokens(response: object) -> int | None:
+    prompt_tokens = _optional_int(getattr(response, "prompt_eval_count", None))
+    output_tokens = _optional_int(getattr(response, "eval_count", None))
 
     if prompt_tokens is None or output_tokens is None:
         return None

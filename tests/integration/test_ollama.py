@@ -1,7 +1,7 @@
 from pathlib import Path
 
-import httpx
 import pytest
+from ollama import Client
 
 from context_forge.application import build_generation_service
 from context_forge.pipeline.analyzer import ProjectAnalyzer
@@ -18,12 +18,11 @@ OLLAMA_MODEL = "qwen2.5-coder:7b"
 
 def ollama_available() -> bool:
     try:
-        response = httpx.get(
-            f"{OLLAMA_URL}/api/tags",
+        Client(
+            host=OLLAMA_URL,
             timeout=2.0,
-        )
-        response.raise_for_status()
-    except httpx.HTTPError:
+        ).list()
+    except Exception:  # noqa: BLE001
         return False
 
     return True
