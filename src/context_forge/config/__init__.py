@@ -12,6 +12,10 @@ from context_forge.config.loader import (
     load_project_config,
     project_config_path,
 )
+from context_forge.config.loading import (
+    load_global_configuration,
+    load_project_configuration,
+)
 from context_forge.config.project import (
     ProjectConfiguration,
     ProjectGenerationConfiguration,
@@ -36,7 +40,9 @@ __all__ = [
     "global_config_directory",
     "global_config_path",
     "load_global_config",
+    "load_global_configuration",
     "load_project_config",
+    "load_project_configuration",
     "project_config_path",
     "validate_project_config",
 ]
