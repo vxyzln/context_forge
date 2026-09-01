@@ -456,3 +456,28 @@ def test_service_passes_task_interpretation_to_context_engine() -> None:
             interpretation=interpretation,
         )
     ]
+
+def test_service_builds_generation_prompt_before_provider() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+    )
+
+    service.generate(
+        project=project,
+        task="authenticate user",
+        config=ProviderConfig(model="test-model"),
+    )
+
+    assert provider.requests[0].prompt == (
+        "Use the following task and project context to answer "
+        "the user's request.\n\n"
+        "Task:\nauthenticate user\n\n"
+        'Context:\n{"task":"authenticate user","units":[]}'
+    )

@@ -42,6 +42,7 @@ def test_ollama_provider_live_generation() -> None:
     request = GenerationRequest(
         task="Reply with exactly: Context Forge works.",
         context='{"task":"Context Forge smoke test","units":[]}',
+        prompt="Reply with exactly: Context Forge works.",
         config=ProviderConfig(
             provider="ollama",
             model=OLLAMA_MODEL,

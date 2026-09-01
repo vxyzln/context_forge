@@ -11,6 +11,7 @@ def make_request() -> GenerationRequest:
     return GenerationRequest(
         task="authenticate user",
         context='{"task":"authenticate user","units":[]}',
+        prompt="Prepared generation prompt",
         config=ProviderConfig(model="deterministic-test"),
     )
 
@@ -38,8 +39,12 @@ def test_deterministic_provider_returns_task_interpretation() -> None:
     provider = DeterministicProvider()
 
     request = GenerationRequest(
-        task="Interpret the following software-development task. Fix scrolling.",
+        task="Fix scrolling",
         context="",
+        prompt=(
+            "Interpret the following software-development task. "
+            "Fix scrolling."
+        ),
         config=ProviderConfig(model="deterministic-test"),
     )
 

@@ -19,6 +19,12 @@ def make_request(
     return GenerationRequest(
         task="authenticate user",
         context='{"task":"authenticate user","units":[]}',
+        prompt=(
+            "Use the following task and project context to answer "
+            "the user's request.\n\n"
+            "Task:\nauthenticate user\n\n"
+            'Context:\n{"task":"authenticate user","units":[]}'
+        ),
         config=ProviderConfig(
             model="qwen2.5-coder:7b",
             temperature=0.0,
@@ -262,3 +268,29 @@ def test_ollama_provider_does_not_expose_thinking() -> None:
     assert result.content == "Authentication is handled by auth.py."
     assert result.metadata.get("thinking") is None
     assert not hasattr(result, "reasoning")
+
+def test_ollama_provider_sends_prepared_prompt_unchanged() -> None:
+    response = make_response()
+
+    request = GenerationRequest(
+        task="authenticate user",
+        context='{"task":"authenticate user","units":[]}',
+        prompt="PREPARED PROMPT",
+        config=ProviderConfig(
+            model="qwen2.5-coder:7b",
+            temperature=0.0,
+        ),
+    )
+
+    with patch("context_forge.provider.ollama.Client") as client_class:
+        client = client_class.return_value
+        client.chat.return_value = response
+
+        OllamaProvider().generate(request)
+
+    assert client.chat.call_args.kwargs["messages"] == [
+        {
+            "role": "user",
+            "content": "PREPARED PROMPT",
+        }
+    ]

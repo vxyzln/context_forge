@@ -7,6 +7,7 @@ from context_forge.provider.config import ProviderConfig
 class GenerationRequest:
     task: str
     context: str
+    prompt: str
     config: ProviderConfig
 
 

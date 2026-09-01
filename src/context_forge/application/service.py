@@ -36,7 +36,9 @@ class ContextGenerationService:
             validation = self.task_validator.validate(interpretation)
 
             if validation.state != TaskState.CLEAR:
-                raise ValueError(f"task validation failed: {validation.state.value}")
+                raise ValueError(
+                    f"task validation failed: {validation.state.value}"
+                )
 
         package = self.engine.build(
             ContextRequest(
@@ -47,11 +49,22 @@ class ContextGenerationService:
         )
 
         context = self.serializer.serialize(package)
+        prompt = self._build_prompt(task=task, context=context)
 
         request = GenerationRequest(
             task=task,
             context=context,
+            prompt=prompt,
             config=config,
         )
 
         return self.provider.generate(request)
+
+    @staticmethod
+    def _build_prompt(*, task: str, context: str) -> str:
+        return (
+            "Use the following task and project context to answer "
+            "the user's request.\n\n"
+            f"Task:\n{task}\n\n"
+            f"Context:\n{context}"
+        )

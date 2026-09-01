@@ -24,9 +24,12 @@ class TaskUnderstandingService:
         if not task.strip():
             raise ValueError("task must not be empty")
 
+        prompt = self._build_prompt(task)
+
         request = GenerationRequest(
-            task=self._build_prompt(task),
+            task=task,
             context="",
+            prompt=prompt,
             config=self._config,
         )
 
@@ -117,7 +120,9 @@ class TaskUnderstandingService:
             raise TypeError(f"task interpretation field '{field}' must be a string")
 
         if not value.strip():
-            raise ValueError(f"task interpretation field '{field}' must not be empty")
+            raise ValueError(
+                f"task interpretation field '{field}' must not be empty"
+            )
 
         return value
 
@@ -137,7 +142,9 @@ class TaskUnderstandingService:
             )
 
         if not value.strip():
-            raise ValueError(f"task interpretation field '{field}' must not be empty")
+            raise ValueError(
+                f"task interpretation field '{field}' must not be empty"
+            )
 
         return value
 
@@ -149,7 +156,9 @@ class TaskUnderstandingService:
         value = data.get(field, [])
 
         if not isinstance(value, list):
-            raise TypeError(f"task interpretation field '{field}' must be an array")
+            raise TypeError(
+                f"task interpretation field '{field}' must be an array"
+            )
 
         if not all(isinstance(item, str) for item in value):
             raise TypeError(
@@ -158,7 +167,8 @@ class TaskUnderstandingService:
 
         if any(not item.strip() for item in value):
             raise ValueError(
-                f"task interpretation field '{field}' must contain non-empty strings"
+                f"task interpretation field '{field}' "
+                "must contain non-empty strings"
             )
 
         return tuple(value)

@@ -6,17 +6,19 @@ from context_forge.provider import (
 )
 
 
-def test_provider_request_stores_task_context_and_config() -> None:
+def test_provider_request_stores_task_context_prompt_and_config() -> None:
     config = ProviderConfig(model="test-model")
 
     request = GenerationRequest(
         task="authenticate user",
         context='{"task":"authenticate user","units":[]}',
+        prompt="Prepared generation prompt",
         config=config,
     )
 
     assert request.task == "authenticate user"
     assert request.context == '{"task":"authenticate user","units":[]}'
+    assert request.prompt == "Prepared generation prompt"
     assert request.config == config
 
 

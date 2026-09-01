@@ -32,7 +32,7 @@ class OllamaProvider(ContextProvider):
                 messages=[
                     {
                         "role": "user",
-                        "content": self._build_prompt(request),
+                        "content": request.prompt,
                     }
                 ],
                 stream=False,
@@ -87,15 +87,6 @@ class OllamaProvider(ContextProvider):
             options["num_predict"] = request.config.max_tokens
 
         return options
-
-    @staticmethod
-    def _build_prompt(request: GenerationRequest) -> str:
-        return (
-            "Use the following task and project context to answer "
-            "the user's request.\n\n"
-            f"Task:\n{request.task}\n\n"
-            f"Context:\n{request.context}"
-        )
 
 
 def _optional_int(value: object) -> int | None:
