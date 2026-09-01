@@ -457,6 +457,7 @@ def test_service_passes_task_interpretation_to_context_engine() -> None:
         )
     ]
 
+
 def test_service_builds_generation_prompt_before_provider() -> None:
     project = make_project()
     package = make_package()

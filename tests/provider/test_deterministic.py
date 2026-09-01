@@ -41,10 +41,7 @@ def test_deterministic_provider_returns_task_interpretation() -> None:
     request = GenerationRequest(
         task="Fix scrolling",
         context="",
-        prompt=(
-            "Interpret the following software-development task. "
-            "Fix scrolling."
-        ),
+        prompt=("Interpret the following software-development task. Fix scrolling."),
         config=ProviderConfig(model="deterministic-test"),
     )
 

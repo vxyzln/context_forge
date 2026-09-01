@@ -269,6 +269,7 @@ def test_ollama_provider_does_not_expose_thinking() -> None:
     assert result.metadata.get("thinking") is None
     assert not hasattr(result, "reasoning")
 
+
 def test_ollama_provider_sends_prepared_prompt_unchanged() -> None:
     response = make_response()
 

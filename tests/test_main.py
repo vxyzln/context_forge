@@ -499,3 +499,104 @@ max_tokens = 1024
         max_tokens=4096,
         base_url="http://cli",
     )
+
+
+def test_main_logs_generation_lifecycle(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+
+    response = type(
+        "Response",
+        (),
+        {"content": "Done."},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", str(project)],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.build_generation_service",
+        ) as build_service,
+        patch(
+            "context_forge.main.log_generation_started",
+        ) as log_started,
+        patch(
+            "context_forge.main.log_generation_completed",
+        ) as log_completed,
+        patch("builtins.input", return_value="Fix scrolling"),
+    ):
+        build_service.return_value.generate.return_value = response
+
+        main()
+
+    log_started.assert_called_once_with(
+        project_path=project.resolve(),
+        provider="ollama",
+        model="qwen2.5-coder:7b",
+    )
+
+    log_completed.assert_called_once()
+
+    completed_call = log_completed.call_args.kwargs
+
+    assert completed_call["project_path"] == project.resolve()
+    assert completed_call["provider"] == "ollama"
+    assert completed_call["model"] == "qwen2.5-coder:7b"
+    assert completed_call["duration_seconds"] >= 0
+
+
+def test_main_logs_generation_failure_without_task(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+
+    error = RuntimeError("Ollama provider request timed out")
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", str(project)],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.build_generation_service",
+        ) as build_service,
+        patch(
+            "context_forge.main.log_generation_started",
+        ),
+        patch(
+            "context_forge.main.log_generation_completed",
+        ) as log_completed,
+        patch(
+            "context_forge.main.log_generation_failed",
+        ) as log_failed,
+        patch("builtins.input", return_value="Fix scrolling"),
+    ):
+        build_service.side_effect = error
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+
+    log_completed.assert_not_called()
+    log_failed.assert_called_once()
+
+    failed_call = log_failed.call_args.kwargs
+
+    assert failed_call["project_path"] == project.resolve()
+    assert failed_call["provider"] == "ollama"
+    assert failed_call["model"] == "qwen2.5-coder:7b"
+    assert failed_call["duration_seconds"] >= 0
+    assert failed_call["error"] is error
+
+    # The user's task must never be passed to the logger.
+    assert "Fix scrolling" not in str(log_failed.call_args)

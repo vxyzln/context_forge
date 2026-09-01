@@ -36,9 +36,7 @@ class ContextGenerationService:
             validation = self.task_validator.validate(interpretation)
 
             if validation.state != TaskState.CLEAR:
-                raise ValueError(
-                    f"task validation failed: {validation.state.value}"
-                )
+                raise ValueError(f"task validation failed: {validation.state.value}")
 
         package = self.engine.build(
             ContextRequest(

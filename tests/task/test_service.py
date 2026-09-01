@@ -137,17 +137,13 @@ def test_understand_rejects_invalid_required_field() -> None:
     try:
         service.understand("Fix scrolling")
     except TypeError as exc:
-        assert str(exc) == (
-            "task interpretation field 'intent' must be a string"
-        )
+        assert str(exc) == ("task interpretation field 'intent' must be a string")
     else:
         raise AssertionError("Expected TypeError")
 
 
 def test_understand_rejects_missing_fields() -> None:
-    service, _ = make_service(
-        '{"intent":"bug_fix"}'
-    )
+    service, _ = make_service('{"intent":"bug_fix"}')
 
     try:
         service.understand("Fix scrolling")
@@ -173,8 +169,7 @@ def test_understand_rejects_invalid_concepts() -> None:
         service.understand("Fix scrolling")
     except TypeError as exc:
         assert str(exc) == (
-            "task interpretation field 'concepts' "
-            "must contain only strings"
+            "task interpretation field 'concepts' must contain only strings"
         )
     else:
         raise AssertionError("Expected TypeError")
@@ -191,8 +186,6 @@ def test_understand_rejects_empty_optional_string() -> None:
     try:
         service.understand("Fix scrolling")
     except ValueError as exc:
-        assert str(exc) == (
-            "task interpretation field 'target' must not be empty"
-        )
+        assert str(exc) == ("task interpretation field 'target' must not be empty")
     else:
         raise AssertionError("Expected ValueError")

@@ -1,5 +1,6 @@
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from context_forge.application import build_generation_service
@@ -7,6 +8,11 @@ from context_forge.config import (
     load_global_configuration,
     load_project_configuration,
     resolve_configuration,
+)
+from context_forge.operational_logging import (
+    log_generation_completed,
+    log_generation_failed,
+    log_generation_started,
 )
 from context_forge.pipeline.analyzer import ProjectAnalyzer
 from context_forge.provider import ProviderConfig
@@ -72,6 +78,10 @@ def build_provider_config(
 def main() -> None:
     args = parse_args()
 
+    root_path: Path | None = None
+    generation_config: ProviderConfig | None = None
+    started_at = time.monotonic()
+
     try:
         root_path = resolve_project_path(args.path)
         database_path = root_path / ".context_forge.db"
@@ -88,6 +98,12 @@ def main() -> None:
             root_path,
         )
 
+        log_generation_started(
+            project_path=root_path,
+            provider=generation_config.provider,
+            model=generation_config.model,
+        )
+
         service = build_generation_service(generation_config)
 
         response = service.generate(
@@ -95,13 +111,32 @@ def main() -> None:
             task=task,
             config=generation_config,
         )
+
+        log_generation_completed(
+            project_path=root_path,
+            provider=generation_config.provider,
+            model=generation_config.model,
+            duration_seconds=time.monotonic() - started_at,
+        )
+
     except (RuntimeError, TypeError, ValueError) as exc:
+        if root_path is not None:
+            log_generation_failed(
+                project_path=root_path,
+                provider=(
+                    generation_config.provider
+                    if generation_config is not None
+                    else None
+                ),
+                model=(
+                    generation_config.model if generation_config is not None else None
+                ),
+                duration_seconds=time.monotonic() - started_at,
+                error=exc,
+            )
+
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
 
     print()
     print(response.content)
-
-
-if __name__ == "__main__":
-    main()
