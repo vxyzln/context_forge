@@ -467,11 +467,3 @@ They should not be responsible for:
 - LLM reasoning
 
 These responsibilities belong to other Context Forge components.
-
-### Current Status
-
-The parser architecture is established and running at v0.5.5.
-
-The Python parser implementation is fully active. Deterministic retrieval, ranking, and budget-based context compression are implemented.
-
-Future components like the Web UI, Local LLM integration, and Git Intelligence remain in the planning phases.
