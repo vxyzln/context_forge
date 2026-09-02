@@ -1,8 +1,6 @@
 from pathlib import Path
 from uuid import uuid4
 
-import pytest
-
 from context_forge.context.file_enrichment import FileContextEnricher
 from context_forge.context.models import ContextUnit
 from context_forge.context.types import ContextUnitType
