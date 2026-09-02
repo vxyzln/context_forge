@@ -660,6 +660,47 @@ def authenticate(username, password):
     assert "Context received:" in captured.out
 
 
+def test_main_reports_generation_provider_failure_without_traceback(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    error = RuntimeError("Ollama provider request timed out after 60 seconds")
+
+    with (
+        patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch("context_forge.main.log_generation_started"),
+        patch("context_forge.main.log_generation_completed") as log_completed,
+        patch("context_forge.main.log_generation_failed") as log_failed,
+        patch("context_forge.main.build_generation_service") as build_service,
+        patch("builtins.input", return_value="Fix scrolling"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        build_service.return_value.generate.side_effect = error
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == (
+        "Error: Ollama provider request timed out after 60 seconds\n"
+    )
+
+    log_completed.assert_not_called()
+    log_failed.assert_called_once()
+
+    failed_call = log_failed.call_args.kwargs
+
+    assert failed_call["project_path"] == tmp_path.resolve()
+    assert failed_call["provider"] == "ollama"
+    assert failed_call["model"] == "qwen2.5-coder:7b"
+    assert failed_call["duration_seconds"] >= 0
+    assert failed_call["error"] is error
+    assert "Fix scrolling" not in str(log_failed.call_args)
+
+
 def test_main_handles_keyboard_interrupt_during_task_input(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -801,3 +842,34 @@ def test_main_reports_unsupported_provider_without_traceback(
 
     build_service.assert_not_called()
     log_failed.assert_not_called()
+
+
+@pytest.mark.parametrize("task", ("", "   \t  "))
+def test_main_rejects_empty_task(
+    task: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch("context_forge.main.log_generation_failed") as log_failed,
+        patch("builtins.input", return_value=task),
+        patch("context_forge.main.build_generation_service") as build_service,
+    ):
+        build_service.return_value.generate.side_effect = ValueError(
+            "task must not be empty"
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: task must not be empty\n"
+
+    build_service.assert_called_once()
+    log_failed.assert_called_once()
