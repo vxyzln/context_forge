@@ -87,6 +87,7 @@ def main() -> None:
     root_path: Path | None = None
     generation_config: ProviderConfig | None = None
     started_at = time.monotonic()
+    generation_started = False
 
     try:
         root_path = resolve_project_path(args.path)
@@ -116,6 +117,7 @@ def main() -> None:
             provider=generation_config.provider,
             model=generation_config.model,
         )
+        generation_started = True
 
         service = build_generation_service(generation_config)
 
@@ -133,7 +135,7 @@ def main() -> None:
         )
 
     except (RuntimeError, TypeError, ValueError) as exc:
-        if root_path is not None:
+        if root_path is not None and generation_started:
             log_generation_failed(
                 project_path=root_path,
                 provider=(

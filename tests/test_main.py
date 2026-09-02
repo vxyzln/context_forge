@@ -713,3 +713,59 @@ def test_main_handles_eof_during_task_input(
     assert captured.out == ""
     assert "Error: Task input ended unexpectedly" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_main_reports_analysis_failure_without_traceback(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    error = RuntimeError("repository analysis failed")
+
+    with (
+        patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch("builtins.input") as input_mock,
+        patch("context_forge.main.build_generation_service") as build_service,
+    ):
+        analyzer.return_value.analyze.side_effect = error
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: repository analysis failed\n"
+
+    input_mock.assert_not_called()
+    build_service.assert_not_called()
+
+
+def test_main_reports_configuration_failure_without_generation_failure_log(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    error = ValueError("invalid provider configuration")
+
+    with (
+        patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch("context_forge.main.build_provider_config", side_effect=error),
+        patch("context_forge.main.log_generation_failed") as log_failed,
+        patch("builtins.input", return_value="Fix scrolling"),
+        patch("context_forge.main.build_generation_service") as build_service,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: invalid provider configuration\n"
+
+    build_service.assert_not_called()
+    log_failed.assert_not_called()
