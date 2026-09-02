@@ -97,7 +97,7 @@ def test_file_enricher_adds_source_content(tmp_path: Path) -> None:
     assert enriched.content == source
 
 
-def test_file_enricher_raises_when_source_cannot_be_read(
+def test_file_enricher_skips_unavailable_source_content(
     tmp_path: Path,
 ) -> None:
     project = Project(
@@ -120,5 +120,8 @@ def test_file_enricher_raises_when_source_cannot_be_read(
         unit_type=ContextUnitType.FILE,
     )
 
-    with pytest.raises(FileNotFoundError):
-        FileContextEnricher().enrich(project, unit)
+    enriched = FileContextEnricher().enrich(project, unit)
+
+    assert enriched.content is None
+    assert len(enriched.facts) == 6
+    assert enriched.facts[0].value == "src/missing.py"

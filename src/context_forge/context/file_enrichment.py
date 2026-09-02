@@ -16,7 +16,10 @@ class FileContextEnricher:
         if file is None:
             return unit
         source_path = project.root_path / file.path
-        content = source_path.read_text(encoding="utf-8")
+        try:
+            content = source_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            content = None
 
         evidence = Evidence(
             source_id=file.id,
