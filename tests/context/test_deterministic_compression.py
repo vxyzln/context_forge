@@ -15,6 +15,7 @@ def make_unit(
     entity_id,
     *,
     relevance: float = 0.5,
+    content: str | None = None,
     signals=(),
     facts=(),
     inferences=(),
@@ -23,6 +24,7 @@ def make_unit(
         entity_id=entity_id,
         unit_type=ContextUnitType.FILE,
         relevance=relevance,
+        content=content,
         signals=signals,
         facts=facts,
         inferences=inferences,
@@ -353,3 +355,33 @@ def test_compressor_is_deterministic() -> None:
     second = compressor.compress(package)
 
     assert first == second
+
+def test_compressor_preserves_content() -> None:
+    entity_id = uuid4()
+    source = "def authenticate():\n    return True\n"
+
+    package = ContextPackage(
+        task="authentication",
+        units=(make_unit(entity_id, content=source),),
+    )
+
+    result = DeterministicContextCompressor().compress(package)
+
+    assert result.units[0].content == source
+
+def test_compressor_preserves_content_when_merging_duplicates() -> None:
+    entity_id = uuid4()
+    source = "def authenticate():\n    return True\n"
+
+    package = ContextPackage(
+        task="authentication",
+        units=(
+            make_unit(entity_id, relevance=0.8, content=source),
+            make_unit(entity_id, relevance=0.6, content=source),
+        ),
+    )
+
+    result = DeterministicContextCompressor().compress(package)
+
+    assert len(result.units) == 1
+    assert result.units[0].content == source

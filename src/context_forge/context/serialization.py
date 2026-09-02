@@ -12,6 +12,7 @@ class ContextPackageSerializer:
                     "entity_id": str(unit.entity_id),
                     "unit_type": unit.unit_type.value,
                     "relevance": unit.relevance,
+                    "content": unit.content,
                     "signals": [
                         {
                             "name": signal.name,

@@ -111,12 +111,14 @@ def test_generation_service_passes_analyzed_context_to_provider(
         encoding="utf-8",
     )
 
+    calculator_source = """
+    class Calculator:
+        def add(self, a, b):
+            return a + b
+    """
+
     (app_directory / "calculator.py").write_text(
-        """
-class Calculator:
-    def add(self, a, b):
-        return a + b
-""",
+        calculator_source,
         encoding="utf-8",
     )
 
@@ -191,6 +193,17 @@ class Calculator:
     context_entity_ids = {unit["entity_id"] for unit in payload["units"]}
 
     assert str(calculator_file.id) in context_entity_ids
+    calculator_units = [
+    unit
+    for unit in payload["units"]
+    if unit["entity_id"] == str(calculator_file.id)
+]
+
+    assert calculator_units
+    assert any(
+        unit["content"] == calculator_source
+        for unit in calculator_units
+    )
 
 
 def test_generation_service_runs_real_python_project_with_deterministic_provider(

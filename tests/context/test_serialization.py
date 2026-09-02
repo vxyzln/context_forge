@@ -27,6 +27,7 @@ def test_context_package_serialization_preserves_context() -> None:
                 entity_id=source_id,
                 unit_type=ContextUnitType.FILE,
                 relevance=0.9,
+                content="def authenticate(username, password):\n    return True\n",
                 signals=(
                     ContextSignal(
                         name="lexical_match",
@@ -61,6 +62,7 @@ def test_context_package_serialization_preserves_context() -> None:
     assert '"lexical_match"' in serialized
     assert '"file_path"' in serialized
     assert '"Authentication logic is likely in this file."' in serialized
+    assert '"content":"def authenticate(username, password):\\n    return True\\n"' in serialized
 
 
 def test_context_package_serialization_is_deterministic() -> None:

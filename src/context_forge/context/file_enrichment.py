@@ -15,6 +15,8 @@ class FileContextEnricher:
 
         if file is None:
             return unit
+        source_path = project.root_path / file.path
+        content = source_path.read_text(encoding="utf-8")
 
         evidence = Evidence(
             source_id=file.id,
@@ -58,6 +60,7 @@ class FileContextEnricher:
             entity_id=unit.entity_id,
             unit_type=unit.unit_type,
             relevance=unit.relevance,
+            content=content,
             signals=unit.signals,
             facts=unit.facts + facts,
             inferences=unit.inferences,

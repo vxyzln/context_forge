@@ -40,6 +40,7 @@ class ContextUnit:
     entity_id: UUID
     unit_type: ContextUnitType
     relevance: float = 0.0
+    content: str | None = None
     signals: tuple[ContextSignal, ...] = ()
     facts: tuple[Fact, ...] = ()
     inferences: tuple[Inference, ...] = ()

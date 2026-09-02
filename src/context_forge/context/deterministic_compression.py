@@ -37,6 +37,7 @@ class DeterministicContextCompressor(ContextCompressor):
             entity_id=first.entity_id,
             unit_type=first.unit_type,
             relevance=max(first.relevance, second.relevance),
+            content=first.content if first.content is not None else second.content,
             signals=self._merge_signals(first.signals, second.signals),
             facts=self._merge_facts(first.facts, second.facts),
             inferences=self._merge_inferences(
