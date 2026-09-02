@@ -62,7 +62,10 @@ def test_context_package_serialization_preserves_context() -> None:
     assert '"lexical_match"' in serialized
     assert '"file_path"' in serialized
     assert '"Authentication logic is likely in this file."' in serialized
-    assert '"content":"def authenticate(username, password):\\n    return True\\n"' in serialized
+    assert (
+        '"content":"def authenticate(username, password):\\n    return True\\n"'
+        in serialized
+    )
 
 
 def test_context_package_serialization_is_deterministic() -> None:

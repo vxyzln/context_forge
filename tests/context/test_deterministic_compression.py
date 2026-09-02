@@ -356,6 +356,7 @@ def test_compressor_is_deterministic() -> None:
 
     assert first == second
 
+
 def test_compressor_preserves_content() -> None:
     entity_id = uuid4()
     source = "def authenticate():\n    return True\n"
@@ -368,6 +369,7 @@ def test_compressor_preserves_content() -> None:
     result = DeterministicContextCompressor().compress(package)
 
     assert result.units[0].content == source
+
 
 def test_compressor_preserves_content_when_merging_duplicates() -> None:
     entity_id = uuid4()

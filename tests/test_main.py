@@ -623,3 +623,38 @@ def test_main_without_project_path_prints_help_without_analyzing(
     analyzer.assert_not_called()
     input_mock.assert_not_called()
     build_service.assert_not_called()
+
+
+def test_main_runs_complete_python_project_workflow(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = """
+def authenticate(username, password):
+    return username == "admin" and password == "secret"
+"""
+
+    source_file = tmp_path / "auth.py"
+    source_file.write_text(source, encoding="utf-8")
+
+    argv = [
+        "context-forge",
+        str(tmp_path),
+        "--provider",
+        "deterministic",
+        "--model",
+        "deterministic-test",
+    ]
+
+    with (
+        patch.object(sys, "argv", argv),
+        patch("builtins.input", return_value="Explain the authenticate function"),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert captured.out
+    assert "Explain the authenticate function" in captured.out
+    assert "Context received:" in captured.out

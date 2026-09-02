@@ -1,5 +1,6 @@
 from pathlib import Path
 from uuid import uuid4
+
 import pytest
 
 from context_forge.context.file_enrichment import FileContextEnricher
@@ -64,6 +65,7 @@ def test_file_enricher_ignores_non_file_units() -> None:
 
     assert enriched == unit
 
+
 def test_file_enricher_adds_source_content(tmp_path: Path) -> None:
     source = "def authenticate(username, password):\n    return True\n"
     source_path = tmp_path / "src" / "auth.py"
@@ -93,6 +95,7 @@ def test_file_enricher_adds_source_content(tmp_path: Path) -> None:
     enriched = FileContextEnricher().enrich(project, unit)
 
     assert enriched.content == source
+
 
 def test_file_enricher_raises_when_source_cannot_be_read(
     tmp_path: Path,

@@ -194,16 +194,13 @@ def test_generation_service_passes_analyzed_context_to_provider(
 
     assert str(calculator_file.id) in context_entity_ids
     calculator_units = [
-    unit
-    for unit in payload["units"]
-    if unit["entity_id"] == str(calculator_file.id)
-]
+        unit
+        for unit in payload["units"]
+        if unit["entity_id"] == str(calculator_file.id)
+    ]
 
     assert calculator_units
-    assert any(
-        unit["content"] == calculator_source
-        for unit in calculator_units
-    )
+    assert any(unit["content"] == calculator_source for unit in calculator_units)
 
 
 def test_generation_service_runs_real_python_project_with_deterministic_provider(
