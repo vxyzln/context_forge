@@ -18,7 +18,7 @@ from context_forge.pipeline.analyzer import ProjectAnalyzer
 from context_forge.provider import ProviderConfig
 
 
-def parse_args() -> argparse.Namespace:
+def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="context-forge",
         description="Generate context-forge responses for software projects.",
@@ -27,15 +27,17 @@ def parse_args() -> argparse.Namespace:
         "path",
         nargs="?",
         type=Path,
-        default=Path.cwd(),
     )
     parser.add_argument("--provider", default=None)
     parser.add_argument("--model", default=None)
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--max-tokens", type=int, default=None)
     parser.add_argument("--base-url", default=None)
+    return parser
 
-    return parser.parse_args()
+
+def parse_args() -> argparse.Namespace:
+    return create_parser().parse_args()
 
 
 def resolve_project_path(path: Path) -> Path:
@@ -63,20 +65,24 @@ def build_provider_config(
     )
 
     return ProviderConfig(
-        provider=args.provider if args.provider is not None else resolved.provider,
+        provider=(args.provider if args.provider is not None else resolved.provider),
         model=args.model if args.model is not None else resolved.model,
-        temperature=args.temperature
-        if args.temperature is not None
-        else resolved.temperature,
-        max_tokens=args.max_tokens
-        if args.max_tokens is not None
-        else resolved.max_tokens,
-        base_url=args.base_url if args.base_url is not None else resolved.base_url,
+        temperature=(
+            args.temperature if args.temperature is not None else resolved.temperature
+        ),
+        max_tokens=(
+            args.max_tokens if args.max_tokens is not None else resolved.max_tokens
+        ),
+        base_url=(args.base_url if args.base_url is not None else resolved.base_url),
     )
 
 
 def main() -> None:
     args = parse_args()
+
+    if args.path is None:
+        create_parser().print_help()
+        return
 
     root_path: Path | None = None
     generation_config: ProviderConfig | None = None

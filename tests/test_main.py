@@ -22,7 +22,7 @@ def test_main_reports_provider_error_without_traceback(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with (
-        patch.object(sys, "argv", ["context-forge"]),
+        patch.object(sys, "argv", ["context-forge", "."]),
         patch("context_forge.main.ProjectAnalyzer"),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="Fix scrolling"),
@@ -52,7 +52,7 @@ def test_main_prints_generation_response(
     )()
 
     with (
-        patch.object(sys, "argv", ["context-forge"]),
+        patch.object(sys, "argv", ["context-forge", "."]),
         patch("context_forge.main.ProjectAnalyzer"),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="Fix scrolling"),
@@ -77,7 +77,7 @@ def test_main_uses_default_provider_configuration() -> None:
     )
 
     with (
-        patch.object(sys, "argv", ["context-forge"]),
+        patch.object(sys, "argv", ["context-forge", "."]),
         patch("context_forge.main.ProjectAnalyzer"),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="Fix scrolling"),
@@ -111,6 +111,7 @@ def test_main_uses_custom_provider_configuration() -> None:
 
     argv = [
         "context-forge",
+        ".",
         "--provider",
         "deterministic",
         "--model",
@@ -149,7 +150,7 @@ def test_main_uses_custom_provider_configuration() -> None:
 
 def test_main_passes_same_configuration_to_service_and_generation() -> None:
     with (
-        patch.object(sys, "argv", ["context-forge"]),
+        patch.object(sys, "argv", ["context-forge", "."]),
         patch("context_forge.main.ProjectAnalyzer"),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="Fix scrolling"),
@@ -600,3 +601,25 @@ def test_main_logs_generation_failure_without_task(
 
     # The user's task must never be passed to the logger.
     assert "Fix scrolling" not in str(log_failed.call_args)
+
+
+def test_main_without_project_path_prints_help_without_analyzing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(sys, "argv", ["context-forge"]),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch("builtins.input") as input_mock,
+        patch("context_forge.main.build_generation_service") as build_service,
+    ):
+        main()
+
+    captured = capsys.readouterr()
+
+    assert "usage: context-forge" in captured.out
+    assert "Generate context-forge responses for software projects." in captured.out
+    assert captured.err == ""
+
+    analyzer.assert_not_called()
+    input_mock.assert_not_called()
+    build_service.assert_not_called()
