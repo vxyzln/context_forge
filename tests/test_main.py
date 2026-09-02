@@ -658,3 +658,58 @@ def authenticate(username, password):
     assert captured.out
     assert "Explain the authenticate function" in captured.out
     assert "Context received:" in captured.out
+
+
+def test_main_handles_keyboard_interrupt_during_task_input(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv = [
+        "context-forge",
+        str(tmp_path),
+        "--provider",
+        "deterministic",
+        "--model",
+        "deterministic-test",
+    ]
+
+    with (
+        patch.object(sys, "argv", argv),
+        patch("builtins.input", side_effect=KeyboardInterrupt),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 130
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+
+
+def test_main_handles_eof_during_task_input(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv = [
+        "context-forge",
+        str(tmp_path),
+        "--provider",
+        "deterministic",
+        "--model",
+        "deterministic-test",
+    ]
+
+    with (
+        patch.object(sys, "argv", argv),
+        patch("builtins.input", side_effect=EOFError),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 1
+    assert captured.out == ""
+    assert "Error: Task input ended unexpectedly" in captured.err
+    assert "Traceback" not in captured.err

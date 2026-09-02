@@ -97,7 +97,14 @@ def main() -> None:
             database_path=database_path,
         ).analyze()
 
-        task = input("Task: ").strip()
+        try:
+            task = input("Task: ").strip()
+        except KeyboardInterrupt:
+            print(file=sys.stderr)
+            raise SystemExit(130) from None
+        except EOFError:
+            print("Error: Task input ended unexpectedly", file=sys.stderr)
+            raise SystemExit(1) from None
 
         generation_config = build_provider_config(
             args,
