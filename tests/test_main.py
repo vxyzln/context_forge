@@ -769,3 +769,35 @@ def test_main_reports_configuration_failure_without_generation_failure_log(
 
     build_service.assert_not_called()
     log_failed.assert_not_called()
+
+
+def test_main_reports_unsupported_provider_without_traceback(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    argv = [
+        "context-forge",
+        str(tmp_path),
+        "--provider",
+        "unknown",
+    ]
+
+    with (
+        patch.object(sys, "argv", argv),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch("context_forge.main.build_generation_service") as build_service,
+        patch("context_forge.main.log_generation_failed") as log_failed,
+        patch("builtins.input", return_value="Fix scrolling"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: Unsupported provider: unknown\n"
+
+    build_service.assert_not_called()
+    log_failed.assert_not_called()
