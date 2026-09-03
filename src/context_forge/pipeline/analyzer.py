@@ -13,7 +13,11 @@ from context_forge.storage.repository import ProjectRepository
 
 
 class ProjectAnalyzer:
-    def __init__(self, root_path: Path, database_path: Path) -> None:
+    def __init__(
+        self,
+        root_path: Path,
+        database_path: Path,
+    ) -> None:
         self.root_path = root_path.resolve()
         self.database = Database(database_path)
         self.repository = ProjectRepository(self.database)
@@ -31,13 +35,18 @@ class ProjectAnalyzer:
             if parser is None:
                 if language.value != "unknown":
                     project.errors.append(
-                        f"{file.path}: no parser available for language '{language.value}'"
+                        f"{file.path}: no parser available for language "
+                        f"'{language.value}'"
                     )
                 continue
 
             try:
-                source = (project.root_path / file.path).read_text(encoding="utf-8")
+                source = (
+                    project.root_path / file.path
+                ).read_text(encoding="utf-8")
+
                 result: ParseResult = parser.parse(source, file)
+
             except (OSError, UnicodeDecodeError) as error:
                 project.errors.append(f"{file.path}: {error}")
                 continue
@@ -46,7 +55,10 @@ class ProjectAnalyzer:
                 project.add_symbol(symbol)
 
             project.imports.extend(result.imports)
-            project.relationships.extend(result.relationships)
+            project.references.extend(result.references)
+            project.inheritance_references.extend(
+                result.inheritance_references
+            )
 
             for error in result.errors:
                 project.errors.append(
@@ -67,8 +79,16 @@ class ProjectAnalyzer:
             registry = ParserRegistry()
             registry.register(PythonParser())
 
-            self._parse_project(project, detector, registry)
-            RelationshipBuilder().build(project, project.imports)
+            self._parse_project(
+                project,
+                detector,
+                registry,
+            )
+
+            RelationshipBuilder().build(
+                project,
+                project.imports,
+            )
 
             git_repository = GitRepository(self.root_path)
 
