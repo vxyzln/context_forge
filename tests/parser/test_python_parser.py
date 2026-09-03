@@ -151,3 +151,102 @@ from app.utils import hello
 
     assert len(result.imports) == 1
     assert result.imports[0].module_name == "app.utils"
+
+
+def test_python_parser_builds_function_signatures() -> None:
+    source = """\
+def calculate(value: int, multiplier: int = 2) -> int:
+    return value * multiplier
+"""
+
+    result = PythonParser().parse(source, create_python_file())
+
+    function = next(symbol for symbol in result.symbols if symbol.name == "calculate")
+
+    assert function.signature == ("calculate(value: int, multiplier: int = 2)")
+
+
+def test_python_parser_distinguishes_nested_function_from_method() -> None:
+    source = """\
+def outer():
+    def inner():
+        return 1
+
+    return inner
+"""
+
+    result = PythonParser().parse(source, create_python_file())
+
+    inner = next(symbol for symbol in result.symbols if symbol.name == "inner")
+
+    assert inner.kind == "function"
+    assert inner.qualified_name == "outer.inner"
+
+
+def test_python_parser_builds_nested_class_qualified_name() -> None:
+    source = """\
+class Outer:
+    class Inner:
+        pass
+"""
+
+    result = PythonParser().parse(source, create_python_file())
+
+    inner = next(symbol for symbol in result.symbols if symbol.name == "Inner")
+
+    assert inner.qualified_name == "Outer.Inner"
+    assert inner.kind == "class"
+
+
+def test_python_parser_records_import_alias() -> None:
+    source = """\
+import pathlib as path
+"""
+
+    result = PythonParser().parse(source, create_python_file())
+
+    assert result.imports[0].module_name == "pathlib"
+    assert result.imports[0].alias == "path"
+
+    symbol = next(symbol for symbol in result.symbols if symbol.kind == "import")
+
+    assert symbol.name == "path"
+    assert symbol.qualified_name == "pathlib"
+
+
+def test_python_parser_records_from_import_alias() -> None:
+    source = """\
+from pathlib import Path as FilePath
+"""
+
+    result = PythonParser().parse(source, create_python_file())
+
+    assert result.imports[0].module_name == "pathlib"
+    assert result.imports[0].imported_name == "Path"
+    assert result.imports[0].alias == "FilePath"
+
+
+def test_python_parser_finds_variables_and_constants() -> None:
+    source = """\
+MAX_RETRIES = 3
+name = "Context Forge"
+"""
+
+    result = PythonParser().parse(source, create_python_file())
+
+    symbols = {(symbol.kind, symbol.name) for symbol in result.symbols}
+
+    assert ("constant", "MAX_RETRIES") in symbols
+    assert ("variable", "name") in symbols
+
+
+def test_python_parser_handles_relative_imports() -> None:
+    source = """\
+from .utils import helper
+"""
+
+    result = PythonParser().parse(source, create_python_file())
+
+    assert result.imports[0].module_name == ".utils"
+    assert result.imports[0].imported_name == "helper"
+    assert result.imports[0].level == 1

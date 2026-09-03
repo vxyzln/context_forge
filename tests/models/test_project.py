@@ -114,3 +114,33 @@ def test_project_git_activity_defaults_to_none() -> None:
     )
 
     assert project.git_activity is None
+
+
+def test_project_adds_symbol_from_project_file() -> None:
+    from context_forge.models.symbol import Symbol
+
+    project = Project(
+        name="Context Forge",
+        root_path=Path.cwd(),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("main.py"),
+        name="main.py",
+        extension=".py",
+    )
+
+    project.add_file(file)
+
+    symbol = Symbol(
+        file_id=file.id,
+        name="main",
+        kind="function",
+        start_line=1,
+        end_line=2,
+    )
+
+    project.add_symbol(symbol)
+
+    assert project.symbols == [symbol]

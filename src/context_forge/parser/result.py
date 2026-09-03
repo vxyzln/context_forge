@@ -17,6 +17,9 @@ class ParseError:
 class ImportReference:
     file_id: UUID
     module_name: str
+    imported_name: str | None = None
+    alias: str | None = None
+    level: int = 0
 
 
 @dataclass

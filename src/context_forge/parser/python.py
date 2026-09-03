@@ -18,7 +18,11 @@ class PythonParser(Parser):
 
     def parse(self, source: str, file: File) -> ParseResult:
         try:
-            tree = ast.parse(source)
+            tree = ast.parse(
+                source,
+                filename=str(file.path),
+                type_comments=True,
+            )
         except SyntaxError as error:
             return ParseResult(
                 errors=[
@@ -47,55 +51,122 @@ class SymbolVisitor(ast.NodeVisitor):
         self.imports: list[ImportReference] = []
         self.parent_stack: list[Symbol] = []
 
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+    def _qualified_name(self, name: str) -> str:
+        if not self.parent_stack:
+            return name
+
+        return ".".join([symbol.name for symbol in self.parent_stack] + [name])
+
+    def _add_symbol(
+        self,
+        *,
+        name: str,
+        kind: str,
+        node: ast.AST,
+        signature: str | None = None,
+    ) -> Symbol:
+        parent = self.parent_stack[-1] if self.parent_stack else None
+
         symbol = Symbol(
             file_id=self.file.id,
-            name=node.name,
-            kind="class",
-            start_line=node.lineno,
-            end_line=node.end_lineno or node.lineno,
-            qualified_name=node.name,
+            name=name,
+            kind=kind,
+            start_line=getattr(node, "lineno", 1),
+            end_line=getattr(node, "end_lineno", None) or getattr(node, "lineno", 1),
+            qualified_name=self._qualified_name(name),
+            parent_symbol_id=parent.id if parent else None,
+            signature=signature,
         )
 
         self.symbols.append(symbol)
+        return symbol
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        symbol = self._add_symbol(
+            name=node.name,
+            kind="class",
+            node=node,
+        )
+
         self.parent_stack.append(symbol)
-
         self.generic_visit(node)
-
         self.parent_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._add_function(node)
+        self._visit_function(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._add_function(node)
+        self._visit_function(node)
 
-    def _add_function(
+    def _visit_function(
         self,
         node: ast.FunctionDef | ast.AsyncFunctionDef,
     ) -> None:
         parent = self.parent_stack[-1] if self.parent_stack else None
+        kind = "method" if self._is_class_scope(parent) else "function"
 
-        kind = "method" if parent is not None else "function"
-
-        qualified_name = f"{parent.qualified_name}.{node.name}" if parent else node.name
-
-        symbol = Symbol(
-            file_id=self.file.id,
+        symbol = self._add_symbol(
             name=node.name,
             kind=kind,
-            start_line=node.lineno,
-            end_line=node.end_lineno or node.lineno,
-            qualified_name=qualified_name,
-            parent_symbol_id=parent.id if parent else None,
+            node=node,
+            signature=self._build_signature(node),
         )
 
-        self.symbols.append(symbol)
         self.parent_stack.append(symbol)
-
         self.generic_visit(node)
-
         self.parent_stack.pop()
+
+    def _is_class_scope(self, parent: Symbol | None) -> bool:
+        return parent is not None and parent.kind == "class"
+
+    def _build_signature(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> str:
+        arguments = node.args
+
+        positional = [
+            *arguments.posonlyargs,
+            *arguments.args,
+        ]
+
+        defaults = [None] * (len(positional) - len(arguments.defaults)) + list(
+            arguments.defaults
+        )
+
+        parts: list[str] = []
+
+        for argument, default in zip(positional, defaults):
+            parts.append(self._format_argument(argument, default))
+
+        if arguments.vararg is not None:
+            parts.append(f"*{arguments.vararg.arg}")
+
+        for argument, default in zip(
+            arguments.kwonlyargs,
+            arguments.kw_defaults,
+        ):
+            parts.append(self._format_argument(argument, default))
+
+        if arguments.kwarg is not None:
+            parts.append(f"**{arguments.kwarg.arg}")
+
+        return f"{node.name}({', '.join(parts)})"
+
+    def _format_argument(
+        self,
+        argument: ast.arg,
+        default: ast.expr | None,
+    ) -> str:
+        annotation = (
+            f": {ast.unparse(argument.annotation)}"
+            if argument.annotation is not None
+            else ""
+        )
+
+        default_text = f" = {ast.unparse(default)}" if default is not None else ""
+
+        return f"{argument.arg}{annotation}{default_text}"
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -103,45 +174,65 @@ class SymbolVisitor(ast.NodeVisitor):
                 ImportReference(
                     file_id=self.file.id,
                     module_name=alias.name,
+                    alias=alias.asname,
                 )
             )
 
-            symbol = Symbol(
-                file_id=self.file.id,
-                name=alias.name,
+            symbol = self._add_symbol(
+                name=alias.asname or alias.name,
                 kind="import",
-                start_line=node.lineno,
-                end_line=node.lineno,
-                qualified_name=alias.name,
+                node=node,
             )
 
-            self.symbols.append(symbol)
+            symbol.qualified_name = alias.name
 
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         module = node.module or ""
+        prefix = "." * node.level + module
 
-        if module:
+        for alias in node.names:
             self.imports.append(
                 ImportReference(
                     file_id=self.file.id,
-                    module_name=module,
+                    module_name=prefix,
+                    imported_name=alias.name,
+                    alias=alias.asname,
+                    level=node.level,
                 )
             )
 
-        for alias in node.names:
-            name = f"{module}.{alias.name}" if module else alias.name
-
-            symbol = Symbol(
-                file_id=self.file.id,
-                name=alias.name,
+            symbol = self._add_symbol(
+                name=alias.asname or alias.name,
                 kind="import",
-                start_line=node.lineno,
-                end_line=node.lineno,
-                qualified_name=name,
+                node=node,
             )
 
-            self.symbols.append(symbol)
+            symbol.qualified_name = f"{prefix}.{alias.name}" if prefix else alias.name
 
         self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            self._visit_assignment_target(target, node)
+
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self._visit_assignment_target(node.target, node)
+        self.generic_visit(node)
+
+    def _visit_assignment_target(
+        self,
+        target: ast.expr,
+        node: ast.AST,
+    ) -> None:
+        if isinstance(target, ast.Name):
+            kind = "constant" if target.id.isupper() else "variable"
+
+            self._add_symbol(
+                name=target.id,
+                kind=kind,
+                node=node,
+            )
