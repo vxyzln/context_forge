@@ -5,7 +5,12 @@ from context_forge.models.project import Project
 from context_forge.provider.base import ContextProvider
 from context_forge.provider.config import ProviderConfig
 from context_forge.provider.models import GenerationRequest, GenerationResponse
-from context_forge.task import TaskState, TaskUnderstandingService, TaskValidator
+from context_forge.task import (
+    TaskGroundingService,
+    TaskState,
+    TaskUnderstandingService,
+    TaskValidator,
+)
 
 
 class ContextGenerationService:
@@ -16,12 +21,14 @@ class ContextGenerationService:
         provider: ContextProvider,
         task_understanding: TaskUnderstandingService | None = None,
         task_validator: TaskValidator | None = None,
+        task_grounding: TaskGroundingService | None = None,
     ) -> None:
         self.engine = engine
         self.serializer = serializer
         self.provider = provider
         self.task_understanding = task_understanding
         self.task_validator = task_validator
+        self.task_grounding = task_grounding
 
     def generate(
         self,
@@ -30,6 +37,7 @@ class ContextGenerationService:
         config: ProviderConfig,
     ) -> GenerationResponse:
         interpretation = None
+        grounding = None
 
         if self.task_understanding is not None and self.task_validator is not None:
             interpretation = self.task_understanding.understand(task)
@@ -38,11 +46,18 @@ class ContextGenerationService:
             if validation.state != TaskState.CLEAR:
                 raise ValueError(f"task validation failed: {validation.state.value}")
 
+        if interpretation is not None and self.task_grounding is not None:
+            grounding = self.task_grounding.ground(
+                project,
+                interpretation,
+            )
+
         package = self.engine.build(
             ContextRequest(
                 project=project,
                 task=task,
                 interpretation=interpretation,
+                grounding=grounding,
             )
         )
 

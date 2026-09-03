@@ -15,6 +15,7 @@ from context_forge.provider import (
     ProviderConfig,
 )
 from context_forge.task import (
+    GroundedTask,
     TaskInterpretation,
     TaskState,
     TaskValidation,
@@ -311,6 +312,22 @@ class StubTaskValidator:
         return self.validation
 
 
+class StubTaskGrounding:
+    def __init__(self, grounding: GroundedTask) -> None:
+        self.grounding = grounding
+        self.projects: list[Project] = []
+        self.interpretations: list[TaskInterpretation] = []
+
+    def ground(
+        self,
+        project: Project,
+        interpretation: TaskInterpretation,
+    ) -> GroundedTask:
+        self.projects.append(project)
+        self.interpretations.append(interpretation)
+        return self.grounding
+
+
 def make_task_interpretation() -> TaskInterpretation:
     return TaskInterpretation(
         task="authenticate user",
@@ -349,6 +366,92 @@ def test_service_validates_task_before_building_context() -> None:
 
     assert understanding.tasks == ["authenticate user"]
     assert validator.interpretations == [interpretation]
+
+
+def test_service_passes_grounding_to_context_request() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    interpretation = make_task_interpretation()
+    grounding = GroundedTask(interpretation=interpretation)
+
+    understanding = StubTaskUnderstanding(interpretation)
+    validator = StubTaskValidator(
+        TaskValidation(state=TaskState.CLEAR),
+    )
+    task_grounding = StubTaskGrounding(grounding)
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+        task_understanding=understanding,
+        task_validator=validator,
+        task_grounding=task_grounding,
+    )
+
+    service.generate(
+        project=project,
+        task="authenticate user",
+        config=ProviderConfig(model="test-model"),
+    )
+
+    assert task_grounding.projects == [project]
+    assert task_grounding.interpretations == [interpretation]
+    assert engine.calls == [
+        ContextRequest(
+            project=project,
+            task="authenticate user",
+            interpretation=interpretation,
+            grounding=grounding,
+        )
+    ]
+
+
+def test_service_does_not_ground_invalid_task() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    interpretation = make_task_interpretation()
+    understanding = StubTaskUnderstanding(interpretation)
+    validator = StubTaskValidator(
+        TaskValidation(
+            state=TaskState.AMBIGUOUS,
+            reasons=("target is unclear",),
+        )
+    )
+    task_grounding = StubTaskGrounding(
+        GroundedTask(interpretation=interpretation),
+    )
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+        task_understanding=understanding,
+        task_validator=validator,
+        task_grounding=task_grounding,
+    )
+
+    try:
+        service.generate(
+            project=project,
+            task="authenticate user",
+            config=ProviderConfig(model="test-model"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "task validation failed: ambiguous"
+    else:
+        raise AssertionError("Expected ValueError")
+
+    assert task_grounding.projects == []
+    assert task_grounding.interpretations == []
+    assert engine.calls == []
+    assert provider.requests == []
 
 
 def test_service_rejects_ambiguous_task_before_context_generation() -> None:

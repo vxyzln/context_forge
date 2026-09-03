@@ -20,7 +20,11 @@ from context_forge.context import (
 )
 from context_forge.context.depth import ContextDepthSelector
 from context_forge.provider import ProviderConfig, ProviderFactory
-from context_forge.task import TaskUnderstandingService, TaskValidator
+from context_forge.task import (
+    TaskGroundingService,
+    TaskUnderstandingService,
+    TaskValidator,
+)
 
 
 def build_context_engine() -> DefaultContextEngine:
@@ -67,4 +71,5 @@ def build_generation_service(
             config=task_understanding_config,
         ),
         task_validator=TaskValidator(),
+        task_grounding=TaskGroundingService(),
     )

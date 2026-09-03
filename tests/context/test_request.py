@@ -4,7 +4,7 @@ import pytest
 
 from context_forge.context import ContextRequest
 from context_forge.models.project import Project
-from context_forge.task import TaskInterpretation
+from context_forge.task import GroundedTask, TaskInterpretation
 
 
 def test_context_request_stores_task_interpretation() -> None:
@@ -60,3 +60,28 @@ def test_context_request_defaults_interpretation() -> None:
     )
 
     assert request.interpretation is None
+
+
+def test_context_request_stores_grounded_task() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    interpretation = TaskInterpretation(
+        task="Fix settings scrolling",
+        intent="bug_fix",
+        target="settings page",
+    )
+    grounding = GroundedTask(
+        interpretation=interpretation,
+    )
+
+    request = ContextRequest(
+        project=project,
+        task="Fix settings scrolling",
+        interpretation=interpretation,
+        grounding=grounding,
+    )
+
+    assert request.grounding is grounding
