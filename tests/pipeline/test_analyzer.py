@@ -1,6 +1,7 @@
 import subprocess
 from pathlib import Path
 
+from context_forge.models.relationship import RelationshipType
 from context_forge.pipeline.analyzer import ProjectAnalyzer
 from context_forge.query import ProjectQuery
 
@@ -1136,3 +1137,54 @@ class Calculator:
 
     assert "Calculator" in loaded_symbol_names
     assert "add" in loaded_symbol_names
+
+
+def test_analyzer_builds_reference_and_inheritance_relationships(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "base.py").write_text(
+        """
+class Base:
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "child.py").write_text(
+        """
+from base import Base
+
+
+class Child(Base):
+    def run(self) -> None:
+        Base()
+""",
+        encoding="utf-8",
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert project.errors == []
+
+    base = next(symbol for symbol in project.symbols if symbol.name == "Base")
+    child = next(symbol for symbol in project.symbols if symbol.name == "Child")
+
+    assert any(
+        relationship.source_id == child.id
+        and relationship.target_id == base.id
+        and relationship.relationship_type == RelationshipType.INHERITS
+        for relationship in project.relationships
+    )
+
+    assert any(
+        relationship.target_id == base.id
+        and relationship.relationship_type == RelationshipType.REFERENCES
+        for relationship in project.relationships
+    )
+
+    assert database_path.exists()

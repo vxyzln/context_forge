@@ -54,10 +54,7 @@ class RelationshipBuilder:
 
     def _build_ownership_relationships(self, project: Project) -> None:
         seen: set[tuple[UUID, UUID, str]] = set()
-        symbols_by_id = {
-            symbol.id: symbol
-            for symbol in project.symbols
-        }
+        symbols_by_id = {symbol.id: symbol for symbol in project.symbols}
 
         for symbol in project.symbols:
             if symbol.parent_symbol_id is None:
@@ -325,8 +322,7 @@ class RelationshipBuilder:
 
             if import_reference.imported_name:
                 qualified_name = (
-                    f"{import_reference.module_name}."
-                    f"{import_reference.imported_name}"
+                    f"{import_reference.module_name}.{import_reference.imported_name}"
                 ).lstrip(".")
 
                 imported_candidates.extend(
@@ -357,9 +353,7 @@ class RelationshipBuilder:
                     )
                 )
 
-        imported_candidates = self._unique_symbols(
-            imported_candidates
-        )
+        imported_candidates = self._unique_symbols(imported_candidates)
 
         if len(imported_candidates) == 1:
             return imported_candidates[0], 0.9
@@ -425,9 +419,7 @@ class RelationshipBuilder:
             if len(imported_candidates) == 1:
                 return imported_candidates[0], 0.9
 
-        local_candidates = self._unique_symbols(
-            symbols_by_name.get(reference.name, [])
-        )
+        local_candidates = self._unique_symbols(symbols_by_name.get(reference.name, []))
 
         if len(local_candidates) == 1:
             return local_candidates[0], 0.8
@@ -438,10 +430,7 @@ class RelationshipBuilder:
         self,
         symbols: list[Symbol],
     ) -> list[Symbol]:
-        unique: dict[UUID, Symbol] = {
-            symbol.id: symbol
-            for symbol in symbols
-        }
+        unique: dict[UUID, Symbol] = {symbol.id: symbol for symbol in symbols}
 
         return sorted(
             unique.values(),
@@ -514,18 +503,12 @@ class RelationshipBuilder:
                 return target
 
             if import_reference.imported_name:
-                return file_by_module.get(
-                    f"{module}.{import_reference.imported_name}"
-                )
+                return file_by_module.get(f"{module}.{import_reference.imported_name}")
 
             return None
 
         source_file = next(
-            (
-                file
-                for file in project.files
-                if file.id == import_reference.file_id
-            ),
+            (file for file in project.files if file.id == import_reference.file_id),
             None,
         )
 

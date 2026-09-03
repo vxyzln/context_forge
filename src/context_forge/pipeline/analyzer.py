@@ -41,9 +41,7 @@ class ProjectAnalyzer:
                 continue
 
             try:
-                source = (
-                    project.root_path / file.path
-                ).read_text(encoding="utf-8")
+                source = (project.root_path / file.path).read_text(encoding="utf-8")
 
                 result: ParseResult = parser.parse(source, file)
 
@@ -56,9 +54,7 @@ class ProjectAnalyzer:
 
             project.imports.extend(result.imports)
             project.references.extend(result.references)
-            project.inheritance_references.extend(
-                result.inheritance_references
-            )
+            project.inheritance_references.extend(result.inheritance_references)
 
             for error in result.errors:
                 project.errors.append(

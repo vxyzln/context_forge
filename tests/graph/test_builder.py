@@ -2,6 +2,7 @@ from pathlib import Path
 
 from context_forge.graph.builder import RelationshipBuilder
 from context_forge.models.project import Project
+from context_forge.models.relationship import RelationshipType
 from context_forge.parser.python import PythonParser
 from context_forge.scanner.repository import RepositoryScanner
 
@@ -19,8 +20,9 @@ def parse_project(project: Project) -> None:
         for symbol in result.symbols:
             project.add_symbol(symbol)
 
-        for import_reference in result.imports:
-            project.imports.append(import_reference)
+        project.imports.extend(result.imports)
+        project.references.extend(result.references)
+        project.inheritance_references.extend(result.inheritance_references)
 
 
 def test_builder_creates_definition_relationships(tmp_path: Path) -> None:
@@ -226,3 +228,173 @@ from app.utils import hello
     assert len(imports) == 1
     assert imports[0].source_id == main_file_id
     assert imports[0].target_id == utils_file_id
+
+
+def test_builds_same_file_reference_relationship(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        """
+def helper() -> None:
+    pass
+
+
+def main() -> None:
+    helper()
+""",
+        encoding="utf-8",
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, project.imports)
+
+    helper = next(symbol for symbol in project.symbols if symbol.name == "helper")
+
+    relationships = [
+        relationship
+        for relationship in project.relationships
+        if relationship.target_id == helper.id
+        and relationship.relationship_type == RelationshipType.REFERENCES
+    ]
+
+    assert len(relationships) == 1
+    assert relationships[0].confidence == 0.8
+
+
+def test_builds_imported_reference_relationship(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "base.py").write_text(
+        """
+class Base:
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "child.py").write_text(
+        """
+from base import Base
+
+
+def use() -> None:
+    Base()
+""",
+        encoding="utf-8",
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, project.imports)
+
+    base = next(symbol for symbol in project.symbols if symbol.name == "Base")
+
+    relationships = [
+        relationship
+        for relationship in project.relationships
+        if relationship.target_id == base.id
+        and relationship.relationship_type == RelationshipType.REFERENCES
+    ]
+
+    assert len(relationships) == 1
+    assert relationships[0].confidence == 0.9
+
+
+def test_builds_inheritance_relationship(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "base.py").write_text(
+        """
+class Base:
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    (tmp_path / "child.py").write_text(
+        """
+from base import Base
+
+
+class Child(Base):
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, project.imports)
+
+    base = next(symbol for symbol in project.symbols if symbol.name == "Base")
+    child = next(symbol for symbol in project.symbols if symbol.name == "Child")
+
+    relationships = [
+        relationship
+        for relationship in project.relationships
+        if relationship.source_id == child.id
+        and relationship.target_id == base.id
+        and relationship.relationship_type == RelationshipType.INHERITS
+    ]
+
+    assert len(relationships) == 1
+    assert relationships[0].confidence == 1.0
+
+
+def test_does_not_create_relationship_for_unresolved_reference(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        """
+def main() -> None:
+    missing_function()
+""",
+        encoding="utf-8",
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, project.imports)
+
+    assert not any(
+        relationship.relationship_type == RelationshipType.REFERENCES
+        for relationship in project.relationships
+    )
+
+
+def test_reference_relationship_metadata_is_preserved(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        """
+def helper() -> None:
+    pass
+
+
+def main() -> None:
+    helper()
+""",
+        encoding="utf-8",
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, project.imports)
+
+    helper = next(symbol for symbol in project.symbols if symbol.name == "helper")
+
+    relationship = next(
+        relationship
+        for relationship in project.relationships
+        if relationship.target_id == helper.id
+        and relationship.relationship_type == RelationshipType.REFERENCES
+    )
+
+    assert relationship.metadata["source"] == "ast"
+    assert relationship.metadata["name"] == "helper"
+    assert "qualified_name" not in relationship.metadata
+    assert "line" in relationship.metadata

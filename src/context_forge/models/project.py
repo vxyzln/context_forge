@@ -35,9 +35,7 @@ class Project:
     symbols: list[Symbol] = field(default_factory=list)
     imports: list[ImportReference] = field(default_factory=list)
     references: list[SymbolReference] = field(default_factory=list)
-    inheritance_references: list[InheritanceReference] = field(
-        default_factory=list
-    )
+    inheritance_references: list[InheritanceReference] = field(default_factory=list)
     relationships: list[Relationship] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -77,16 +75,10 @@ class Project:
         reference: InheritanceReference,
     ) -> None:
         if reference.file_id not in {file.id for file in self.files}:
-            raise ValueError(
-                "Inheritance reference file does not belong to project"
-            )
+            raise ValueError("Inheritance reference file does not belong to project")
 
-        if reference.class_symbol_id not in {
-            symbol.id for symbol in self.symbols
-        }:
-            raise ValueError(
-                "Inheritance reference class does not belong to project"
-            )
+        if reference.class_symbol_id not in {symbol.id for symbol in self.symbols}:
+            raise ValueError("Inheritance reference class does not belong to project")
 
         self.inheritance_references.append(reference)
 

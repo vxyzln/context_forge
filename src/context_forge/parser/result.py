@@ -48,9 +48,7 @@ class ParseResult:
     relationships: list[Relationship] = field(default_factory=list)
     imports: list[ImportReference] = field(default_factory=list)
     references: list[SymbolReference] = field(default_factory=list)
-    inheritance_references: list[InheritanceReference] = field(
-        default_factory=list
-    )
+    inheritance_references: list[InheritanceReference] = field(default_factory=list)
     errors: list[ParseError] = field(default_factory=list)
 
     @property

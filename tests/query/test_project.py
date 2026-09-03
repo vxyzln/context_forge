@@ -673,3 +673,106 @@ def test_query_result_reason_does_not_change_score(
     assert results
     assert results[0].score == 1.0
     assert results[0].reason == "Exact symbol name match"
+
+
+def test_get_incoming_relationships(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    relationships = query.get_incoming_relationships(
+        project.files[1].id,
+    )
+
+    assert len(relationships) == 1
+    assert relationships[0].target_id == project.files[1].id
+
+
+def test_filter_relationships_by_type(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    relationships = query.get_relationships(
+        project.files[0].id,
+        relationship_type="imports",
+    )
+
+    assert len(relationships) == 1
+    assert relationships[0].relationship_type == "imports"
+
+
+def test_get_related_entity_ids(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    related_ids = query.get_related_entity_ids(
+        project.files[0].id,
+    )
+
+    assert related_ids == {project.files[1].id}
+
+
+def test_traverse_outgoing_relationships(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    result = query.traverse(
+        project.files[0].id,
+        max_depth=1,
+        direction="outgoing",
+    )
+
+    assert result == [
+        project.files[1].id,
+    ]
+
+
+def test_traverse_respects_max_depth(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    project.add_relationship(
+        Relationship(
+            source_id=project.files[1].id,
+            target_id=project.symbols[0].id,
+            relationship_type="contains",
+        )
+    )
+
+    query = ProjectQuery(project)
+
+    depth_one = query.traverse(
+        project.files[0].id,
+        max_depth=1,
+        direction="outgoing",
+    )
+
+    depth_two = query.traverse(
+        project.files[0].id,
+        max_depth=2,
+        direction="outgoing",
+    )
+
+    assert project.symbols[0].id not in depth_one
+    assert project.symbols[0].id in depth_two
+
+
+def test_traverse_is_cycle_safe(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+
+    project.add_relationship(
+        Relationship(
+            source_id=project.files[1].id,
+            target_id=project.files[0].id,
+            relationship_type="references",
+        )
+    )
+
+    query = ProjectQuery(project)
+
+    result = query.traverse(
+        project.files[0].id,
+        max_depth=10,
+    )
+
+    assert result == [
+        project.files[1].id,
+    ]

@@ -22,18 +22,10 @@ class ProjectQuery:
         return None
 
     def find_symbols(self, name: str) -> list[Symbol]:
-        return [
-            symbol
-            for symbol in self.project.symbols
-            if symbol.name == name
-        ]
+        return [symbol for symbol in self.project.symbols if symbol.name == name]
 
     def find_symbols_in_file(self, file_id: UUID) -> list[Symbol]:
-        return [
-            symbol
-            for symbol in self.project.symbols
-            if symbol.file_id == file_id
-        ]
+        return [symbol for symbol in self.project.symbols if symbol.file_id == file_id]
 
     def get_relationships(
         self,
@@ -53,8 +45,7 @@ class ProjectQuery:
             relationships = [
                 relationship
                 for relationship in relationships
-                if self._relationship_type_value(relationship)
-                == relationship_type
+                if self._relationship_type_value(relationship) == relationship_type
             ]
 
         return self._sort_relationships(
@@ -77,8 +68,7 @@ class ProjectQuery:
             relationships = [
                 relationship
                 for relationship in relationships
-                if self._relationship_type_value(relationship)
-                == relationship_type
+                if self._relationship_type_value(relationship) == relationship_type
             ]
 
         return self._sort_relationships(
@@ -101,8 +91,7 @@ class ProjectQuery:
             relationships = [
                 relationship
                 for relationship in relationships
-                if self._relationship_type_value(relationship)
-                == relationship_type
+                if self._relationship_type_value(relationship) == relationship_type
             ]
 
         return self._sort_relationships(
@@ -166,8 +155,7 @@ class ProjectQuery:
 
         if direction not in {"outgoing", "incoming", "both"}:
             raise ValueError(
-                "Traversal direction must be 'outgoing', "
-                "'incoming', or 'both'"
+                "Traversal direction must be 'outgoing', 'incoming', or 'both'"
             )
 
         visited: set[UUID] = {entity_id}
@@ -179,13 +167,9 @@ class ProjectQuery:
 
             for current_id in frontier:
                 if direction == "outgoing":
-                    relationships = self.get_outgoing_relationships(
-                        current_id
-                    )
+                    relationships = self.get_outgoing_relationships(current_id)
                 elif direction == "incoming":
-                    relationships = self.get_incoming_relationships(
-                        current_id
-                    )
+                    relationships = self.get_incoming_relationships(current_id)
                 else:
                     relationships = self.get_relationships(current_id)
 
@@ -352,16 +336,11 @@ class ProjectQuery:
                     )
                 )
 
-        file_by_id = {
-            file.id: file
-            for file in self.project.files
-        }
+        file_by_id = {file.id: file for file in self.project.files}
 
         for symbol in self.project.symbols:
             name = symbol.name.lower()
-            qualified_name = (
-                symbol.qualified_name or symbol.name
-            ).lower()
+            qualified_name = (symbol.qualified_name or symbol.name).lower()
 
             score = 0.0
             reason = None
@@ -411,11 +390,7 @@ class ProjectQuery:
     ) -> Directory | None:
         if isinstance(directory, UUID):
             return next(
-                (
-                    item
-                    for item in self.project.directories
-                    if item.id == directory
-                ),
+                (item for item in self.project.directories if item.id == directory),
                 None,
             )
 
@@ -435,9 +410,7 @@ class ProjectQuery:
         directory_id: UUID,
     ) -> list[File]:
         return [
-            file
-            for file in self.project.files
-            if file.directory_id == directory_id
+            file for file in self.project.files if file.directory_id == directory_id
         ]
 
     def get_child_directories(

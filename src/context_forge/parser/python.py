@@ -61,9 +61,7 @@ class SymbolVisitor(ast.NodeVisitor):
         if not self.parent_stack:
             return name
 
-        return ".".join(
-            [symbol.name for symbol in self.parent_stack] + [name]
-        )
+        return ".".join([symbol.name for symbol in self.parent_stack] + [name])
 
     def _add_symbol(
         self,
@@ -80,10 +78,7 @@ class SymbolVisitor(ast.NodeVisitor):
             name=name,
             kind=kind,
             start_line=getattr(node, "lineno", 1),
-            end_line=(
-                getattr(node, "end_lineno", None)
-                or getattr(node, "lineno", 1)
-            ),
+            end_line=(getattr(node, "end_lineno", None) or getattr(node, "lineno", 1)),
             qualified_name=self._qualified_name(name),
             parent_symbol_id=parent.id if parent else None,
             signature=signature,
@@ -176,9 +171,9 @@ class SymbolVisitor(ast.NodeVisitor):
             *arguments.args,
         ]
 
-        defaults = [None] * (
-            len(positional) - len(arguments.defaults)
-        ) + list(arguments.defaults)
+        defaults = [None] * (len(positional) - len(arguments.defaults)) + list(
+            arguments.defaults
+        )
 
         parts: list[str] = []
 
@@ -210,11 +205,7 @@ class SymbolVisitor(ast.NodeVisitor):
             else ""
         )
 
-        default_text = (
-            f" = {ast.unparse(default)}"
-            if default is not None
-            else ""
-        )
+        default_text = f" = {ast.unparse(default)}" if default is not None else ""
 
         return f"{argument.arg}{annotation}{default_text}"
 
@@ -257,9 +248,7 @@ class SymbolVisitor(ast.NodeVisitor):
                 node=node,
             )
 
-            symbol.qualified_name = (
-                f"{prefix}.{alias.name}" if prefix else alias.name
-            )
+            symbol.qualified_name = f"{prefix}.{alias.name}" if prefix else alias.name
 
     def visit_Name(self, node: ast.Name) -> None:
         if isinstance(node.ctx, ast.Load):

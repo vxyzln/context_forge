@@ -250,3 +250,80 @@ from .utils import helper
     assert result.imports[0].module_name == ".utils"
     assert result.imports[0].imported_name == "helper"
     assert result.imports[0].level == 1
+
+
+def test_parse_symbol_references() -> None:
+    source = """
+def helper() -> None:
+    pass
+
+
+def main() -> None:
+    helper()
+"""
+
+    parser = PythonParser()
+    file = create_python_file()
+
+    result = parser.parse(source, file)
+
+    assert result.success
+    references = [
+        reference for reference in result.references if reference.name == "helper"
+    ]
+
+    assert len(references) == 1
+    assert references[0].kind == "reference"
+    assert references[0].qualified_name is None
+
+
+def test_parse_qualified_symbol_reference() -> None:
+    source = """
+class Service:
+    def run(self) -> None:
+        pass
+
+
+service = Service()
+service.run()
+"""
+
+    parser = PythonParser()
+    file = create_python_file()
+
+    result = parser.parse(source, file)
+
+    assert result.success
+
+    qualified_references = [
+        reference
+        for reference in result.references
+        if reference.qualified_name == "service.run"
+    ]
+
+    assert len(qualified_references) == 1
+
+
+def test_parse_inheritance_reference() -> None:
+    source = """
+class Base:
+    pass
+
+
+class Child(Base):
+    pass
+"""
+
+    parser = PythonParser()
+    file = create_python_file()
+
+    result = parser.parse(source, file)
+
+    assert result.success
+    assert len(result.inheritance_references) == 1
+
+    reference = result.inheritance_references[0]
+
+    assert reference.name == "Base"
+    assert reference.qualified_name == "Base"
+    assert reference.line == 6
