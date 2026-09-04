@@ -22,6 +22,7 @@ from context_forge.context.depth import ContextDepthSelector
 from context_forge.provider import ProviderConfig, ProviderFactory
 from context_forge.task import (
     TaskGroundingService,
+    TaskRepositoryGroundingService,
     TaskUnderstandingService,
     TaskValidator,
 )
@@ -72,4 +73,5 @@ def build_generation_service(
         ),
         task_validator=TaskValidator(),
         task_grounding=TaskGroundingService(),
+        task_repository_grounding=TaskRepositoryGroundingService(),
     )

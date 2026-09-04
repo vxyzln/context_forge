@@ -4,7 +4,7 @@ import pytest
 
 from context_forge.context import ContextRequest
 from context_forge.models.project import Project
-from context_forge.task import GroundedTask, TaskInterpretation
+from context_forge.task import GroundedTask, RepositoryGrounding, TaskInterpretation
 
 
 def test_context_request_stores_task_interpretation() -> None:
@@ -62,7 +62,7 @@ def test_context_request_defaults_interpretation() -> None:
     assert request.interpretation is None
 
 
-def test_context_request_stores_grounded_task() -> None:
+def test_context_request_stores_repository_grounding() -> None:
     project = Project(
         name="demo",
         root_path=Path("/tmp/context-forge-test"),
@@ -73,8 +73,13 @@ def test_context_request_stores_grounded_task() -> None:
         intent="bug_fix",
         target="settings page",
     )
-    grounding = GroundedTask(
+
+    grounded_task = GroundedTask(
         interpretation=interpretation,
+    )
+
+    grounding = RepositoryGrounding(
+        task=grounded_task,
     )
 
     request = ContextRequest(

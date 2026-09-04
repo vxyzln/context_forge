@@ -53,6 +53,7 @@ class DefaultContextEngine(ContextEngine):
             request.project,
             request.task,
             request.interpretation,
+            request.grounding,
         )
 
         ranked = self.ranker.rank(candidates, signals)

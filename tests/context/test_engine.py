@@ -33,6 +33,34 @@ from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
+from context_forge.task import (
+    GroundedTask,
+    RepositoryGrounding,
+    TaskInterpretation,
+)
+
+
+class RecordingCandidateGenerator:
+    def __init__(self, candidates=None):
+        self.calls = []
+        self.candidates = candidates or []
+
+    def generate(
+        self,
+        project,
+        task,
+        interpretation=None,
+        grounding=None,
+    ):
+        self.calls.append(
+            {
+                "project": project,
+                "task": task,
+                "interpretation": interpretation,
+                "grounding": grounding,
+            }
+        )
+        return self.candidates, {}
 
 
 class FixedDepthSelector:
@@ -288,3 +316,86 @@ def test_default_context_engine_uses_selected_context_depth() -> None:
     assert first.id in entity_ids
     assert second.id in entity_ids
     assert third.id in entity_ids
+
+
+def test_engine_passes_repository_grounding_to_candidate_generator() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(file)
+
+    candidate_generator = RecordingCandidateGenerator(
+        candidates=[
+            ContextCandidate(
+                entity_id=file.id,
+                unit_type=ContextUnitType.FILE,
+                score=1.0,
+                source="task_grounding",
+                reason="test",
+            )
+        ]
+    )
+
+    engine = DefaultContextEngine(
+        candidate_generator=candidate_generator,
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    interpretation = TaskInterpretation(
+        task="Fix authentication",
+        intent="fix",
+        target="AuthenticationService",
+    )
+
+    grounded_task = GroundedTask(
+        interpretation=interpretation,
+    )
+
+    grounding = RepositoryGrounding(
+        task=grounded_task,
+    )
+
+    request = ContextRequest(
+        project=project,
+        task="Fix authentication",
+        interpretation=interpretation,
+        grounding=grounding,
+    )
+
+    engine.build(request)
+
+    assert len(candidate_generator.calls) == 1
+    assert candidate_generator.calls[0]["project"] is project
+    assert candidate_generator.calls[0]["task"] == "Fix authentication"
+    assert candidate_generator.calls[0]["interpretation"] is interpretation
+    assert candidate_generator.calls[0]["grounding"] is grounding

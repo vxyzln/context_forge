@@ -3,8 +3,12 @@ from context_forge.context.git_relevance import GitRelevance
 from context_forge.context.signals import RelevanceSignals
 from context_forge.context.types import ContextUnitType
 from context_forge.git.repository import GitRepository
+from context_forge.models.directory import Directory
+from context_forge.models.file import File
 from context_forge.models.project import Project
+from context_forge.models.symbol import Symbol
 from context_forge.query.project import ProjectQuery
+from context_forge.task.models import RepositoryGrounding
 
 
 class CandidateGenerator:
@@ -13,8 +17,14 @@ class CandidateGenerator:
         project: Project,
         task: str,
         interpretation=None,
+        grounding: RepositoryGrounding | None = None,
     ) -> tuple[list[ContextCandidate], dict[object, RelevanceSignals]]:
-        candidates = self._generate_candidates(project, task, interpretation)
+        candidates = self._generate_candidates(
+            project,
+            task,
+            interpretation,
+            grounding,
+        )
 
         git_relevance = GitRelevance(self._get_git_commits(project))
 
@@ -44,63 +54,154 @@ class CandidateGenerator:
         project: Project,
         task: str,
         interpretation=None,
+        grounding: RepositoryGrounding | None = None,
     ) -> list[ContextCandidate]:
         results = ProjectQuery(project).search(task)
 
         candidates = [ContextCandidate.from_search_result(result) for result in results]
 
-        if interpretation is None:
-            return candidates
-
         existing = {
             (candidate.entity_id, candidate.unit_type) for candidate in candidates
         }
 
-        for file in project.files:
-            file_text = " ".join(
-                (
-                    file.name,
-                    str(file.path),
-                )
-            ).lower()
-
-            target = (interpretation.target or "").strip().lower()
-
-            concepts = tuple(
-                concept.strip().lower()
-                for concept in interpretation.concepts
-                if concept.strip()
-            )
-
-            matches_target = bool(target and target in file_text)
-
-            symbol_names = {
-                symbol.name.lower()
-                for symbol in project.symbols
-                if symbol.file_id == file.id
-            }
-
-            matches_concept = any(
-                concept in file_text
-                or any(concept in symbol_name for symbol_name in symbol_names)
-                for concept in concepts
-            )
-
-            if (matches_target or matches_concept) and (
-                file.id,
-                ContextUnitType.FILE,
-            ) not in existing:
-                candidates.append(
-                    ContextCandidate(
-                        entity_id=file.id,
-                        unit_type=ContextUnitType.FILE,
-                        score=0.8,
-                        source="task_interpretation",
-                        reason="Task interpretation matches file",
+        if interpretation is not None:
+            for file in project.files:
+                file_text = " ".join(
+                    (
+                        file.name,
+                        str(file.path),
                     )
+                ).lower()
+
+                target = (interpretation.target or "").strip().lower()
+
+                concepts = tuple(
+                    concept.strip().lower()
+                    for concept in interpretation.concepts
+                    if concept.strip()
                 )
+
+                matches_target = bool(target and target in file_text)
+
+                symbol_names = {
+                    symbol.name.lower()
+                    for symbol in project.symbols
+                    if symbol.file_id == file.id
+                }
+
+                matches_concept = any(
+                    concept in file_text
+                    or any(concept in symbol_name for symbol_name in symbol_names)
+                    for concept in concepts
+                )
+
+                key = (file.id, ContextUnitType.FILE)
+
+                if (matches_target or matches_concept) and key not in existing:
+                    candidates.append(
+                        ContextCandidate(
+                            entity_id=file.id,
+                            unit_type=ContextUnitType.FILE,
+                            score=0.8,
+                            source="task_interpretation",
+                            reason="Task interpretation matches file",
+                        )
+                    )
+                    existing.add(key)
+
+        if grounding is not None:
+            self._add_grounded_candidates(
+                project,
+                grounding,
+                candidates,
+            )
 
         return candidates
+
+    def _add_grounded_candidates(
+        self,
+        project: Project,
+        grounding: RepositoryGrounding,
+        candidates: list[ContextCandidate],
+    ) -> None:
+        existing = {
+            (candidate.entity_id, candidate.unit_type) for candidate in candidates
+        }
+
+        for entity in grounding.task.entities:
+            unit_type = ContextUnitType(entity.entity_type)
+            key = (entity.entity_id, unit_type)
+
+            if key in existing:
+                continue
+
+            candidates.append(
+                ContextCandidate(
+                    entity_id=entity.entity_id,
+                    unit_type=unit_type,
+                    score=1.0,
+                    source="task_grounding",
+                    reason=entity.provenance,
+                )
+            )
+
+            existing.add(key)
+
+        for entity_id in grounding.related_entity_ids:
+            entity = self._get_entity(project, entity_id)
+
+            if entity is None:
+                continue
+
+            unit_type = self._entity_type(entity)
+            key = (entity_id, unit_type)
+
+            if key in existing:
+                continue
+
+            candidates.append(
+                ContextCandidate(
+                    entity_id=entity_id,
+                    unit_type=unit_type,
+                    score=0.7,
+                    source="repository_grounding",
+                    reason="Repository relationship traversal",
+                )
+            )
+
+            existing.add(key)
+
+    @staticmethod
+    def _get_entity(
+        project: Project,
+        entity_id,
+    ):
+        for file in project.files:
+            if file.id == entity_id:
+                return file
+
+        for directory in project.directories:
+            if directory.id == entity_id:
+                return directory
+
+        for symbol in project.symbols:
+            if symbol.id == entity_id:
+                return symbol
+
+        return None
+
+    @staticmethod
+    def _entity_type(entity) -> ContextUnitType:
+        if isinstance(entity, File):
+            return ContextUnitType.FILE
+
+        if isinstance(entity, Directory):
+            return ContextUnitType.DIRECTORY
+
+        if isinstance(entity, Symbol):
+            return ContextUnitType.SYMBOL
+
+        raise ValueError(f"Unsupported repository entity type: {type(entity).__name__}")
 
     @staticmethod
     def _task_relevance(

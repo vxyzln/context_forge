@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from context_forge.models.relationship import RelationshipType
+
 
 @dataclass(frozen=True)
 class TaskInterpretation:
@@ -54,3 +56,37 @@ class GroundedTask:
     entities: tuple[GroundedEntity, ...] = field(default_factory=tuple)
     unresolved_references: tuple[TaskReference, ...] = field(default_factory=tuple)
     ambiguous_references: tuple[TaskReference, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class GroundedRelationship:
+    source_id: UUID
+    target_id: UUID
+    relationship_type: RelationshipType | str
+    depth: int
+    confidence: float
+    provenance: str
+
+    def __post_init__(self) -> None:
+        if self.depth < 1:
+            raise ValueError("Grounded relationship depth must be positive")
+
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError(
+                "Grounded relationship confidence must be between 0.0 and 1.0"
+            )
+
+        if not self.provenance.strip():
+            raise ValueError("Grounded relationship provenance cannot be empty")
+
+
+@dataclass(frozen=True)
+class RepositoryGrounding:
+    task: GroundedTask
+    related_entity_ids: tuple[UUID, ...] = field(default_factory=tuple)
+    relationships: tuple[GroundedRelationship, ...] = field(default_factory=tuple)
+    max_depth: int = 1
+
+    def __post_init__(self) -> None:
+        if self.max_depth < 0:
+            raise ValueError("Repository grounding depth cannot be negative")

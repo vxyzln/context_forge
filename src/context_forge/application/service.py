@@ -7,6 +7,7 @@ from context_forge.provider.config import ProviderConfig
 from context_forge.provider.models import GenerationRequest, GenerationResponse
 from context_forge.task import (
     TaskGroundingService,
+    TaskRepositoryGroundingService,
     TaskState,
     TaskUnderstandingService,
     TaskValidator,
@@ -22,6 +23,7 @@ class ContextGenerationService:
         task_understanding: TaskUnderstandingService | None = None,
         task_validator: TaskValidator | None = None,
         task_grounding: TaskGroundingService | None = None,
+        task_repository_grounding: TaskRepositoryGroundingService | None = None,
     ) -> None:
         self.engine = engine
         self.serializer = serializer
@@ -29,6 +31,7 @@ class ContextGenerationService:
         self.task_understanding = task_understanding
         self.task_validator = task_validator
         self.task_grounding = task_grounding
+        self.task_repository_grounding = task_repository_grounding
 
     def generate(
         self,
@@ -47,10 +50,16 @@ class ContextGenerationService:
                 raise ValueError(f"task validation failed: {validation.state.value}")
 
         if interpretation is not None and self.task_grounding is not None:
-            grounding = self.task_grounding.ground(
+            grounded_task = self.task_grounding.ground(
                 project,
                 interpretation,
             )
+
+            if self.task_repository_grounding is not None:
+                grounding = self.task_repository_grounding.ground(
+                    project,
+                    grounded_task,
+                )
 
         package = self.engine.build(
             ContextRequest(
