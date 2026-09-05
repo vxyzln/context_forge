@@ -1,10 +1,14 @@
 from itertools import pairwise
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
 from context_forge.context.candidate import ContextCandidate
-from context_forge.context.retrieval import RelationshipCandidateRetriever
+from context_forge.context.retrieval import (
+    RelationshipCandidateRetriever,
+    RetrievalEvidence,
+)
 from context_forge.context.types import ContextUnitType
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
@@ -53,7 +57,7 @@ def test_relationship_candidate_retriever_expands_direct_relationship() -> None:
         )
     ]
 
-    expanded = RelationshipCandidateRetriever().expand(
+    expanded, _ = RelationshipCandidateRetriever().expand(
         project,
         candidates,
     )
@@ -86,7 +90,7 @@ def test_relationship_candidate_retriever_preserves_original_candidate() -> None
         reason="File name contains query",
     )
 
-    expanded = RelationshipCandidateRetriever().expand(
+    expanded, _ = RelationshipCandidateRetriever().expand(
         project,
         [candidate],
     )
@@ -148,7 +152,7 @@ def test_relationship_candidate_retriever_filters_relationship_types() -> None:
         source="deterministic_search",
     )
 
-    expanded = RelationshipCandidateRetriever(
+    expanded, _ = RelationshipCandidateRetriever(
         relationship_types={"imports"},
     ).expand(project, [candidate])
 
@@ -213,7 +217,7 @@ def test_relationship_candidate_retriever_supports_max_depth() -> None:
         source="deterministic_search",
     )
 
-    expanded = RelationshipCandidateRetriever(max_depth=2).expand(
+    expanded, _ = RelationshipCandidateRetriever(max_depth=2).expand(
         project,
         [candidate],
     )
@@ -261,7 +265,7 @@ def test_relationship_candidate_retriever_limits_candidates() -> None:
         source="deterministic_search",
     )
 
-    expanded = RelationshipCandidateRetriever(
+    expanded, _ = RelationshipCandidateRetriever(
         max_depth=2,
         max_candidates=3,
     ).expand(
@@ -328,7 +332,7 @@ def test_relationship_candidate_retriever_deduplicates_expansion() -> None:
         ),
     ]
 
-    expanded = RelationshipCandidateRetriever(max_depth=2).expand(
+    expanded, _ = RelationshipCandidateRetriever(max_depth=2).expand(
         project,
         candidates,
     )
@@ -345,3 +349,164 @@ def test_relationship_candidate_retriever_rejects_invalid_limits() -> None:
 
     with pytest.raises(ValueError, match="candidate count must be positive"):
         RelationshipCandidateRetriever(max_candidates=0)
+
+
+def test_relationship_candidate_retriever_records_evidence() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("first.py"),
+        name="first.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("second.py"),
+        name="second.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+
+    project.add_relationship(
+        Relationship(
+            source_id=first.id,
+            target_id=second.id,
+            relationship_type="imports",
+            confidence=0.8,
+        )
+    )
+
+    candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="deterministic_search",
+    )
+
+    expanded, evidence = RelationshipCandidateRetriever().expand(
+        project,
+        [candidate],
+    )
+
+    assert expanded[1].entity_id == second.id
+
+    second_evidence = evidence[second.id]
+
+    assert second_evidence.source_candidate_id == first.id
+    assert second_evidence.relationship_type == "imports"
+    assert second_evidence.depth == 1
+    assert second_evidence.relationship_confidence == 0.8
+    assert second_evidence.candidate_confidence == 0.8
+    assert second_evidence.provenance == "relationship-aware repository expansion"
+
+
+def test_relationship_candidate_retriever_caps_expanded_confidence() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("first.py"),
+        name="first.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("second.py"),
+        name="second.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+
+    project.add_relationship(
+        Relationship(
+            source_id=first.id,
+            target_id=second.id,
+            relationship_type="imports",
+            confidence=1.0,
+        )
+    )
+
+    candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.6,
+        source="deterministic_search",
+    )
+
+    expanded, evidence = RelationshipCandidateRetriever().expand(
+        project,
+        [candidate],
+    )
+
+    expanded_candidate = next(
+        candidate for candidate in expanded if candidate.entity_id == second.id
+    )
+
+    assert expanded_candidate.score == 0.6
+    assert evidence[second.id].candidate_confidence == 0.6
+
+
+def test_retrieval_evidence_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="depth must be positive"):
+        RetrievalEvidence(
+            source_candidate_id=uuid4(),
+            relationship_type="imports",
+            depth=0,
+            relationship_confidence=1.0,
+            candidate_confidence=1.0,
+            provenance="test",
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Relationship confidence must be between",
+    ):
+        RetrievalEvidence(
+            source_candidate_id=uuid4(),
+            relationship_type="imports",
+            depth=1,
+            relationship_confidence=1.1,
+            candidate_confidence=1.0,
+            provenance="test",
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Candidate confidence must be between",
+    ):
+        RetrievalEvidence(
+            source_candidate_id=uuid4(),
+            relationship_type="imports",
+            depth=1,
+            relationship_confidence=1.0,
+            candidate_confidence=-0.1,
+            provenance="test",
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="provenance cannot be empty",
+    ):
+        RetrievalEvidence(
+            source_candidate_id=uuid4(),
+            relationship_type="imports",
+            depth=1,
+            relationship_confidence=1.0,
+            candidate_confidence=1.0,
+            provenance=" ",
+        )
