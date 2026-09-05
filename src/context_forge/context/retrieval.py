@@ -55,16 +55,17 @@ class RelationshipCandidateRetriever:
         query = ProjectQuery(project)
 
         expanded = list(candidates)
+        original_count = len(candidates)
         evidence: dict[object, RetrievalEvidence] = {}
 
-        existing = {
-            (candidate.entity_id, candidate.unit_type) for candidate in candidates
-        }
-        visited = {candidate.entity_id for candidate in candidates}
-
         if self.max_candidates is not None and len(expanded) >= self.max_candidates:
-            return expanded[: self.max_candidates], evidence
+            return self._sort_expanded(
+                expanded[: self.max_candidates],
+                evidence,
+                original_count,
+            )
 
+        visited = {candidate.entity_id for candidate in candidates}
         frontier = list(candidates)
 
         for depth in range(1, self.max_depth + 1):
@@ -91,21 +92,42 @@ class RelationshipCandidateRetriever:
                         else relationship.source_id
                     )
 
-                    if entity_id in visited:
-                        continue
-
                     entity = self._get_entity(project, entity_id)
 
                     if entity is None:
                         continue
 
-                    visited.add(entity_id)
-
                     unit_type = self._entity_type(entity)
+
                     candidate_confidence = min(
                         candidate.score,
                         relationship.confidence,
                     )
+
+                    new_evidence = RetrievalEvidence(
+                        source_candidate_id=candidate.entity_id,
+                        relationship_type=relationship_type,
+                        depth=depth,
+                        relationship_confidence=relationship.confidence,
+                        candidate_confidence=candidate_confidence,
+                        provenance="relationship-aware repository expansion",
+                    )
+
+                    existing_evidence = evidence.get(entity_id)
+
+                    if existing_evidence is not None:
+                        if self._evidence_is_stronger(
+                            new_evidence,
+                            existing_evidence,
+                        ):
+                            evidence[entity_id] = new_evidence
+
+                        continue
+
+                    if entity_id in visited:
+                        continue
+
+                    visited.add(entity_id)
 
                     expanded_candidate = ContextCandidate(
                         entity_id=entity_id,
@@ -115,32 +137,72 @@ class RelationshipCandidateRetriever:
                         reason="Relationship-aware repository expansion",
                     )
 
+                    evidence[entity_id] = new_evidence
                     expanded.append(expanded_candidate)
-                    existing.add((entity_id, unit_type))
-
-                    evidence[entity_id] = RetrievalEvidence(
-                        source_candidate_id=candidate.entity_id,
-                        relationship_type=relationship_type,
-                        depth=depth,
-                        relationship_confidence=relationship.confidence,
-                        candidate_confidence=candidate_confidence,
-                        provenance="relationship-aware repository expansion",
-                    )
-
                     next_frontier.append(expanded_candidate)
 
                     if (
                         self.max_candidates is not None
                         and len(expanded) >= self.max_candidates
                     ):
-                        return expanded, evidence
+                        return self._sort_expanded(
+                            expanded,
+                            evidence,
+                            original_count,
+                        )
 
             frontier = next_frontier
 
             if not frontier:
                 break
 
-        return expanded, evidence
+        return self._sort_expanded(
+            expanded,
+            evidence,
+            original_count,
+        )
+
+    @staticmethod
+    def _evidence_is_stronger(
+        candidate: RetrievalEvidence,
+        existing: RetrievalEvidence,
+    ) -> bool:
+        candidate_key = (
+            candidate.candidate_confidence,
+            -candidate.depth,
+            str(candidate.source_candidate_id),
+        )
+        existing_key = (
+            existing.candidate_confidence,
+            -existing.depth,
+            str(existing.source_candidate_id),
+        )
+        return candidate_key > existing_key
+
+    @staticmethod
+    def _sort_expanded(
+        candidates: list[ContextCandidate],
+        evidence: dict[object, RetrievalEvidence],
+        original_count: int,
+    ) -> tuple[list[ContextCandidate], dict[object, RetrievalEvidence]]:
+        originals = candidates[:original_count]
+
+        additions = sorted(
+            candidates[original_count:],
+            key=lambda candidate: (
+                -candidate.score,
+                candidate.unit_type.value,
+                str(candidate.entity_id),
+            ),
+        )
+
+        ordered = originals + additions
+
+        return ordered, {
+            candidate.entity_id: evidence[candidate.entity_id]
+            for candidate in ordered
+            if candidate.entity_id in evidence
+        }
 
     @staticmethod
     def _get_entity(project: Project, entity_id: object) -> object | None:

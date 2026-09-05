@@ -13,7 +13,7 @@ from context_forge.context.types import ContextUnitType
 from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
-from context_forge.models.relationship import Relationship
+from context_forge.models.relationship import Relationship, RelationshipType
 
 
 def test_relationship_candidate_retriever_expands_direct_relationship() -> None:
@@ -510,3 +510,183 @@ def test_retrieval_evidence_rejects_invalid_values() -> None:
             candidate_confidence=1.0,
             provenance=" ",
         )
+
+
+def test_relationship_candidate_retriever_deduplicates_multiple_paths() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    files = [
+        File(
+            project_id=project.id,
+            path=Path(f"file_{index}.py"),
+            name=f"file_{index}.py",
+            extension=".py",
+            file_type=FileType.SOURCE,
+        )
+        for index in range(3)
+    ]
+
+    for file in files:
+        project.add_file(file)
+
+    first, second, third = files
+
+    project.add_relationship(
+        Relationship(
+            source_id=first.id,
+            target_id=second.id,
+            relationship_type=RelationshipType.REFERENCES,
+            confidence=0.8,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=first.id,
+            target_id=third.id,
+            relationship_type=RelationshipType.REFERENCES,
+            confidence=0.9,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=second.id,
+            target_id=third.id,
+            relationship_type=RelationshipType.REFERENCES,
+            confidence=0.7,
+        )
+    )
+
+    candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="test",
+        reason="test",
+    )
+
+    expanded, evidence = RelationshipCandidateRetriever(
+        max_depth=2,
+    ).expand(project, [candidate])
+
+    third_candidates = [item for item in expanded if item.entity_id == third.id]
+
+    assert len(third_candidates) == 1
+    assert third_candidates[0].score == 0.9
+    assert evidence[third.id].candidate_confidence == 0.9
+    assert evidence[third.id].depth == 1
+
+
+def test_relationship_candidate_retriever_prefers_shallower_equal_confidence_path() -> (
+    None
+):
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    files = [
+        File(
+            project_id=project.id,
+            path=Path(f"file_{index}.py"),
+            name=f"file_{index}.py",
+            extension=".py",
+            file_type=FileType.SOURCE,
+        )
+        for index in range(3)
+    ]
+
+    for file in files:
+        project.add_file(file)
+
+    first, second, third = files
+
+    project.add_relationship(
+        Relationship(
+            source_id=first.id,
+            target_id=second.id,
+            relationship_type=RelationshipType.REFERENCES,
+            confidence=0.8,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=second.id,
+            target_id=third.id,
+            relationship_type=RelationshipType.REFERENCES,
+            confidence=0.8,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=first.id,
+            target_id=third.id,
+            relationship_type=RelationshipType.REFERENCES,
+            confidence=0.8,
+        )
+    )
+
+    candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="test",
+        reason="test",
+    )
+
+    _, evidence = RelationshipCandidateRetriever(
+        max_depth=2,
+    ).expand(project, [candidate])
+
+    assert evidence[third.id].depth == 1
+    assert evidence[third.id].candidate_confidence == 0.8
+
+
+def test_relationship_candidate_retriever_is_deterministic() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    files = [
+        File(
+            project_id=project.id,
+            path=Path(f"file_{index}.py"),
+            name=f"file_{index}.py",
+            extension=".py",
+            file_type=FileType.SOURCE,
+        )
+        for index in range(4)
+    ]
+
+    for file in files:
+        project.add_file(file)
+
+    first = files[0]
+
+    for file in files[1:]:
+        project.add_relationship(
+            Relationship(
+                source_id=first.id,
+                target_id=file.id,
+                relationship_type=RelationshipType.REFERENCES,
+                confidence=0.8,
+            )
+        )
+
+    candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="test",
+        reason="test",
+    )
+
+    retriever = RelationshipCandidateRetriever()
+
+    first_result = retriever.expand(project, [candidate])
+    second_result = retriever.expand(project, [candidate])
+
+    assert first_result == second_result
