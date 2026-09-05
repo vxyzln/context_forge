@@ -7,6 +7,7 @@ from context_forge.models.enums import FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship, RelationshipType
+from context_forge.models.symbol import Symbol
 from context_forge.pipeline.analyzer import ProjectAnalyzer
 from context_forge.task.models import (
     GroundedEntity,
@@ -430,3 +431,109 @@ def test_grounded_candidates_are_not_duplicated() -> None:
     ]
 
     assert len(matching) == 1
+
+
+def test_candidate_generator_adds_lexical_signal_for_file_search() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("src/auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(file)
+
+    candidates, signals = CandidateGenerator().generate(
+        project,
+        "auth",
+    )
+
+    assert candidates
+    assert signals[file.id].lexical == candidates[0].score
+
+
+def test_candidate_generator_adds_symbol_signal_for_symbol_search() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("src/auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    project.add_file(file)
+
+    symbol = Symbol(
+        file_id=file.id,
+        name="authenticate",
+        qualified_name="authenticate",
+        kind="function",
+        start_line=1,
+        end_line=3,
+    )
+    project.add_symbol(symbol)
+
+    candidates, signals = CandidateGenerator().generate(
+        project,
+        "authenticate",
+    )
+
+    assert candidates
+    assert candidates[0].unit_type == ContextUnitType.SYMBOL
+    assert signals[symbol.id].symbol == candidates[0].score
+
+
+def test_grounded_candidate_does_not_receive_lexical_signal() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("src/auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    project.add_file(file)
+
+    interpretation = TaskInterpretation(
+        task="Fix AuthenticationService",
+        intent="fix",
+        target="AuthenticationService",
+    )
+
+    grounded_task = GroundedTask(
+        interpretation=interpretation,
+        entities=(
+            GroundedEntity(
+                entity_id=file.id,
+                entity_type="file",
+                reference="src/auth.py",
+                confidence=1.0,
+                provenance="exact repository-relative file path",
+            ),
+        ),
+    )
+
+    grounding = RepositoryGrounding(task=grounded_task)
+
+    _, signals = CandidateGenerator().generate(
+        project,
+        "Fix AuthenticationService",
+        interpretation=interpretation,
+        grounding=grounding,
+    )
+
+    assert signals[file.id].lexical == 0.0

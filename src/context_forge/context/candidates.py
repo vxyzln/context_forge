@@ -35,16 +35,22 @@ class CandidateGenerator:
         for candidate in candidates:
             file = file_by_id.get(candidate.entity_id)
 
-            if file is None:
-                continue
+            task_signal = 0.0
+            git_signal = 0.0
 
-            signals[candidate.entity_id] = RelevanceSignals(
-                git=git_relevance.score(file),
-                task=self._task_relevance(
+            if file is not None:
+                task_signal = self._task_relevance(
                     project,
                     file,
                     interpretation,
-                ),
+                )
+                git_signal = git_relevance.score(file)
+
+            signals[candidate.entity_id] = RelevanceSignals(
+                lexical=self._lexical_relevance(candidate),
+                symbol=self._symbol_relevance(candidate),
+                git=git_signal,
+                task=task_signal,
             )
 
         return candidates, signals
@@ -258,3 +264,26 @@ class CandidateGenerator:
             return []
 
         return repository.get_commits()
+
+    @staticmethod
+    def _lexical_relevance(candidate: ContextCandidate) -> float:
+        if candidate.source != "deterministic_search":
+            return 0.0
+
+        if candidate.unit_type in (
+            ContextUnitType.FILE,
+            ContextUnitType.DIRECTORY,
+        ):
+            return candidate.score
+
+        return 0.0
+
+    @staticmethod
+    def _symbol_relevance(candidate: ContextCandidate) -> float:
+        if candidate.source != "deterministic_search":
+            return 0.0
+
+        if candidate.unit_type != ContextUnitType.SYMBOL:
+            return 0.0
+
+        return candidate.score
