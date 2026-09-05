@@ -129,7 +129,7 @@ class CandidateGenerator:
                 candidates,
             )
 
-        return candidates
+        return self._deduplicate_candidates(candidates)
 
     @staticmethod
     def _relationship_relevance(
@@ -173,6 +173,48 @@ class CandidateGenerator:
                 )
 
         return structural, dependency
+
+    @staticmethod
+    def _deduplicate_candidates(
+        candidates: list[ContextCandidate],
+    ) -> list[ContextCandidate]:
+        selected: dict[tuple[object, ContextUnitType], ContextCandidate] = {}
+
+        for candidate in candidates:
+            key = (candidate.entity_id, candidate.unit_type)
+            existing = selected.get(key)
+
+            if existing is None:
+                selected[key] = candidate
+                continue
+
+            if CandidateGenerator._candidate_priority(candidate) > (
+                CandidateGenerator._candidate_priority(existing)
+            ):
+                selected[key] = candidate
+
+        return sorted(
+            selected.values(),
+            key=lambda candidate: (
+                -candidate.score,
+                candidate.unit_type.value,
+                str(candidate.entity_id),
+            ),
+        )
+
+    @staticmethod
+    def _candidate_priority(candidate: ContextCandidate) -> tuple[float, int]:
+        source_priority = {
+            "task_grounding": 4,
+            "repository_grounding": 3,
+            "task_interpretation": 2,
+            "deterministic_search": 1,
+        }
+
+        return (
+            candidate.score,
+            source_priority.get(candidate.source, 0),
+        )
 
     def _add_grounded_candidates(
         self,

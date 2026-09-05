@@ -206,3 +206,69 @@ def test_ranker_remains_deterministic_with_task_signals() -> None:
     assert [item.entity_id for item in first_result] == [
         item.entity_id for item in second_result
     ]
+
+
+def test_ranker_limits_candidates() -> None:
+    candidates = [
+        ContextCandidate(
+            entity_id=uuid4(),
+            unit_type=ContextUnitType.FILE,
+            score=0.9,
+            source="deterministic_search",
+        ),
+        ContextCandidate(
+            entity_id=uuid4(),
+            unit_type=ContextUnitType.FILE,
+            score=0.8,
+            source="deterministic_search",
+        ),
+        ContextCandidate(
+            entity_id=uuid4(),
+            unit_type=ContextUnitType.FILE,
+            score=0.7,
+            source="deterministic_search",
+        ),
+    ]
+
+    results = DeterministicRanker(max_candidates=2).rank(
+        candidates,
+        {},
+    )
+
+    assert len(results) == 2
+    assert [result.entity_id for result in results] == [
+        candidates[0].entity_id,
+        candidates[1].entity_id,
+    ]
+
+
+def test_ranker_rejects_non_positive_candidate_limit() -> None:
+    with pytest.raises(
+        ValueError,
+        match="Maximum candidate count must be positive",
+    ):
+        DeterministicRanker(max_candidates=0)
+
+
+def test_ranker_without_limit_preserves_all_candidates() -> None:
+    candidates = [
+        ContextCandidate(
+            entity_id=uuid4(),
+            unit_type=ContextUnitType.FILE,
+            score=0.9,
+            source="deterministic_search",
+        ),
+        ContextCandidate(
+            entity_id=uuid4(),
+            unit_type=ContextUnitType.FILE,
+            score=0.8,
+            source="deterministic_search",
+        ),
+    ]
+
+    results = DeterministicRanker().rank(
+        candidates,
+        {},
+    )
+
+    assert len(results) == 2

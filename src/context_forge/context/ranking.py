@@ -3,6 +3,11 @@ from context_forge.context.signals import RelevanceSignals
 
 
 class DeterministicRanker:
+    def __init__(self, max_candidates: int | None = None) -> None:
+        if max_candidates is not None and max_candidates < 1:
+            raise ValueError("Maximum candidate count must be positive")
+        self.max_candidates = max_candidates
+
     def score(
         self,
         candidate: ContextCandidate,
@@ -34,7 +39,7 @@ class DeterministicRanker:
             )
         )
 
-        return [
+        ranked = [
             ContextCandidate(
                 entity_id=candidate.entity_id,
                 unit_type=candidate.unit_type,
@@ -44,3 +49,8 @@ class DeterministicRanker:
             )
             for candidate, score in scored
         ]
+
+        if self.max_candidates is not None:
+            return ranked[: self.max_candidates]
+
+        return ranked

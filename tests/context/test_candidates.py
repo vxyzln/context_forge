@@ -1,8 +1,10 @@
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
+from context_forge.context.candidate import ContextCandidate
 from context_forge.context.candidates import CandidateGenerator
 from context_forge.context.types import ContextUnitType
 from context_forge.models.enums import FileType
@@ -807,3 +809,66 @@ def test_candidate_generator_does_not_overmatch_symbol_task_target() -> None:
 
     assert candidates
     assert signals[symbol.id].task == 0.0
+
+
+def test_candidate_generator_deduplicates_same_entity() -> None:
+    candidate = ContextCandidate(
+        entity_id=uuid4(),
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+    )
+
+    result = CandidateGenerator._deduplicate_candidates([candidate, candidate])
+
+    assert result == [candidate]
+
+
+def test_candidate_generator_deduplication_keeps_stronger_source() -> None:
+    entity_id = uuid4()
+
+    search_candidate = ContextCandidate(
+        entity_id=entity_id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+    )
+
+    grounding_candidate = ContextCandidate(
+        entity_id=entity_id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="task_grounding",
+    )
+
+    result = CandidateGenerator._deduplicate_candidates(
+        [search_candidate, grounding_candidate]
+    )
+
+    assert len(result) == 1
+    assert result[0] == grounding_candidate
+
+
+def test_candidate_generator_deduplication_prefers_grounding_on_tie() -> None:
+    entity_id = uuid4()
+
+    search_candidate = ContextCandidate(
+        entity_id=entity_id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+    )
+
+    grounding_candidate = ContextCandidate(
+        entity_id=entity_id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="task_grounding",
+    )
+
+    result = CandidateGenerator._deduplicate_candidates(
+        [search_candidate, grounding_candidate]
+    )
+
+    assert len(result) == 1
+    assert result[0].source == "task_grounding"
