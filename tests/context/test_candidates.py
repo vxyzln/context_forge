@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from context_forge.context.candidates import CandidateGenerator
 from context_forge.context.types import ContextUnitType
 from context_forge.models.enums import FileType
@@ -679,3 +681,129 @@ def test_candidate_generator_uses_strongest_relationship_confidence() -> None:
     )
 
     assert signals[source.id].dependency == 0.9
+
+
+def test_candidate_generator_adds_task_signal_to_symbol_candidate(
+    tmp_path: Path,
+) -> None:
+    source_file = tmp_path / "authentication.py"
+    source_file.write_text(
+        """
+class AuthenticationService:
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=tmp_path / ".context_forge.db",
+    ).analyze()
+
+    interpretation = TaskInterpretation(
+        task="Fix AuthenticationService",
+        intent="bug_fix",
+        target="AuthenticationService",
+        concepts=("authentication",),
+        requested_action="fix",
+    )
+
+    candidates, signals = CandidateGenerator().generate(
+        project,
+        "AuthenticationService",
+        interpretation=interpretation,
+    )
+
+    symbol = next(
+        symbol for symbol in project.symbols if symbol.name == "AuthenticationService"
+    )
+
+    candidate = next(
+        candidate for candidate in candidates if candidate.entity_id == symbol.id
+    )
+
+    assert candidate.unit_type == ContextUnitType.SYMBOL
+    assert signals[symbol.id].task == 1.0
+
+
+def test_candidate_generator_adds_symbol_concept_relevance() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("src/auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    project.add_file(file)
+
+    symbol = Symbol(
+        file_id=file.id,
+        name="AuthenticationService",
+        qualified_name="AuthenticationService",
+        kind="class",
+        start_line=1,
+        end_line=5,
+    )
+    project.add_symbol(symbol)
+
+    interpretation = TaskInterpretation(
+        task="Improve authentication",
+        intent="improve",
+        target=None,
+        concepts=("authentication", "security"),
+    )
+
+    candidates, signals = CandidateGenerator().generate(
+        project,
+        "AuthenticationService",
+        interpretation=interpretation,
+    )
+
+    assert candidates
+    assert signals[symbol.id].task == pytest.approx(0.5)
+
+
+def test_candidate_generator_does_not_overmatch_symbol_task_target() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("src/auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    project.add_file(file)
+
+    symbol = Symbol(
+        file_id=file.id,
+        name="Authentication",
+        qualified_name="Authentication",
+        kind="class",
+        start_line=1,
+        end_line=5,
+    )
+    project.add_symbol(symbol)
+
+    interpretation = TaskInterpretation(
+        task="Fix AuthenticationService",
+        intent="bug_fix",
+        target="AuthenticationService",
+    )
+
+    candidates, signals = CandidateGenerator().generate(
+        project,
+        "Authentication",
+        interpretation=interpretation,
+    )
+
+    assert candidates
+    assert signals[symbol.id].task == 0.0

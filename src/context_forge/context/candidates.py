@@ -30,22 +30,21 @@ class CandidateGenerator:
         git_relevance = GitRelevance(self._get_git_commits(project))
 
         file_by_id = {file.id: file for file in project.files}
+        symbol_by_id = {symbol.id: symbol for symbol in project.symbols}
 
         signals: dict[object, RelevanceSignals] = {}
 
         for candidate in candidates:
             file = file_by_id.get(candidate.entity_id)
+            symbol = symbol_by_id.get(candidate.entity_id)
 
-            task_signal = 0.0
-            git_signal = 0.0
-
-            if file is not None:
-                task_signal = self._task_relevance(
-                    project,
-                    file,
-                    interpretation,
-                )
-                git_signal = git_relevance.score(file)
+            task_signal = self._candidate_task_relevance(
+                project,
+                file,
+                symbol,
+                interpretation,
+            )
+            git_signal = git_relevance.score(file) if file is not None else 0.0
 
             structural_signal, dependency_signal = self._relationship_relevance(
                 project,
@@ -300,6 +299,65 @@ class CandidateGenerator:
             concept in file_text
             or any(concept in symbol_name for symbol_name in symbol_matches)
             for concept in concepts
+        )
+
+        return min(1.0, matched_concepts / len(concepts))
+
+    @classmethod
+    def _candidate_task_relevance(
+        cls,
+        project: Project,
+        file: File | None,
+        symbol: Symbol | None,
+        interpretation,
+    ) -> float:
+        if interpretation is None:
+            return 0.0
+
+        if symbol is not None:
+            return cls._symbol_task_relevance(
+                symbol,
+                interpretation,
+            )
+
+        if file is not None:
+            return cls._task_relevance(
+                project,
+                file,
+                interpretation,
+            )
+
+        return 0.0
+
+    @staticmethod
+    def _symbol_task_relevance(
+        symbol: Symbol,
+        interpretation,
+    ) -> float:
+        target = (interpretation.target or "").strip().lower()
+
+        symbol_names = {
+            symbol.name.lower(),
+            (symbol.qualified_name or "").strip().lower(),
+        }
+
+        if target and target in symbol_names:
+            return 1.0
+
+        concepts = tuple(
+            concept.strip().lower()
+            for concept in interpretation.concepts
+            if concept.strip()
+        )
+
+        if not concepts:
+            return 0.0
+
+        matched_concepts = sum(
+            concept in symbol_name
+            for concept in concepts
+            for symbol_name in symbol_names
+            if symbol_name
         )
 
         return min(1.0, matched_concepts / len(concepts))
