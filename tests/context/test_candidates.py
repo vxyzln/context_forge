@@ -537,3 +537,145 @@ def test_grounded_candidate_does_not_receive_lexical_signal() -> None:
     )
 
     assert signals[file.id].lexical == 0.0
+
+
+def test_candidate_generator_adds_dependency_signal() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    source = File(
+        project_id=project.id,
+        path=Path("src/auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    target = File(
+        project_id=project.id,
+        path=Path("src/utils.py"),
+        name="utils.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(source)
+    project.add_file(target)
+
+    project.add_relationship(
+        Relationship(
+            source_id=source.id,
+            target_id=target.id,
+            relationship_type=RelationshipType.IMPORTS,
+            confidence=0.8,
+        )
+    )
+
+    candidates, signals = CandidateGenerator().generate(
+        project,
+        "auth.py",
+    )
+
+    assert candidates
+    assert signals[source.id].dependency == 0.8
+
+
+def test_candidate_generator_adds_structural_signal() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("src/auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    project.add_file(file)
+
+    symbol = Symbol(
+        file_id=file.id,
+        name="AuthService",
+        qualified_name="AuthService",
+        kind="class",
+        start_line=1,
+        end_line=5,
+    )
+    project.add_symbol(symbol)
+
+    project.add_relationship(
+        Relationship(
+            source_id=file.id,
+            target_id=symbol.id,
+            relationship_type=RelationshipType.DEFINES,
+            confidence=1.0,
+        )
+    )
+
+    candidates, signals = CandidateGenerator().generate(
+        project,
+        "auth.py",
+    )
+
+    assert candidates
+    assert signals[file.id].structural == 1.0
+
+
+def test_candidate_generator_uses_strongest_relationship_confidence() -> None:
+    project = Project(
+        name="example",
+        root_path=Path("/tmp/example"),
+    )
+
+    source = File(
+        project_id=project.id,
+        path=Path("src/auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    first_target = File(
+        project_id=project.id,
+        path=Path("src/first.py"),
+        name="first.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second_target = File(
+        project_id=project.id,
+        path=Path("src/second.py"),
+        name="second.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(source)
+    project.add_file(first_target)
+    project.add_file(second_target)
+
+    project.add_relationship(
+        Relationship(
+            source_id=source.id,
+            target_id=first_target.id,
+            relationship_type=RelationshipType.IMPORTS,
+            confidence=0.4,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=source.id,
+            target_id=second_target.id,
+            relationship_type=RelationshipType.IMPORTS,
+            confidence=0.9,
+        )
+    )
+
+    _, signals = CandidateGenerator().generate(
+        project,
+        "auth.py",
+    )
+
+    assert signals[source.id].dependency == 0.9

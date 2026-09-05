@@ -6,6 +6,7 @@ from context_forge.git.repository import GitRepository
 from context_forge.models.directory import Directory
 from context_forge.models.file import File
 from context_forge.models.project import Project
+from context_forge.models.relationship import RelationshipType
 from context_forge.models.symbol import Symbol
 from context_forge.query.project import ProjectQuery
 from context_forge.task.models import RepositoryGrounding
@@ -46,9 +47,16 @@ class CandidateGenerator:
                 )
                 git_signal = git_relevance.score(file)
 
+            structural_signal, dependency_signal = self._relationship_relevance(
+                project,
+                candidate,
+            )
+
             signals[candidate.entity_id] = RelevanceSignals(
                 lexical=self._lexical_relevance(candidate),
+                structural=structural_signal,
                 symbol=self._symbol_relevance(candidate),
+                dependency=dependency_signal,
                 git=git_signal,
                 task=task_signal,
             )
@@ -123,6 +131,49 @@ class CandidateGenerator:
             )
 
         return candidates
+
+    @staticmethod
+    def _relationship_relevance(
+        project: Project,
+        candidate: ContextCandidate,
+    ) -> tuple[float, float]:
+        relationships = ProjectQuery(project).get_relationships(
+            candidate.entity_id,
+        )
+
+        structural = 0.0
+        dependency = 0.0
+
+        structural_types = {
+            RelationshipType.DEFINES.value,
+            RelationshipType.CONTAINS.value,
+        }
+
+        dependency_types = {
+            RelationshipType.IMPORTS.value,
+            RelationshipType.REFERENCES.value,
+            RelationshipType.INHERITS.value,
+            RelationshipType.CALLS.value,
+        }
+
+        for relationship in relationships:
+            relationship_type = relationship.relationship_type
+
+            if hasattr(relationship_type, "value"):
+                relationship_type = relationship_type.value
+
+            if relationship_type in structural_types:
+                structural = max(
+                    structural,
+                    relationship.confidence,
+                )
+            elif relationship_type in dependency_types:
+                dependency = max(
+                    dependency,
+                    relationship.confidence,
+                )
+
+        return structural, dependency
 
     def _add_grounded_candidates(
         self,
