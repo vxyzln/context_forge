@@ -5,11 +5,12 @@ from context_forge.context.candidates import CandidateGenerator
 from context_forge.context.compression_pipeline import ContextCompressionPipeline
 from context_forge.context.depth import ContextDepthSelector
 from context_forge.context.enrichment_pipeline import ContextEnrichmentPipeline
-from context_forge.context.expansion import GraphExpander
+from context_forge.context.expansion import ContextExpansion, GraphExpander
 from context_forge.context.models import ContextPackage
 from context_forge.context.package import ContextPackageBuilder
 from context_forge.context.ranking import DeterministicRanker
 from context_forge.context.request import ContextRequest
+from context_forge.context.retrieval import RelationshipCandidateRetriever
 from context_forge.context.selection import ContextSelector
 
 
@@ -33,6 +34,7 @@ class DefaultContextEngine(ContextEngine):
         compression_pipeline: ContextCompressionPipeline,
         assembly: ContextAssembler,
         max_context_units: int = 20,
+        relationship_retriever: RelationshipCandidateRetriever | None = None,
     ) -> None:
         self.candidate_generator = candidate_generator
         self.ranker = ranker
@@ -44,6 +46,9 @@ class DefaultContextEngine(ContextEngine):
         self.compression_pipeline = compression_pipeline
         self.assembly = assembly
         self.max_context_units = max_context_units
+        self.relationship_retriever = (
+            relationship_retriever or RelationshipCandidateRetriever()
+        )
 
     def build(self, request: ContextRequest) -> ContextPackage:
         if not request.task.strip():
@@ -62,11 +67,15 @@ class DefaultContextEngine(ContextEngine):
 
         depth_decision = self.depth_selector.select(selected)
 
-        expanded = self.expander.expand(
+        expanded_candidates, retrieval_evidence = self.relationship_retriever.expand(
             request.project,
             selected,
             max_depth=depth_decision.depth,
         )
+
+        expanded = [
+            ContextExpansion(candidate=candidate) for candidate in expanded_candidates
+        ]
 
         selected_signals = {
             candidate.entity_id: signals[candidate.entity_id]
@@ -75,9 +84,7 @@ class DefaultContextEngine(ContextEngine):
         }
 
         package = self.package_builder.build(
-            request.task,
-            expanded,
-            selected_signals,
+            request.task, expanded, selected_signals, retrieval_evidence
         )
 
         enriched_units = self.enrichment_pipeline.enrich(

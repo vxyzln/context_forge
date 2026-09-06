@@ -51,7 +51,14 @@ class RelationshipCandidateRetriever:
         self,
         project: Project,
         candidates: list[ContextCandidate],
+        max_depth: int | None = None,
     ) -> tuple[list[ContextCandidate], dict[object, RetrievalEvidence]]:
+
+        expansion_depth = self.max_depth if max_depth is None else max_depth
+
+        if expansion_depth < 0:
+            raise ValueError("Relationship expansion depth cannot be negative")
+
         query = ProjectQuery(project)
 
         expanded = list(candidates)
@@ -68,7 +75,7 @@ class RelationshipCandidateRetriever:
         visited = {candidate.entity_id for candidate in candidates}
         frontier = list(candidates)
 
-        for depth in range(1, self.max_depth + 1):
+        for depth in range(1, expansion_depth + 1):
             next_frontier: list[ContextCandidate] = []
 
             for candidate in frontier:

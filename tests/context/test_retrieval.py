@@ -690,3 +690,145 @@ def test_relationship_candidate_retriever_is_deterministic() -> None:
     second_result = retriever.expand(project, [candidate])
 
     assert first_result == second_result
+
+
+def test_relationship_candidate_retriever_allows_per_call_depth_override() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("first.py"),
+        name="first.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("second.py"),
+        name="second.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    third = File(
+        project_id=project.id,
+        path=Path("third.py"),
+        name="third.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+    project.add_file(third)
+
+    project.add_relationship(
+        Relationship(
+            source_id=first.id,
+            target_id=second.id,
+            relationship_type="imports",
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=second.id,
+            target_id=third.id,
+            relationship_type="imports",
+        )
+    )
+
+    candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="test",
+        reason="test candidate",
+    )
+
+    retriever = RelationshipCandidateRetriever(max_depth=1)
+
+    expanded, evidence = retriever.expand(
+        project,
+        [candidate],
+        max_depth=2,
+    )
+
+    entity_ids = {item.entity_id for item in expanded}
+
+    assert first.id in entity_ids
+    assert second.id in entity_ids
+    assert third.id in entity_ids
+
+    assert evidence[second.id].depth == 1
+    assert evidence[third.id].depth == 2
+
+
+def test_relationship_candidate_retriever_allows_zero_per_call_depth() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("first.py"),
+        name="first.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("second.py"),
+        name="second.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+
+    project.add_relationship(
+        Relationship(
+            source_id=first.id,
+            target_id=second.id,
+            relationship_type="imports",
+        )
+    )
+
+    candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="test",
+        reason="test candidate",
+    )
+
+    retriever = RelationshipCandidateRetriever(max_depth=1)
+
+    expanded, evidence = retriever.expand(
+        project,
+        [candidate],
+        max_depth=0,
+    )
+
+    assert [item.entity_id for item in expanded] == [first.id]
+    assert evidence == {}
+
+
+def test_relationship_candidate_retriever_rejects_negative_per_call_depth() -> None:
+    retriever = RelationshipCandidateRetriever(max_depth=1)
+
+    with pytest.raises(
+        ValueError,
+        match="Relationship expansion depth cannot be negative",
+    ):
+        retriever.expand(
+            Project(
+                name="demo",
+                root_path=Path("/tmp/context-forge-test"),
+            ),
+            [],
+            max_depth=-1,
+        )

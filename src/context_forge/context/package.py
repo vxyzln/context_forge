@@ -6,6 +6,7 @@ from context_forge.context.models import (
     ContextUnit,
     Evidence,
 )
+from context_forge.context.retrieval import RetrievalEvidence
 from context_forge.context.signals import RelevanceSignals
 
 
@@ -15,9 +16,11 @@ class ContextPackageBuilder:
         task: str,
         expansions: list[ContextExpansion],
         signals: dict[object, RelevanceSignals] | None = None,
+        retrieval_evidence: dict[object, RetrievalEvidence] | None = None,
     ) -> ContextPackage:
         units: list[ContextUnit] = []
         signals = signals or {}
+        retrieval_evidence = retrieval_evidence or {}
 
         for expansion in expansions:
             candidate = expansion.candidate
@@ -26,6 +29,7 @@ class ContextPackageBuilder:
                 self._build_unit(
                     candidate,
                     signals.get(candidate.entity_id),
+                    retrieval_evidence.get(candidate.entity_id),
                 )
             )
 
@@ -34,7 +38,8 @@ class ContextPackageBuilder:
                     self._build_unit(
                         related,
                         signals.get(related.entity_id),
-                    )
+                        retrieval_evidence.get(related.entity_id),
+                    ),
                 )
 
         return ContextPackage(
@@ -46,6 +51,7 @@ class ContextPackageBuilder:
     def _build_unit(
         candidate: ContextCandidate,
         relevance_signals: RelevanceSignals | None = None,
+        retrieval_evidence: RetrievalEvidence | None = None,
     ) -> ContextUnit:
         selection_description = (
             f"{candidate.reason}; "
@@ -85,6 +91,29 @@ class ContextPackageBuilder:
                         ),
                     ),
                 )
+            )
+
+        if retrieval_evidence is not None:
+            relationship_type = retrieval_evidence.relationship_type
+
+            if hasattr(relationship_type, "value"):
+                relationship_type = relationship_type.value
+
+            context_signals.append(
+                ContextSignal(
+                    name="relationship_retrieval",
+                    value=retrieval_evidence.candidate_confidence,
+                    evidence=(
+                        Evidence(
+                            source_id=candidate.entity_id,
+                            description=(
+                                f"Retrieved through {relationship_type} relationship "
+                                f"at depth {retrieval_evidence.depth}"
+                                f"{retrieval_evidence.provenance}"
+                            ),
+                        ),
+                    ),
+                ),
             )
 
         return ContextUnit(

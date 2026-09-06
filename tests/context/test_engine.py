@@ -74,6 +74,19 @@ class FixedDepthSelector:
         return self.decision
 
 
+class RecordingRelationshipRetriever:
+    def __init__(self, candidates):
+        self.candidates = candidates
+        self.calls = []
+
+    def expand(self, project, candidates, max_depth: int | None = None):
+        self.calls.append(
+            {"project": project, "candidates": candidates, "max_depth": max_depth}
+        )
+
+        return self.candidates, {}
+
+
 def make_engine() -> DefaultContextEngine:
     return DefaultContextEngine(
         candidate_generator=CandidateGenerator(),
@@ -399,3 +412,69 @@ def test_engine_passes_repository_grounding_to_candidate_generator() -> None:
     assert candidate_generator.calls[0]["task"] == "Fix authentication"
     assert candidate_generator.calls[0]["interpretation"] is interpretation
     assert candidate_generator.calls[0]["grounding"] is grounding
+
+
+def test_context_engine_uses_relationship_aware_retrieval() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(file)
+
+    candidate = ContextCandidate(
+        entity_id=file.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="deterministic_search",
+    )
+
+    retriever = RecordingRelationshipRetriever([candidate])
+
+    engine = DefaultContextEngine(
+        candidate_generator=RecordingCandidateGenerator([candidate]),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        relationship_retriever=retriever,
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="auth",
+        )
+    )
+
+    assert len(retriever.calls) == 1
+    assert retriever.calls[0]["project"] is project
+    assert package.units
+    assert package.units[0].entity_id == file.id
+    assert retriever.calls[0]["candidates"] == [candidate]
+    assert retriever.calls[0]["max_depth"] == 1

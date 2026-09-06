@@ -33,6 +33,10 @@ from context_forge.context.priority_ordering import ContextPriorityOrdering
 from context_forge.context.ranking import DeterministicRanker
 from context_forge.context.relationship_enrichment import RelationshipContextEnricher
 from context_forge.context.request import ContextRequest
+from context_forge.context.retrieval import (
+    RelationshipCandidateRetriever,
+    RetrievalEvidence,
+)
 from context_forge.context.selection import ContextSelector
 from context_forge.context.serialization import ContextPackageSerializer
 from context_forge.context.signals import RelevanceSignals
@@ -71,7 +75,9 @@ __all__ = [
     "FileContextEnricher",
     "GraphExpander",
     "Inference",
+    "RelationshipCandidateRetriever",
     "RelationshipContextEnricher",
     "RelevanceSignals",
+    "RetrievalEvidence",
     "SymbolContextEnricher",
 ]

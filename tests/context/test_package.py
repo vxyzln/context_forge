@@ -3,6 +3,7 @@ from uuid import uuid4
 from context_forge.context.candidate import ContextCandidate
 from context_forge.context.expansion import ContextExpansion
 from context_forge.context.package import ContextPackageBuilder
+from context_forge.context.retrieval import RetrievalEvidence
 from context_forge.context.signals import RelevanceSignals
 from context_forge.context.types import ContextUnitType
 
@@ -153,3 +154,44 @@ def test_package_builder_includes_git_relevance_signal() -> None:
     assert git_signal.value == 0.8
     assert git_signal.evidence
     assert "Git history" in git_signal.evidence[0].description
+
+
+def test_package_builder_includes_relationship_retrieval_evidence() -> None:
+    entity_id = uuid4()
+
+    candidate = ContextCandidate(
+        entity_id=entity_id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="relationship_expansion",
+        reason="Relationship-aware repository expansion",
+    )
+
+    retrieval_evidence = RetrievalEvidence(
+        source_candidate_id=uuid4(),
+        relationship_type="imports",
+        depth=2,
+        relationship_confidence=0.7,
+        candidate_confidence=0.7,
+        provenance="relationship-aware repository expansion",
+    )
+
+    package = ContextPackageBuilder().build(
+        "authentication",
+        [ContextExpansion(candidate=candidate)],
+        retrieval_evidence={entity_id: retrieval_evidence},
+    )
+
+    unit = package.units[0]
+
+    relationship_signal = next(
+        signal for signal in unit.signals if signal.name == "relationship_retrieval"
+    )
+
+    assert relationship_signal.value == 0.7
+    assert relationship_signal.evidence
+    assert "imports" in relationship_signal.evidence[0].description
+    assert "depth 2" in relationship_signal.evidence[0].description
+    assert "relationship-aware repository expansion" in (
+        relationship_signal.evidence[0].description
+    )
