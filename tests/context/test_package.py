@@ -195,3 +195,32 @@ def test_package_builder_includes_relationship_retrieval_evidence() -> None:
     assert "relationship-aware repository expansion" in (
         relationship_signal.evidence[0].description
     )
+
+
+def test_package_builder_preserves_selection_confidence() -> None:
+    candidate = ContextCandidate(
+        entity_id=uuid4(),
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+        reason="matched task",
+    )
+
+    package = ContextPackageBuilder().build(
+        task="authenticate user",
+        expansions=[ContextExpansion(candidate=candidate)],
+        selection_confidence={
+            candidate.entity_id: 0.93,
+        },
+    )
+
+    signals = {
+        signal.name: signal
+        for signal in package.units[0].signals
+    }
+
+    assert signals["selection_confidence"].value == 0.93
+    assert (
+        signals["selection_confidence"].evidence[0].source_id
+        == candidate.entity_id
+    )

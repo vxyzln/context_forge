@@ -65,10 +65,7 @@ class ContextSelectionContract:
         if not isinstance(decisions, list):
             raise TypeError("Selection response must contain a decisions list")
 
-        candidate_ids = {
-            candidate.entity_id
-            for candidate in request.candidates
-        }
+        candidate_ids = {candidate.entity_id for candidate in request.candidates}
         parsed: dict[UUID, ContextSelectionDecision] = {}
 
         for item in decisions:

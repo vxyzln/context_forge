@@ -88,10 +88,10 @@ def test_response_parses_valid_decisions() -> None:
     response = ContextSelectionContract.parse_response(raw, request)
 
     assert len(response.decisions) == 2
-    assert {
-        decision.entity_id
-        for decision in response.decisions
-    } == {first.entity_id, second.entity_id}
+    assert {decision.entity_id for decision in response.decisions} == {
+        first.entity_id,
+        second.entity_id,
+    }
 
 
 def test_response_is_normalized_deterministically() -> None:
@@ -119,10 +119,7 @@ def test_response_is_normalized_deterministically() -> None:
 
     response = ContextSelectionContract.parse_response(raw, request)
 
-    assert [
-        str(decision.entity_id)
-        for decision in response.decisions
-    ] == sorted(
+    assert [str(decision.entity_id) for decision in response.decisions] == sorted(
         [str(first.entity_id), str(second.entity_id)]
     )
 

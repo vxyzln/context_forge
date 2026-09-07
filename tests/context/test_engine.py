@@ -74,6 +74,36 @@ class FixedDepthSelector:
         return self.decision
 
 
+
+
+class RecordingSelectionService:
+    def __init__(self, selected_candidates) -> None:
+        self.selected_candidates = selected_candidates
+        self.calls = []
+
+    def select(self, task, candidates):
+        self.calls.append(
+            {
+                "task": task,
+                "candidates": candidates,
+            }
+        )
+
+        from context_forge.context.selection_service import (
+            ContextSelectionResult,
+            SelectedContextCandidate,
+        )
+
+        return ContextSelectionResult(
+            candidates=tuple(
+                SelectedContextCandidate(
+                    candidate=candidate,
+                    confidence=0.9,
+                )
+                for candidate in self.selected_candidates
+            )
+        )
+
 class RecordingRelationshipRetriever:
     def __init__(self, candidates):
         self.candidates = candidates
@@ -478,3 +508,102 @@ def test_context_engine_uses_relationship_aware_retrieval() -> None:
     assert package.units[0].entity_id == file.id
     assert retriever.calls[0]["candidates"] == [candidate]
     assert retriever.calls[0]["max_depth"] == 1
+
+
+def test_context_engine_uses_intelligent_context_selection() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("first.py"),
+        name="first.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("second.py"),
+        name="second.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+
+    first_candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="deterministic_search",
+    )
+    second_candidate = ContextCandidate(
+        entity_id=second.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+    )
+
+    retriever = RecordingRelationshipRetriever(
+        [first_candidate, second_candidate],
+    )
+    selection_service = RecordingSelectionService(
+        [first_candidate],
+    )
+
+    engine = DefaultContextEngine(
+        candidate_generator=RecordingCandidateGenerator(
+            [first_candidate, second_candidate],
+        ),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        relationship_retriever=retriever,
+        selection_service=selection_service,
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="first",
+        )
+    )
+
+    assert len(selection_service.calls) == 1
+    assert selection_service.calls[0]["task"] == "first"
+    assert selection_service.calls[0]["candidates"] == [
+        first_candidate,
+        second_candidate,
+    ]
+
+    entity_ids = {unit.entity_id for unit in package.units}
+
+    assert entity_ids == {first.id}
+
+    signals = {
+        signal.name: signal
+        for signal in package.units[0].signals
+    }
+
+    assert signals["selection_confidence"].value == 0.9

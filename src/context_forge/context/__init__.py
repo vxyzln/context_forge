@@ -48,6 +48,11 @@ from context_forge.context.serialization import ContextPackageSerializer
 from context_forge.context.signals import RelevanceSignals
 from context_forge.context.symbol_enrichment import SymbolContextEnricher
 from context_forge.context.types import ContextUnitType
+from context_forge.context.selection_service import (
+    ContextSelectionResult,
+    ContextSelectionService,
+    SelectedContextCandidate,
+)
 
 __all__ = [
     "CandidateGenerator",
@@ -90,4 +95,7 @@ __all__ = [
     "RelevanceSignals",
     "RetrievalEvidence",
     "SymbolContextEnricher",
+    "ContextSelectionResult",
+    "ContextSelectionService",
+    "SelectedContextCandidate",
 ]

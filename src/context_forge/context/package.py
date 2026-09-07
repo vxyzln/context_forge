@@ -17,10 +17,12 @@ class ContextPackageBuilder:
         expansions: list[ContextExpansion],
         signals: dict[object, RelevanceSignals] | None = None,
         retrieval_evidence: dict[object, RetrievalEvidence] | None = None,
+        selection_confidence: dict[object, float] | None = None,
     ) -> ContextPackage:
         units: list[ContextUnit] = []
         signals = signals or {}
         retrieval_evidence = retrieval_evidence or {}
+        selection_confidence = selection_confidence or {}
 
         for expansion in expansions:
             candidate = expansion.candidate
@@ -30,6 +32,7 @@ class ContextPackageBuilder:
                     candidate,
                     signals.get(candidate.entity_id),
                     retrieval_evidence.get(candidate.entity_id),
+                    selection_confidence.get(candidate.entity_id),
                 )
             )
 
@@ -39,6 +42,7 @@ class ContextPackageBuilder:
                         related,
                         signals.get(related.entity_id),
                         retrieval_evidence.get(related.entity_id),
+                        selection_confidence.get(related.entity_id),
                     ),
                 )
 
@@ -52,6 +56,7 @@ class ContextPackageBuilder:
         candidate: ContextCandidate,
         relevance_signals: RelevanceSignals | None = None,
         retrieval_evidence: RetrievalEvidence | None = None,
+        selection_confidence: float | None = None,
     ) -> ContextUnit:
         selection_description = (
             f"{candidate.reason}; "
@@ -76,6 +81,20 @@ class ContextPackageBuilder:
         )
 
         context_signals = [selection_signal]
+
+        if selection_confidence is not None:
+            context_signals.append(
+                ContextSignal(
+                    name="selection_confidence",
+                    value=selection_confidence,
+                    evidence=(
+                        Evidence(
+                            source_id=candidate.entity_id,
+                            description="LLM context-selection confidence",
+                        ),
+                    ),
+                )
+            )
 
         if relevance_signals is not None and relevance_signals.git > 0:
             context_signals.append(
