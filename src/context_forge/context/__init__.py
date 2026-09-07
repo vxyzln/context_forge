@@ -38,6 +38,12 @@ from context_forge.context.retrieval import (
     RetrievalEvidence,
 )
 from context_forge.context.selection import ContextSelector
+from context_forge.context.selection_contract import (
+    ContextSelectionContract,
+    ContextSelectionDecision,
+    ContextSelectionRequest,
+    ContextSelectionResponse,
+)
 from context_forge.context.serialization import ContextPackageSerializer
 from context_forge.context.signals import RelevanceSignals
 from context_forge.context.symbol_enrichment import SymbolContextEnricher
@@ -62,6 +68,10 @@ __all__ = [
     "ContextPriority",
     "ContextPriorityOrdering",
     "ContextRequest",
+    "ContextSelectionContract",
+    "ContextSelectionDecision",
+    "ContextSelectionRequest",
+    "ContextSelectionResponse",
     "ContextSelector",
     "ContextSignal",
     "ContextUnit",
