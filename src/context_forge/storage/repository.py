@@ -10,12 +10,64 @@ from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
 from context_forge.models.symbol import Symbol
+from context_forge.storage.cache import RepositoryCacheMetadata
 from context_forge.storage.database import Database
 
 
 class ProjectRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
+
+    def save_cache_metadata(
+        self,
+        metadata: RepositoryCacheMetadata,
+    ) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO repository_cache (
+                    repository_key,
+                    project_id,
+                    cache_schema_version,
+                    analyzer_version
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    metadata.repository_key,
+                    str(metadata.project_id),
+                    metadata.cache_schema_version,
+                    metadata.analyzer_version,
+                ),
+            )
+
+    def load_cache_metadata(
+        self,
+        repository_key: str,
+    ) -> RepositoryCacheMetadata | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    repository_key,
+                    project_id,
+                    cache_schema_version,
+                    analyzer_version
+                FROM repository_cache
+                WHERE repository_key = ?
+                """,
+                (repository_key,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return RepositoryCacheMetadata(
+            repository_key=row["repository_key"],
+            project_id=UUID(row["project_id"]),
+            cache_schema_version=row["cache_schema_version"],
+            analyzer_version=row["analyzer_version"],
+        )
 
     def save(self, project: Project) -> None:
         with self.database.connect() as connection:
@@ -229,6 +281,30 @@ class ProjectRepository:
                         error,
                     ),
                 )
+
+    def save_analysis(
+        self,
+        project: Project,
+        metadata: RepositoryCacheMetadata,
+    ) -> None:
+        self.save(project)
+        self.save_cache_metadata(metadata)
+
+    def load_analysis(
+        self,
+        repository_key: str,
+    ) -> tuple[Project, RepositoryCacheMetadata] | None:
+        metadata = self.load_cache_metadata(repository_key)
+
+        if metadata is None:
+            return None
+
+        project = self.load(metadata.project_id)
+
+        if project is None:
+            return None
+
+        return project, metadata
 
     def load(self, project_id: UUID) -> Project | None:
         with self.database.connect() as connection:

@@ -33,6 +33,14 @@ class Database:
                     git_total_deletions INTEGER
                 );
 
+                CREATE TABLE IF NOT EXISTS repository_cache (
+                    repository_key TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    cache_schema_version INTEGER NOT NULL,
+                    analyzer_version TEXT NOT NULL,
+                    FOREIGN KEY (project_id) REFERENCES projects(id)
+                );
+
                 CREATE TABLE IF NOT EXISTS directories (
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL,
@@ -88,6 +96,9 @@ class Database:
                     FOREIGN KEY (project_id) REFERENCES projects(id)
                 );
 
+                CREATE INDEX IF NOT EXISTS idx_repository_cache_project
+                ON repository_cache(project_id);
+
                 CREATE INDEX IF NOT EXISTS idx_directories_project
                 ON directories(project_id);
 
@@ -107,6 +118,7 @@ class Database:
                 ON relationships(target_id);
                 """
             )
+
             columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(projects)").fetchall()

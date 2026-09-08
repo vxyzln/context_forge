@@ -6,6 +6,12 @@ from context_forge.graph.builder import RelationshipBuilder
 from context_forge.models.project import Project
 from context_forge.parser.python import PythonParser
 from context_forge.scanner.repository import RepositoryScanner
+from context_forge.storage.cache import (
+    ANALYZER_VERSION,
+    CACHE_SCHEMA_VERSION,
+    RepositoryCacheMetadata,
+    RepositoryIdentity,
+)
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
 
@@ -382,3 +388,233 @@ def test_missing_git_activity_survives_repository_round_trip(
 
     assert loaded is not None
     assert loaded.git_activity is None
+
+
+def test_repository_identity_is_deterministic(tmp_path: Path) -> None:
+    identity = RepositoryIdentity(tmp_path)
+
+    assert identity.key == str(tmp_path.resolve())
+
+
+def test_repository_cache_metadata_survives_round_trip(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+
+    repository.save(project)
+
+    metadata = RepositoryCacheMetadata(
+        repository_key=RepositoryIdentity(tmp_path).key,
+        project_id=project.id,
+    )
+
+    repository.save_cache_metadata(metadata)
+
+    loaded = repository.load_cache_metadata(metadata.repository_key)
+
+    assert loaded is not None
+    assert loaded == metadata
+
+
+def test_repository_cache_metadata_uses_current_versions(
+    tmp_path: Path,
+) -> None:
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+
+    metadata = RepositoryCacheMetadata(
+        repository_key=RepositoryIdentity(tmp_path).key,
+        project_id=project.id,
+    )
+
+    assert metadata.cache_schema_version == CACHE_SCHEMA_VERSION
+    assert metadata.analyzer_version == ANALYZER_VERSION
+
+
+def test_missing_repository_cache_metadata_returns_none(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    loaded = repository.load_cache_metadata(
+        RepositoryIdentity(tmp_path).key,
+    )
+
+    assert loaded is None
+
+
+def test_repository_cache_metadata_can_be_replaced(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    first_project = Project(
+        name="First Project",
+        root_path=tmp_path,
+    )
+    second_project = Project(
+        name="Second Project",
+        root_path=tmp_path,
+    )
+
+    repository.save(first_project)
+    repository.save(second_project)
+
+    repository_key = RepositoryIdentity(tmp_path).key
+
+    repository.save_cache_metadata(
+        RepositoryCacheMetadata(
+            repository_key=repository_key,
+            project_id=first_project.id,
+        )
+    )
+
+    repository.save_cache_metadata(
+        RepositoryCacheMetadata(
+            repository_key=repository_key,
+            project_id=second_project.id,
+        )
+    )
+
+    loaded = repository.load_cache_metadata(repository_key)
+
+    assert loaded is not None
+    assert loaded.project_id == second_project.id
+
+
+def test_save_analysis_persists_project_and_cache_metadata(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+    metadata = RepositoryCacheMetadata(
+        repository_key=RepositoryIdentity(tmp_path).key,
+        project_id=project.id,
+    )
+
+    repository.save_analysis(project, metadata)
+
+    loaded_project = repository.load(project.id)
+    loaded_metadata = repository.load_cache_metadata(metadata.repository_key)
+
+    assert loaded_project is not None
+    assert loaded_project.id == project.id
+    assert loaded_project.name == project.name
+    assert loaded_metadata == metadata
+
+
+def test_load_analysis_returns_project_and_metadata(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+    metadata = RepositoryCacheMetadata(
+        repository_key=RepositoryIdentity(tmp_path).key,
+        project_id=project.id,
+    )
+
+    repository.save_analysis(project, metadata)
+
+    loaded = repository.load_analysis(metadata.repository_key)
+
+    assert loaded is not None
+
+    loaded_project, loaded_metadata = loaded
+
+    assert loaded_project.id == project.id
+    assert loaded_project.name == project.name
+    assert loaded_metadata == metadata
+
+
+def test_load_analysis_returns_none_for_missing_cache(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    loaded = repository.load_analysis(
+        RepositoryIdentity(tmp_path).key,
+    )
+
+    assert loaded is None
+
+
+def test_load_analysis_returns_none_when_cached_project_is_missing(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+    metadata = RepositoryCacheMetadata(
+        repository_key=RepositoryIdentity(tmp_path).key,
+        project_id=project.id,
+    )
+
+    repository.save_cache_metadata(metadata)
+
+    loaded = repository.load_analysis(metadata.repository_key)
+
+    assert loaded is None
+
+
+def test_load_analysis_preserves_repository_identity(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+    repository_key = RepositoryIdentity(tmp_path).key
+    metadata = RepositoryCacheMetadata(
+        repository_key=repository_key,
+        project_id=project.id,
+    )
+
+    repository.save_analysis(project, metadata)
+
+    loaded = repository.load_analysis(repository_key)
+
+    assert loaded is not None
+
+    loaded_project, loaded_metadata = loaded
+
+    assert loaded_project.root_path == tmp_path.resolve()
+    assert loaded_metadata.repository_key == repository_key
