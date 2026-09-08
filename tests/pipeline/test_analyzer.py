@@ -4,6 +4,7 @@ from pathlib import Path
 from context_forge.models.relationship import RelationshipType
 from context_forge.pipeline.analyzer import ProjectAnalyzer
 from context_forge.query import ProjectQuery
+from context_forge.storage.cache import RepositoryIdentity
 
 
 def test_analyzer_runs_full_pipeline(tmp_path: Path) -> None:
@@ -1188,3 +1189,54 @@ class Child(Base):
     )
 
     assert database_path.exists()
+
+
+def test_analyzer_persists_repository_cache_identity(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        'def hello() -> str:\n    return "hello"\n',
+        encoding="utf-8",
+    )
+
+    database_path = tmp_path / "context_forge.db"
+    analyzer = ProjectAnalyzer(tmp_path, database_path)
+
+    project = analyzer.analyze()
+
+    metadata = analyzer.repository.load_cache_metadata(
+        RepositoryIdentity(tmp_path).key,
+    )
+
+    assert metadata is not None
+    assert metadata.repository_key == RepositoryIdentity(tmp_path).key
+    assert metadata.project_id == project.id
+
+
+def test_analyzer_cache_identity_resolves_persisted_project(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        'def hello() -> str:\n    return "hello"\n',
+        encoding="utf-8",
+    )
+
+    database_path = tmp_path / "context_forge.db"
+    analyzer = ProjectAnalyzer(tmp_path, database_path)
+
+    project = analyzer.analyze()
+
+    loaded = analyzer.repository.load_analysis(
+        RepositoryIdentity(tmp_path).key,
+    )
+
+    assert loaded is not None
+
+    loaded_project, metadata = loaded
+
+    assert loaded_project.id == project.id
+    assert loaded_project.name == project.name
+    assert loaded_project.root_path == tmp_path.resolve()
+    assert metadata.project_id == project.id

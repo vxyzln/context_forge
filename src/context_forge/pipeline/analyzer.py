@@ -8,17 +8,15 @@ from context_forge.parser import LanguageDetector, ParserRegistry
 from context_forge.parser.python import PythonParser
 from context_forge.parser.result import ParseResult
 from context_forge.scanner.repository import RepositoryScanner
+from context_forge.storage.cache import RepositoryCacheMetadata, RepositoryIdentity
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
 
 
 class ProjectAnalyzer:
-    def __init__(
-        self,
-        root_path: Path,
-        database_path: Path,
-    ) -> None:
+    def __init__(self, root_path: Path, database_path: Path) -> None:
         self.root_path = root_path.resolve()
+        self.identity = RepositoryIdentity(self.root_path)
         self.database = Database(database_path)
         self.repository = ProjectRepository(self.database)
 
@@ -98,6 +96,9 @@ class ProjectAnalyzer:
             project.analysis_status = "failed"
             raise
 
-        self.repository.save(project)
-
+        metadata = RepositoryCacheMetadata(
+            repository_key=self.identity.key,
+            project_id=project.id,
+        )
+        self.repository.save_analysis(project, metadata)
         return project
