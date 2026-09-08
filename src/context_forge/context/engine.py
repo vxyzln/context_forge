@@ -76,6 +76,8 @@ class DefaultContextEngine(ContextEngine):
             max_depth=depth_decision.depth,
         )
 
+        selection_fallback = False
+
         if self.selection_service is not None:
             try:
                 selection_result = self.selection_service.select(
@@ -84,11 +86,11 @@ class DefaultContextEngine(ContextEngine):
                 )
             except (RuntimeError, ValueError, TypeError):
                 selection_result = None
+                selection_fallback = True
 
             if selection_result is not None:
                 selected_entity_ids = {
-                    item.candidate.entity_id
-                    for item in selection_result.candidates
+                    item.candidate.entity_id for item in selection_result.candidates
                 }
 
                 expanded_candidates = [
@@ -122,6 +124,7 @@ class DefaultContextEngine(ContextEngine):
             selected_signals,
             retrieval_evidence,
             selection_confidence,
+            selection_fallback,
         )
 
         enriched_units = self.enrichment_pipeline.enrich(

@@ -8,6 +8,7 @@ from context_forge.context import (
     ContextPackageBuilder,
     ContextPackageSerializer,
     ContextPriorityOrdering,
+    ContextSelectionService,
     ContextSelector,
     DefaultContextEngine,
     DeterministicContextCompressor,
@@ -28,7 +29,9 @@ from context_forge.task import (
 )
 
 
-def build_context_engine() -> DefaultContextEngine:
+def build_context_engine(
+    selection_service: ContextSelectionService | None = None,
+) -> DefaultContextEngine:
     return DefaultContextEngine(
         candidate_generator=CandidateGenerator(),
         ranker=DeterministicRanker(),
@@ -52,6 +55,7 @@ def build_context_engine() -> DefaultContextEngine:
                 DeterministicPrioritizer(),
             ),
         ),
+        selection_service=selection_service,
     )
 
 
@@ -63,10 +67,17 @@ def build_generation_service(
         model="deterministic-task",
     )
 
+    generation_provider = ProviderFactory.create(generation_config)
+    selection_provider = ProviderFactory.create(generation_config)
+    selection_service = ContextSelectionService(
+        provider=selection_provider,
+        config=generation_config,
+    )
+
     return ContextGenerationService(
-        engine=build_context_engine(),
+        engine=build_context_engine(selection_service=selection_service),
         serializer=ContextPackageSerializer(),
-        provider=ProviderFactory.create(generation_config),
+        provider=generation_provider,
         task_understanding=TaskUnderstandingService(
             provider=ProviderFactory.create(task_understanding_config),
             config=task_understanding_config,

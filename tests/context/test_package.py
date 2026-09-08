@@ -214,13 +214,51 @@ def test_package_builder_preserves_selection_confidence() -> None:
         },
     )
 
-    signals = {
-        signal.name: signal
-        for signal in package.units[0].signals
-    }
+    signals = {signal.name: signal for signal in package.units[0].signals}
 
     assert signals["selection_confidence"].value == 0.93
-    assert (
-        signals["selection_confidence"].evidence[0].source_id
-        == candidate.entity_id
+    assert signals["selection_confidence"].evidence[0].source_id == candidate.entity_id
+
+
+def test_package_builder_includes_selection_fallback_signal() -> None:
+    candidate = ContextCandidate(
+        entity_id=uuid4(),
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+        reason="matched task",
+    )
+
+    package = ContextPackageBuilder().build(
+        task="authenticate user",
+        expansions=[ContextExpansion(candidate=candidate)],
+        selection_fallback=True,
+    )
+
+    signals = {signal.name: signal for signal in package.units[0].signals}
+
+    assert signals["selection_fallback"].value == 1.0
+    assert signals["selection_fallback"].evidence
+    assert signals["selection_fallback"].evidence[0].source_id == candidate.entity_id
+    assert signals["selection_fallback"].evidence[0].description == (
+        "Deterministic context-selection fallback used "
+        "because intelligent selection was unavailable"
+    )
+
+
+def test_package_builder_omits_selection_fallback_signal_by_default() -> None:
+    candidate = ContextCandidate(
+        entity_id=uuid4(),
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+    )
+
+    package = ContextPackageBuilder().build(
+        task="authenticate user",
+        expansions=[ContextExpansion(candidate=candidate)],
+    )
+
+    assert all(
+        signal.name != "selection_fallback" for signal in package.units[0].signals
     )

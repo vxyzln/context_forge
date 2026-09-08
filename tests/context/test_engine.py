@@ -74,8 +74,6 @@ class FixedDepthSelector:
         return self.decision
 
 
-
-
 class RecordingSelectionService:
     def __init__(self, selected_candidates) -> None:
         self.selected_candidates = selected_candidates
@@ -105,7 +103,6 @@ class RecordingSelectionService:
         )
 
 
-
 class FailingSelectionService:
     def __init__(self, error: Exception) -> None:
         self.error = error
@@ -119,6 +116,7 @@ class FailingSelectionService:
             }
         )
         raise self.error
+
 
 class RecordingRelationshipRetriever:
     def __init__(self, candidates):
@@ -617,10 +615,7 @@ def test_context_engine_uses_intelligent_context_selection() -> None:
 
     assert entity_ids == {first.id}
 
-    signals = {
-        signal.name: signal
-        for signal in package.units[0].signals
-    }
+    signals = {signal.name: signal for signal in package.units[0].signals}
 
     assert signals["selection_confidence"].value == 0.9
 
@@ -705,10 +700,7 @@ def test_context_engine_falls_back_when_selection_provider_fails() -> None:
     )
 
     assert len(selection_service.calls) == 1
-    assert {
-        unit.entity_id
-        for unit in package.units
-    } == {first.id, second.id}
+    assert {unit.entity_id for unit in package.units} == {first.id, second.id}
 
     assert all(
         signal.name != "selection_confidence"
@@ -796,7 +788,295 @@ def test_context_engine_falls_back_on_invalid_selection_response() -> None:
         )
     )
 
-    assert {
-        unit.entity_id
-        for unit in package.units
-    } == {first.id, second.id}
+    assert {unit.entity_id for unit in package.units} == {first.id, second.id}
+
+
+def test_context_engine_preserves_selection_confidence_in_final_package() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    included = File(
+        project_id=project.id,
+        path=Path("auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+        size=128,
+    )
+    excluded = File(
+        project_id=project.id,
+        path=Path("unrelated.py"),
+        name="unrelated.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+        size=128,
+    )
+
+    project.add_file(included)
+    project.add_file(excluded)
+
+    included_candidate = ContextCandidate(
+        entity_id=included.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.9,
+        source="deterministic_search",
+        reason="Authentication file",
+    )
+    excluded_candidate = ContextCandidate(
+        entity_id=excluded.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+        reason="Unrelated file",
+    )
+
+    selection_service = RecordingSelectionService(
+        [included_candidate],
+    )
+
+    engine = DefaultContextEngine(
+        candidate_generator=RecordingCandidateGenerator(
+            [
+                included_candidate,
+                excluded_candidate,
+            ],
+        ),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        selection_service=selection_service,
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="authentication",
+        )
+    )
+
+    assert [unit.entity_id for unit in package.units] == [included.id]
+
+    unit = package.units[0]
+
+    selection_confidence = next(
+        signal for signal in unit.signals if signal.name == "selection_confidence"
+    )
+
+    assert selection_confidence.value == 0.9
+    assert selection_confidence.evidence
+    assert selection_confidence.evidence[0].source_id == included.id
+
+
+def test_context_engine_fallback_produces_final_context_with_fallback_diagnostic() -> (
+    None
+):
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("session.py"),
+        name="session.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+
+    first_candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.9,
+        source="deterministic_search",
+    )
+    second_candidate = ContextCandidate(
+        entity_id=second.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+    )
+
+    selection_service = FailingSelectionService(
+        RuntimeError("selection provider unavailable"),
+    )
+
+    engine = DefaultContextEngine(
+        candidate_generator=RecordingCandidateGenerator(
+            [
+                first_candidate,
+                second_candidate,
+            ],
+        ),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        selection_service=selection_service,
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="authentication",
+        )
+    )
+
+    assert {unit.entity_id for unit in package.units} == {
+        first.id,
+        second.id,
+    }
+
+    assert package.units
+
+    for unit in package.units:
+        signal_names = {signal.name for signal in unit.signals}
+
+        assert "selection_confidence" not in signal_names
+        assert "selection_fallback" in signal_names
+
+        fallback_signal = next(
+            signal for signal in unit.signals if signal.name == "selection_fallback"
+        )
+
+        assert fallback_signal.value == 1.0
+        assert fallback_signal.evidence
+        assert fallback_signal.evidence[0].source_id == unit.entity_id
+
+
+def test_context_engine_successful_selection_produces_confidence_without_fallback() -> (
+    None
+):
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("session.py"),
+        name="session.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+
+    first_candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.9,
+        source="deterministic_search",
+    )
+    second_candidate = ContextCandidate(
+        entity_id=second.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+    )
+
+    selection_service = RecordingSelectionService(
+        [first_candidate],
+    )
+
+    engine = DefaultContextEngine(
+        candidate_generator=RecordingCandidateGenerator(
+            [
+                first_candidate,
+                second_candidate,
+            ],
+        ),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        selection_service=selection_service,
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="authentication",
+        )
+    )
+
+    assert [unit.entity_id for unit in package.units] == [first.id]
+
+    unit = package.units[0]
+
+    signals = {signal.name: signal for signal in unit.signals}
+
+    assert "selection_confidence" in signals
+    assert signals["selection_confidence"].value == 0.9
+    assert "selection_fallback" not in signals

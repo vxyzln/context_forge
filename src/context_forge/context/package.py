@@ -18,6 +18,7 @@ class ContextPackageBuilder:
         signals: dict[object, RelevanceSignals] | None = None,
         retrieval_evidence: dict[object, RetrievalEvidence] | None = None,
         selection_confidence: dict[object, float] | None = None,
+        selection_fallback: bool = False,
     ) -> ContextPackage:
         units: list[ContextUnit] = []
         signals = signals or {}
@@ -33,6 +34,7 @@ class ContextPackageBuilder:
                     signals.get(candidate.entity_id),
                     retrieval_evidence.get(candidate.entity_id),
                     selection_confidence.get(candidate.entity_id),
+                    selection_fallback,
                 )
             )
 
@@ -43,7 +45,8 @@ class ContextPackageBuilder:
                         signals.get(related.entity_id),
                         retrieval_evidence.get(related.entity_id),
                         selection_confidence.get(related.entity_id),
-                    ),
+                        selection_fallback,
+                    )
                 )
 
         return ContextPackage(
@@ -57,6 +60,7 @@ class ContextPackageBuilder:
         relevance_signals: RelevanceSignals | None = None,
         retrieval_evidence: RetrievalEvidence | None = None,
         selection_confidence: float | None = None,
+        selection_fallback: bool = False,
     ) -> ContextUnit:
         selection_description = (
             f"{candidate.reason}; "
@@ -91,6 +95,23 @@ class ContextPackageBuilder:
                         Evidence(
                             source_id=candidate.entity_id,
                             description="LLM context-selection confidence",
+                        ),
+                    ),
+                )
+            )
+
+        if selection_fallback:
+            context_signals.append(
+                ContextSignal(
+                    name="selection_fallback",
+                    value=1.0,
+                    evidence=(
+                        Evidence(
+                            source_id=candidate.entity_id,
+                            description=(
+                                "Deterministic context-selection fallback used "
+                                "because intelligent selection was unavailable"
+                            ),
                         ),
                     ),
                 )
@@ -132,7 +153,7 @@ class ContextPackageBuilder:
                             ),
                         ),
                     ),
-                ),
+                )
             )
 
         return ContextUnit(

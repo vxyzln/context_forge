@@ -44,15 +44,15 @@ from context_forge.context.selection_contract import (
     ContextSelectionRequest,
     ContextSelectionResponse,
 )
-from context_forge.context.serialization import ContextPackageSerializer
-from context_forge.context.signals import RelevanceSignals
-from context_forge.context.symbol_enrichment import SymbolContextEnricher
-from context_forge.context.types import ContextUnitType
 from context_forge.context.selection_service import (
     ContextSelectionResult,
     ContextSelectionService,
     SelectedContextCandidate,
 )
+from context_forge.context.serialization import ContextPackageSerializer
+from context_forge.context.signals import RelevanceSignals
+from context_forge.context.symbol_enrichment import SymbolContextEnricher
+from context_forge.context.types import ContextUnitType
 
 __all__ = [
     "CandidateGenerator",
@@ -77,6 +77,8 @@ __all__ = [
     "ContextSelectionDecision",
     "ContextSelectionRequest",
     "ContextSelectionResponse",
+    "ContextSelectionResult",
+    "ContextSelectionService",
     "ContextSelector",
     "ContextSignal",
     "ContextUnit",
@@ -94,8 +96,6 @@ __all__ = [
     "RelationshipContextEnricher",
     "RelevanceSignals",
     "RetrievalEvidence",
-    "SymbolContextEnricher",
-    "ContextSelectionResult",
-    "ContextSelectionService",
     "SelectedContextCandidate",
+    "SymbolContextEnricher",
 ]
