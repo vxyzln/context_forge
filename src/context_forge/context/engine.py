@@ -77,26 +77,32 @@ class DefaultContextEngine(ContextEngine):
         )
 
         if self.selection_service is not None:
-            selection_result = self.selection_service.select(
-                request.task,
-                expanded_candidates,
-            )
+            try:
+                selection_result = self.selection_service.select(
+                    request.task,
+                    expanded_candidates,
+                )
+            except (RuntimeError, ValueError, TypeError):
+                selection_result = None
 
-            selected_entity_ids = {
-                item.candidate.entity_id
-                for item in selection_result.candidates
-            }
+            if selection_result is not None:
+                selected_entity_ids = {
+                    item.candidate.entity_id
+                    for item in selection_result.candidates
+                }
 
-            expanded_candidates = [
-                candidate
-                for candidate in expanded_candidates
-                if candidate.entity_id in selected_entity_ids
-            ]
+                expanded_candidates = [
+                    candidate
+                    for candidate in expanded_candidates
+                    if candidate.entity_id in selected_entity_ids
+                ]
 
-            selection_confidence = {
-                item.candidate.entity_id: item.confidence
-                for item in selection_result.candidates
-            }
+                selection_confidence = {
+                    item.candidate.entity_id: item.confidence
+                    for item in selection_result.candidates
+                }
+            else:
+                selection_confidence = {}
         else:
             selection_confidence = {}
 

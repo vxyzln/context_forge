@@ -104,6 +104,22 @@ class RecordingSelectionService:
             )
         )
 
+
+
+class FailingSelectionService:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        self.calls = []
+
+    def select(self, task, candidates):
+        self.calls.append(
+            {
+                "task": task,
+                "candidates": candidates,
+            }
+        )
+        raise self.error
+
 class RecordingRelationshipRetriever:
     def __init__(self, candidates):
         self.candidates = candidates
@@ -607,3 +623,180 @@ def test_context_engine_uses_intelligent_context_selection() -> None:
     }
 
     assert signals["selection_confidence"].value == 0.9
+
+
+def test_context_engine_falls_back_when_selection_provider_fails() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("first.py"),
+        name="first.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("second.py"),
+        name="second.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+
+    first_candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="deterministic_search",
+    )
+    second_candidate = ContextCandidate(
+        entity_id=second.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+    )
+
+    selection_service = FailingSelectionService(
+        RuntimeError("selection provider failed"),
+    )
+
+    engine = DefaultContextEngine(
+        candidate_generator=RecordingCandidateGenerator(
+            [first_candidate, second_candidate],
+        ),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        relationship_retriever=RecordingRelationshipRetriever(
+            [first_candidate, second_candidate],
+        ),
+        selection_service=selection_service,
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="authentication",
+        )
+    )
+
+    assert len(selection_service.calls) == 1
+    assert {
+        unit.entity_id
+        for unit in package.units
+    } == {first.id, second.id}
+
+    assert all(
+        signal.name != "selection_confidence"
+        for unit in package.units
+        for signal in unit.signals
+    )
+
+
+def test_context_engine_falls_back_on_invalid_selection_response() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/context-forge-test"),
+    )
+
+    first = File(
+        project_id=project.id,
+        path=Path("first.py"),
+        name="first.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    second = File(
+        project_id=project.id,
+        path=Path("second.py"),
+        name="second.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+
+    project.add_file(first)
+    project.add_file(second)
+
+    first_candidate = ContextCandidate(
+        entity_id=first.id,
+        unit_type=ContextUnitType.FILE,
+        score=1.0,
+        source="deterministic_search",
+    )
+    second_candidate = ContextCandidate(
+        entity_id=second.id,
+        unit_type=ContextUnitType.FILE,
+        score=0.8,
+        source="deterministic_search",
+    )
+
+    selection_service = FailingSelectionService(
+        ValueError("Invalid selection response JSON"),
+    )
+
+    engine = DefaultContextEngine(
+        candidate_generator=RecordingCandidateGenerator(
+            [first_candidate, second_candidate],
+        ),
+        ranker=DeterministicRanker(),
+        selector=ContextSelector(),
+        depth_selector=ContextDepthSelector(),
+        expander=GraphExpander(),
+        relationship_retriever=RecordingRelationshipRetriever(
+            [first_candidate, second_candidate],
+        ),
+        selection_service=selection_service,
+        package_builder=ContextPackageBuilder(),
+        enrichment_pipeline=ContextEnrichmentPipeline(
+            enrichers=[
+                FileContextEnricher(),
+                SymbolContextEnricher(),
+                RelationshipContextEnricher(),
+            ],
+        ),
+        compression_pipeline=ContextCompressionPipeline(
+            compressor=DeterministicContextCompressor(),
+            budget_compressor=ContextBudgetCompressor(),
+        ),
+        assembly=ContextAssembler(
+            ContextPriorityOrdering(
+                DeterministicPrioritizer(),
+            ),
+        ),
+    )
+
+    package = engine.build(
+        ContextRequest(
+            project=project,
+            task="authentication",
+        )
+    )
+
+    assert {
+        unit.entity_id
+        for unit in package.units
+    } == {first.id, second.id}
