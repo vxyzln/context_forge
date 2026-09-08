@@ -10,7 +10,10 @@ from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
 from context_forge.models.symbol import Symbol
-from context_forge.storage.cache import RepositoryCacheMetadata
+from context_forge.storage.cache import (
+    FileFingerprint,
+    RepositoryCacheMetadata,
+)
 from context_forge.storage.database import Database
 
 
@@ -68,6 +71,70 @@ class ProjectRepository:
             cache_schema_version=row["cache_schema_version"],
             analyzer_version=row["analyzer_version"],
         )
+
+    def save_file_fingerprints(
+        self,
+        repository_key: str,
+        fingerprints: list[FileFingerprint],
+    ) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                DELETE FROM repository_file_fingerprints
+                WHERE repository_key = ?
+                """,
+                (repository_key,),
+            )
+
+            for fingerprint in fingerprints:
+                connection.execute(
+                    """
+                    INSERT INTO repository_file_fingerprints (
+                        repository_key,
+                        path,
+                        size,
+                        modified_at_ns,
+                        content_hash
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        repository_key,
+                        fingerprint.path.as_posix(),
+                        fingerprint.size,
+                        fingerprint.modified_at_ns,
+                        fingerprint.content_hash,
+                    ),
+                )
+
+    def load_file_fingerprints(
+        self,
+        repository_key: str,
+    ) -> dict[Path, FileFingerprint]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    path,
+                    size,
+                    modified_at_ns,
+                    content_hash
+                FROM repository_file_fingerprints
+                WHERE repository_key = ?
+                ORDER BY path
+                """,
+                (repository_key,),
+            ).fetchall()
+
+        return {
+            Path(row["path"]): FileFingerprint(
+                path=Path(row["path"]),
+                size=row["size"],
+                modified_at_ns=row["modified_at_ns"],
+                content_hash=row["content_hash"],
+            )
+            for row in rows
+        }
 
     def save(self, project: Project) -> None:
         with self.database.connect() as connection:
@@ -286,9 +353,13 @@ class ProjectRepository:
         self,
         project: Project,
         metadata: RepositoryCacheMetadata,
+        fingerprints: list[FileFingerprint] | None = None,
     ) -> None:
         self.save(project)
         self.save_cache_metadata(metadata)
+
+        if fingerprints is not None:
+            self.save_file_fingerprints(metadata.repository_key, fingerprints)
 
     def load_analysis(
         self,

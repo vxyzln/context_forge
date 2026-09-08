@@ -41,6 +41,19 @@ class Database:
                     FOREIGN KEY (project_id) REFERENCES projects(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS repository_file_fingerprints (
+                    repository_key TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    modified_at_ns INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    PRIMARY KEY (repository_key, path),
+                    FOREIGN KEY (repository_key) REFERENCES repository_cache(repository_key)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_repository_file_fingerprints_repository
+                ON repository_file_fingerprints(repository_key);
+
                 CREATE TABLE IF NOT EXISTS directories (
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL,

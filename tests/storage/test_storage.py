@@ -9,6 +9,7 @@ from context_forge.scanner.repository import RepositoryScanner
 from context_forge.storage.cache import (
     ANALYZER_VERSION,
     CACHE_SCHEMA_VERSION,
+    FileFingerprint,
     RepositoryCacheMetadata,
     RepositoryIdentity,
 )
@@ -618,3 +619,76 @@ def test_load_analysis_preserves_repository_identity(
 
     assert loaded_project.root_path == tmp_path.resolve()
     assert loaded_metadata.repository_key == repository_key
+
+
+def test_file_fingerprint_round_trip(tmp_path: Path) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    repository_key = RepositoryIdentity(tmp_path).key
+
+    fingerprint = FileFingerprint(
+        path=Path("main.py"),
+        size=10,
+        modified_at_ns=123456789,
+        content_hash="abc123",
+    )
+
+    repository.save_file_fingerprints(
+        repository_key,
+        [fingerprint],
+    )
+
+    loaded = repository.load_file_fingerprints(repository_key)
+
+    assert loaded == {Path("main.py"): fingerprint}
+
+
+def test_file_fingerprint_storage_replaces_previous_state(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    repository_key = RepositoryIdentity(tmp_path).key
+
+    first = FileFingerprint(
+        path=Path("main.py"),
+        size=10,
+        modified_at_ns=1,
+        content_hash="first",
+    )
+
+    second = FileFingerprint(
+        path=Path("other.py"),
+        size=20,
+        modified_at_ns=2,
+        content_hash="second",
+    )
+
+    repository.save_file_fingerprints(
+        repository_key,
+        [first],
+    )
+    repository.save_file_fingerprints(
+        repository_key,
+        [second],
+    )
+
+    loaded = repository.load_file_fingerprints(repository_key)
+
+    assert loaded == {Path("other.py"): second}
+
+
+def test_missing_file_fingerprints_return_empty_mapping(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    repository_key = RepositoryIdentity(tmp_path).key
+
+    assert repository.load_file_fingerprints(repository_key) == {}

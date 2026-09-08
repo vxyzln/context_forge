@@ -4,7 +4,10 @@ from pathlib import Path
 from context_forge.models.relationship import RelationshipType
 from context_forge.pipeline.analyzer import ProjectAnalyzer
 from context_forge.query import ProjectQuery
-from context_forge.storage.cache import RepositoryIdentity
+from context_forge.storage.cache import (
+    RepositoryIdentity,
+    fingerprint_file,
+)
 
 
 def test_analyzer_runs_full_pipeline(tmp_path: Path) -> None:
@@ -1240,3 +1243,32 @@ def test_analyzer_cache_identity_resolves_persisted_project(
     assert loaded_project.name == project.name
     assert loaded_project.root_path == tmp_path.resolve()
     assert metadata.project_id == project.id
+
+
+def test_analyzer_persists_file_fingerprints(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        'def hello() -> str:\n    return "hello"\n',
+        encoding="utf-8",
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+    analyzer = ProjectAnalyzer(tmp_path, database_path)
+
+    analyzer.analyze()
+
+    repository_key = RepositoryIdentity(tmp_path).key
+    fingerprints = analyzer.repository.load_file_fingerprints(
+        repository_key,
+    )
+
+    assert fingerprints == {
+        Path("main.py"): fingerprint_file(
+            tmp_path,
+            Path("main.py"),
+        )
+    }
+
+    assert fingerprints[Path("main.py")].content_hash

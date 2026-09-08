@@ -8,7 +8,11 @@ from context_forge.parser import LanguageDetector, ParserRegistry
 from context_forge.parser.python import PythonParser
 from context_forge.parser.result import ParseResult
 from context_forge.scanner.repository import RepositoryScanner
-from context_forge.storage.cache import RepositoryCacheMetadata, RepositoryIdentity
+from context_forge.storage.cache import (
+    RepositoryCacheMetadata,
+    RepositoryIdentity,
+    fingerprint_file,
+)
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
 
@@ -100,5 +104,12 @@ class ProjectAnalyzer:
             repository_key=self.identity.key,
             project_id=project.id,
         )
-        self.repository.save_analysis(project, metadata)
+        fingerprints = [
+            fingerprint_file(
+                project.root_path,
+                file.path,
+            )
+            for file in project.files
+        ]
+        self.repository.save_analysis(project, metadata, fingerprints)
         return project
