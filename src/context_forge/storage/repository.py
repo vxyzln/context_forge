@@ -14,6 +14,7 @@ from context_forge.storage.cache import (
     ANALYZER_VERSION,
     CACHE_SCHEMA_VERSION,
     CacheFreshness,
+    CacheInvalidation,
     FileFingerprint,
     RepositoryCacheMetadata,
     validate_cache_freshness,
@@ -165,6 +166,252 @@ class ProjectRepository:
             cached_fingerprints=cached_fingerprints,
             current_fingerprints=current_fingerprints,
         )
+
+    def invalidate_cache(
+        self,
+        repository_key: str,
+        invalidation: CacheInvalidation,
+    ) -> None:
+        if invalidation.full:
+            self._invalidate_full_cache(repository_key)
+            return
+
+        if invalidation.paths:
+            self._invalidate_paths(
+                repository_key,
+                invalidation.paths,
+            )
+
+    def _invalidate_full_cache(
+        self,
+        repository_key: str,
+    ) -> None:
+        with self.database.connect() as connection:
+            project_row = connection.execute(
+                """
+                SELECT project_id
+                FROM repository_cache
+                WHERE repository_key = ?
+                """,
+                (repository_key,),
+            ).fetchone()
+
+            if project_row is not None:
+                project_id = project_row["project_id"]
+
+                connection.execute(
+                    """
+                    DELETE FROM relationships
+                    WHERE source_id IN (
+                        SELECT id
+                        FROM files
+                        WHERE project_id = ?
+                    )
+                    OR target_id IN (
+                        SELECT id
+                        FROM files
+                        WHERE project_id = ?
+                    )
+                    OR source_id IN (
+                        SELECT symbols.id
+                        FROM symbols
+                        JOIN files
+                            ON files.id = symbols.file_id
+                        WHERE files.project_id = ?
+                    )
+                    OR target_id IN (
+                        SELECT symbols.id
+                        FROM symbols
+                        JOIN files
+                            ON files.id = symbols.file_id
+                        WHERE files.project_id = ?
+                    )
+                    """,
+                    (
+                        project_id,
+                        project_id,
+                        project_id,
+                        project_id,
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    DELETE FROM symbols
+                    WHERE file_id IN (
+                        SELECT id
+                        FROM files
+                        WHERE project_id = ?
+                    )
+                    """,
+                    (project_id,),
+                )
+
+                connection.execute(
+                    """
+                    DELETE FROM files
+                    WHERE project_id = ?
+                    """,
+                    (project_id,),
+                )
+
+                connection.execute(
+                    """
+                    DELETE FROM directories
+                    WHERE project_id = ?
+                    """,
+                    (project_id,),
+                )
+
+                connection.execute(
+                    """
+                    DELETE FROM analysis_errors
+                    WHERE project_id = ?
+                    """,
+                    (project_id,),
+                )
+
+                connection.execute(
+                    """
+                    DELETE FROM projects
+                    WHERE id = ?
+                    """,
+                    (project_id,),
+                )
+
+            connection.execute(
+                """
+                DELETE FROM repository_file_fingerprints
+                WHERE repository_key = ?
+                """,
+                (repository_key,),
+            )
+
+            connection.execute(
+                """
+                DELETE FROM repository_cache
+                WHERE repository_key = ?
+                """,
+                (repository_key,),
+            )
+
+    def _invalidate_paths(
+        self,
+        repository_key: str,
+        paths: frozenset[Path],
+    ) -> None:
+        if not paths:
+            return
+
+        normalized_paths = tuple(sorted(path.as_posix() for path in paths))
+
+        with self.database.connect() as connection:
+            project_row = connection.execute(
+                """
+                SELECT project_id
+                FROM repository_cache
+                WHERE repository_key = ?
+                """,
+                (repository_key,),
+            ).fetchone()
+
+            if project_row is None:
+                return
+
+            project_id = project_row["project_id"]
+
+            placeholders = ", ".join("?" for _ in normalized_paths)
+
+            file_rows = connection.execute(
+                f"""
+                SELECT id
+                FROM files
+                WHERE project_id = ?
+                AND path IN ({placeholders})
+                """,
+                (project_id, *normalized_paths),
+            ).fetchall()
+
+            file_ids = tuple(row["id"] for row in file_rows)
+
+            if file_ids:
+                file_placeholders = ", ".join("?" for _ in file_ids)
+
+                symbol_rows = connection.execute(
+                    f"""
+                    SELECT id
+                    FROM symbols
+                    WHERE file_id IN ({file_placeholders})
+                    """,
+                    file_ids,
+                ).fetchall()
+
+                symbol_ids = tuple(row["id"] for row in symbol_rows)
+
+                relationship_ids: set[str] = set()
+
+                if symbol_ids:
+                    symbol_placeholders = ", ".join("?" for _ in symbol_ids)
+
+                    relationship_rows = connection.execute(
+                        f"""
+                        SELECT id
+                        FROM relationships
+                        WHERE source_id IN ({symbol_placeholders})
+                        OR target_id IN ({symbol_placeholders})
+                        """,
+                        (*symbol_ids, *symbol_ids),
+                    ).fetchall()
+
+                    relationship_ids.update(row["id"] for row in relationship_rows)
+
+                file_relationship_rows = connection.execute(
+                    f"""
+                    SELECT id
+                    FROM relationships
+                    WHERE source_id IN ({file_placeholders})
+                    OR target_id IN ({file_placeholders})
+                    """,
+                    (*file_ids, *file_ids),
+                ).fetchall()
+
+                relationship_ids.update(row["id"] for row in file_relationship_rows)
+
+                if relationship_ids:
+                    relationship_placeholders = ", ".join("?" for _ in relationship_ids)
+
+                    connection.execute(
+                        f"""
+                        DELETE FROM relationships
+                        WHERE id IN ({relationship_placeholders})
+                        """,
+                        tuple(relationship_ids),
+                    )
+
+                connection.execute(
+                    f"""
+                    DELETE FROM symbols
+                    WHERE file_id IN ({file_placeholders})
+                    """,
+                    file_ids,
+                )
+
+                connection.execute(
+                    f"""
+                    DELETE FROM files
+                    WHERE id IN ({file_placeholders})
+                    """,
+                    file_ids,
+                )
+
+            connection.execute(
+                f"""
+                DELETE FROM repository_file_fingerprints
+                WHERE repository_key = ?
+                AND path IN ({placeholders})
+                """,
+                (repository_key, *normalized_paths),
+            )
 
     def save(self, project: Project) -> None:
         with self.database.connect() as connection:
