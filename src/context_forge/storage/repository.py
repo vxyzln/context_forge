@@ -17,6 +17,7 @@ from context_forge.storage.cache import (
     CacheInvalidation,
     FileFingerprint,
     RepositoryCacheMetadata,
+    determine_cache_invalidation,
     validate_cache_freshness,
 )
 from context_forge.storage.database import Database
@@ -181,6 +182,26 @@ class ProjectRepository:
                 repository_key,
                 invalidation.paths,
             )
+
+    def refresh_cache_state(
+        self,
+        repository_key: str,
+        current_fingerprints: dict[Path, FileFingerprint],
+    ) -> CacheInvalidation:
+        freshness = self.check_cache_freshness(
+            repository_key,
+            current_fingerprints,
+        )
+        invalidation = determine_cache_invalidation(
+            freshness,
+        )
+
+        self.invalidate_cache(
+            repository_key,
+            invalidation,
+        )
+
+        return invalidation
 
     def _invalidate_full_cache(
         self,
