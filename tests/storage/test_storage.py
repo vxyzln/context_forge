@@ -692,3 +692,168 @@ def test_missing_file_fingerprints_return_empty_mapping(
     repository_key = RepositoryIdentity(tmp_path).key
 
     assert repository.load_file_fingerprints(repository_key) == {}
+
+
+def test_check_cache_freshness_returns_fresh_for_matching_cache(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="example",
+        root_path=tmp_path,
+    )
+    metadata = RepositoryCacheMetadata(
+        repository_key=RepositoryIdentity(tmp_path).key,
+        project_id=project.id,
+    )
+
+    repository.save(project)
+    repository.save_cache_metadata(metadata)
+
+    fingerprint = FileFingerprint(
+        path=Path("main.py"),
+        size=10,
+        modified_at_ns=1,
+        content_hash="same",
+    )
+    repository.save_file_fingerprints(
+        metadata.repository_key,
+        [fingerprint],
+    )
+
+    result = repository.check_cache_freshness(
+        metadata.repository_key,
+        {Path("main.py"): fingerprint},
+    )
+
+    assert result.is_fresh
+    assert result.reason == "fresh"
+    assert result.changes is not None
+    assert result.changes.is_unchanged
+
+
+def test_check_cache_freshness_detects_modified_file(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="example",
+        root_path=tmp_path,
+    )
+    metadata = RepositoryCacheMetadata(
+        repository_key=RepositoryIdentity(tmp_path).key,
+        project_id=project.id,
+    )
+
+    repository.save(project)
+    repository.save_cache_metadata(metadata)
+
+    cached = FileFingerprint(
+        path=Path("main.py"),
+        size=10,
+        modified_at_ns=1,
+        content_hash="old",
+    )
+    current = FileFingerprint(
+        path=Path("main.py"),
+        size=11,
+        modified_at_ns=2,
+        content_hash="new",
+    )
+
+    repository.save_file_fingerprints(
+        metadata.repository_key,
+        [cached],
+    )
+
+    result = repository.check_cache_freshness(
+        metadata.repository_key,
+        {Path("main.py"): current},
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "files_changed"
+    assert result.changes is not None
+    assert result.changes.modified == frozenset({Path("main.py")})
+
+
+def test_check_cache_freshness_detects_missing_metadata(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    repository_key = RepositoryIdentity(tmp_path).key
+
+    result = repository.check_cache_freshness(
+        repository_key,
+        {},
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "missing_metadata"
+
+
+def test_check_cache_freshness_detects_schema_version_mismatch(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="example",
+        root_path=tmp_path,
+    )
+    metadata = RepositoryCacheMetadata(
+        repository_key=RepositoryIdentity(tmp_path).key,
+        project_id=project.id,
+        cache_schema_version=CACHE_SCHEMA_VERSION - 1,
+    )
+
+    repository.save(project)
+    repository.save_cache_metadata(metadata)
+
+    result = repository.check_cache_freshness(
+        metadata.repository_key,
+        {},
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "schema_version_mismatch"
+
+
+def test_check_cache_freshness_detects_analyzer_version_mismatch(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="example",
+        root_path=tmp_path,
+    )
+    metadata = RepositoryCacheMetadata(
+        repository_key=RepositoryIdentity(tmp_path).key,
+        project_id=project.id,
+        analyzer_version="different",
+    )
+
+    repository.save(project)
+    repository.save_cache_metadata(metadata)
+
+    result = repository.check_cache_freshness(
+        metadata.repository_key,
+        {},
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "analyzer_version_mismatch"

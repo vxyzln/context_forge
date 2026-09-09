@@ -1,9 +1,14 @@
 from pathlib import Path
+from uuid import UUID
 
 from context_forge.storage.cache import (
+    ANALYZER_VERSION,
+    CACHE_SCHEMA_VERSION,
     FileFingerprint,
+    RepositoryCacheMetadata,
     detect_file_changes,
     fingerprint_file,
+    validate_cache_freshness,
 )
 
 
@@ -179,3 +184,157 @@ def test_change_detection_identifies_all_change_types() -> None:
     assert changes.modified == frozenset({Path("modified.py")})
     assert changes.added == frozenset({Path("added.py")})
     assert changes.deleted == frozenset({Path("deleted.py")})
+
+
+def test_validate_cache_freshness_accepts_matching_cache() -> None:
+    metadata = RepositoryCacheMetadata(
+        repository_key="/repo",
+        project_id=UUID("00000000-0000-0000-0000-000000000001"),
+    )
+    fingerprints = {
+        Path("main.py"): make_fingerprint(
+            "main.py",
+            "same",
+        ),
+    }
+
+    result = validate_cache_freshness(
+        metadata=metadata,
+        current_schema_version=CACHE_SCHEMA_VERSION,
+        current_analyzer_version=ANALYZER_VERSION,
+        cached_fingerprints=fingerprints,
+        current_fingerprints=fingerprints,
+    )
+
+    assert result.is_fresh
+    assert result.reason == "fresh"
+    assert result.changes is not None
+    assert result.changes.is_unchanged
+
+
+def test_validate_cache_freshness_rejects_modified_files() -> None:
+    metadata = RepositoryCacheMetadata(
+        repository_key="/repo",
+        project_id=UUID("00000000-0000-0000-0000-000000000001"),
+    )
+
+    cached = {
+        Path("main.py"): make_fingerprint("main.py", "old"),
+    }
+    current = {
+        Path("main.py"): make_fingerprint("main.py", "new"),
+    }
+
+    result = validate_cache_freshness(
+        metadata,
+        CACHE_SCHEMA_VERSION,
+        ANALYZER_VERSION,
+        cached,
+        current,
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "files_changed"
+    assert result.changes is not None
+    assert result.changes.modified == frozenset({Path("main.py")})
+
+
+def test_validate_cache_freshness_rejects_added_files() -> None:
+    metadata = RepositoryCacheMetadata(
+        repository_key="/repo",
+        project_id=UUID("00000000-0000-0000-0000-000000000001"),
+    )
+
+    cached = {}
+    current = {
+        Path("main.py"): make_fingerprint("main.py", "new"),
+    }
+
+    result = validate_cache_freshness(
+        metadata,
+        CACHE_SCHEMA_VERSION,
+        ANALYZER_VERSION,
+        cached,
+        current,
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "files_changed"
+    assert result.changes is not None
+    assert result.changes.added == frozenset({Path("main.py")})
+
+
+def test_validate_cache_freshness_rejects_deleted_files() -> None:
+    metadata = RepositoryCacheMetadata(
+        repository_key="/repo",
+        project_id=UUID("00000000-0000-0000-0000-000000000001"),
+    )
+
+    cached = {
+        Path("main.py"): make_fingerprint("main.py", "old"),
+    }
+    current = {}
+
+    result = validate_cache_freshness(
+        metadata,
+        CACHE_SCHEMA_VERSION,
+        ANALYZER_VERSION,
+        cached,
+        current,
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "files_changed"
+    assert result.changes is not None
+    assert result.changes.deleted == frozenset({Path("main.py")})
+
+
+def test_validate_cache_freshness_rejects_schema_mismatch() -> None:
+    metadata = RepositoryCacheMetadata(
+        repository_key="/repo",
+        project_id=UUID("00000000-0000-0000-0000-000000000001"),
+        cache_schema_version=CACHE_SCHEMA_VERSION - 1,
+    )
+
+    result = validate_cache_freshness(
+        metadata,
+        CACHE_SCHEMA_VERSION,
+        ANALYZER_VERSION,
+        {},
+        {},
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "schema_version_mismatch"
+
+
+def test_validate_cache_freshness_rejects_analyzer_version_mismatch() -> None:
+    metadata = RepositoryCacheMetadata(
+        repository_key="/repo",
+        project_id=UUID("00000000-0000-0000-0000-000000000001"),
+        analyzer_version="different",
+    )
+
+    result = validate_cache_freshness(
+        metadata,
+        CACHE_SCHEMA_VERSION,
+        ANALYZER_VERSION,
+        {},
+        {},
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "analyzer_version_mismatch"
+
+
+def test_validate_cache_freshness_rejects_missing_metadata() -> None:
+    result = validate_cache_freshness(
+        metadata=None,
+        current_schema_version=CACHE_SCHEMA_VERSION,
+        current_analyzer_version=ANALYZER_VERSION,
+        cached_fingerprints=None,
+        current_fingerprints={},
+    )
+
+    assert not result.is_fresh
+    assert result.reason == "missing_metadata"

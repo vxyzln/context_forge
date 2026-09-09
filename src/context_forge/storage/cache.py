@@ -48,6 +48,69 @@ class FileChangeSet:
         return not self.changed
 
 
+@dataclass(frozen=True)
+class CacheFreshness:
+    is_fresh: bool
+    reason: str
+    changes: FileChangeSet | None = None
+
+
+def validate_cache_freshness(
+    metadata: RepositoryCacheMetadata | None,
+    current_schema_version: int,
+    current_analyzer_version: str,
+    cached_fingerprints: dict[Path, FileFingerprint] | None,
+    current_fingerprints: dict[Path, FileFingerprint] | None,
+) -> CacheFreshness:
+    if metadata is None:
+        return CacheFreshness(
+            is_fresh=False,
+            reason="missing_metadata",
+        )
+
+    if metadata.cache_schema_version != current_schema_version:
+        return CacheFreshness(
+            is_fresh=False,
+            reason="schema_version_mismatch",
+        )
+
+    if metadata.analyzer_version != current_analyzer_version:
+        return CacheFreshness(
+            is_fresh=False,
+            reason="analyzer_version_mismatch",
+        )
+
+    if cached_fingerprints is None:
+        return CacheFreshness(
+            is_fresh=False,
+            reason="missing_fingerprints",
+        )
+
+    if current_fingerprints is None:
+        return CacheFreshness(
+            is_fresh=False,
+            reason="missing_current_fingerprints",
+        )
+
+    changes = detect_file_changes(
+        cached_fingerprints,
+        current_fingerprints,
+    )
+
+    if not changes.is_unchanged:
+        return CacheFreshness(
+            is_fresh=False,
+            reason="files_changed",
+            changes=changes,
+        )
+
+    return CacheFreshness(
+        is_fresh=True,
+        reason="fresh",
+        changes=changes,
+    )
+
+
 def fingerprint_file(root_path: Path, file_path: Path) -> FileFingerprint:
     root_path = root_path.resolve()
     absolute_path = (

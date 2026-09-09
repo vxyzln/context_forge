@@ -11,8 +11,12 @@ from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
 from context_forge.models.symbol import Symbol
 from context_forge.storage.cache import (
+    ANALYZER_VERSION,
+    CACHE_SCHEMA_VERSION,
+    CacheFreshness,
     FileFingerprint,
     RepositoryCacheMetadata,
+    validate_cache_freshness,
 )
 from context_forge.storage.database import Database
 
@@ -135,6 +139,57 @@ class ProjectRepository:
             )
             for row in rows
         }
+
+    def check_cache_freshness(
+        self,
+        repository_key: str,
+        current_fingerprints: dict[Path, FileFingerprint],
+    ) -> CacheFreshness:
+        metadata = self.load_cache_metadata(repository_key)
+
+        if metadata is None:
+            return validate_cache_freshness(
+                metadata=None,
+                current_schema_version=CACHE_SCHEMA_VERSION,
+                current_analyzer_version=ANALYZER_VERSION,
+                cached_fingerprints=None,
+                current_fingerprints=current_fingerprints,
+            )
+
+        cached_fingerprints = self.load_file_fingerprints(repository_key)
+
+        return validate_cache_freshness(
+            metadata=metadata,
+            current_schema_version=CACHE_SCHEMA_VERSION,
+            current_analyzer_version=ANALYZER_VERSION,
+            cached_fingerprints=cached_fingerprints,
+            current_fingerprints=current_fingerprints,
+        )
+
+    def validate_cache_freshness(
+        self,
+        repository_key: str,
+        current_fingerprints: dict[Path, FileFingerprint] | None,
+    ) -> CacheFreshness:
+        metadata = self.load_cache_metadata(repository_key)
+        cached_fingerprints = self.load_file_fingerprints(repository_key)
+
+        if metadata is None:
+            return validate_cache_freshness(
+                metadata=None,
+                current_schema_version=CACHE_SCHEMA_VERSION,
+                current_analyzer_version=ANALYZER_VERSION,
+                cached_fingerprints=None,
+                current_fingerprints=current_fingerprints,
+            )
+
+        return validate_cache_freshness(
+            metadata=metadata,
+            current_schema_version=CACHE_SCHEMA_VERSION,
+            current_analyzer_version=ANALYZER_VERSION,
+            cached_fingerprints=cached_fingerprints,
+            current_fingerprints=current_fingerprints,
+        )
 
     def save(self, project: Project) -> None:
         with self.database.connect() as connection:
