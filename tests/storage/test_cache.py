@@ -4,7 +4,9 @@ from uuid import UUID
 from context_forge.storage.cache import (
     ANALYZER_VERSION,
     CACHE_SCHEMA_VERSION,
+    CacheFreshness,
     CacheInvalidation,
+    FileChangeSet,
     FileFingerprint,
     RepositoryCacheMetadata,
     detect_file_changes,
@@ -483,4 +485,128 @@ def test_determine_cache_invalidation_fully_invalidates_analyzer_mismatch() -> N
         full=True,
         paths=frozenset(),
         reason="analyzer_version_mismatch",
+    )
+
+
+def test_determine_cache_invalidation_for_fresh_cache() -> None:
+    freshness = CacheFreshness(
+        is_fresh=True,
+        reason="fresh",
+        changes=None,
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=False,
+        paths=frozenset(),
+        reason="fresh",
+    )
+
+
+def test_determine_cache_invalidation_for_changed_files() -> None:
+    changes = FileChangeSet(
+        unchanged=frozenset({Path("unchanged.py")}),
+        modified=frozenset({Path("modified.py")}),
+        added=frozenset({Path("added.py")}),
+        deleted=frozenset({Path("deleted.py")}),
+    )
+    freshness = CacheFreshness(
+        is_fresh=False,
+        reason="files_changed",
+        changes=changes,
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=False,
+        paths=frozenset(
+            {
+                Path("modified.py"),
+                Path("added.py"),
+                Path("deleted.py"),
+            }
+        ),
+        reason="files_changed",
+    )
+
+
+def test_determine_cache_invalidation_for_missing_metadata() -> None:
+    freshness = CacheFreshness(
+        is_fresh=False,
+        reason="missing_metadata",
+        changes=None,
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=True,
+        paths=frozenset(),
+        reason="missing_metadata",
+    )
+
+
+def test_determine_cache_invalidation_for_schema_mismatch() -> None:
+    freshness = CacheFreshness(
+        is_fresh=False,
+        reason="schema_version_mismatch",
+        changes=None,
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=True,
+        paths=frozenset(),
+        reason="schema_version_mismatch",
+    )
+
+
+def test_determine_cache_invalidation_for_analyzer_mismatch() -> None:
+    freshness = CacheFreshness(
+        is_fresh=False,
+        reason="analyzer_version_mismatch",
+        changes=None,
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=True,
+        paths=frozenset(),
+        reason="analyzer_version_mismatch",
+    )
+
+
+def test_determine_cache_invalidation_for_missing_fingerprints() -> None:
+    freshness = CacheFreshness(
+        is_fresh=False,
+        reason="missing_fingerprints",
+        changes=None,
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=True,
+        paths=frozenset(),
+        reason="missing_fingerprints",
+    )
+
+
+def test_determine_cache_invalidation_for_missing_current_fingerprints() -> None:
+    freshness = CacheFreshness(
+        is_fresh=False,
+        reason="missing_current_fingerprints",
+        changes=None,
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=True,
+        paths=frozenset(),
+        reason="missing_current_fingerprints",
     )
