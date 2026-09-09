@@ -166,31 +166,6 @@ class ProjectRepository:
             current_fingerprints=current_fingerprints,
         )
 
-    def validate_cache_freshness(
-        self,
-        repository_key: str,
-        current_fingerprints: dict[Path, FileFingerprint] | None,
-    ) -> CacheFreshness:
-        metadata = self.load_cache_metadata(repository_key)
-        cached_fingerprints = self.load_file_fingerprints(repository_key)
-
-        if metadata is None:
-            return validate_cache_freshness(
-                metadata=None,
-                current_schema_version=CACHE_SCHEMA_VERSION,
-                current_analyzer_version=ANALYZER_VERSION,
-                cached_fingerprints=None,
-                current_fingerprints=current_fingerprints,
-            )
-
-        return validate_cache_freshness(
-            metadata=metadata,
-            current_schema_version=CACHE_SCHEMA_VERSION,
-            current_analyzer_version=ANALYZER_VERSION,
-            cached_fingerprints=cached_fingerprints,
-            current_fingerprints=current_fingerprints,
-        )
-
     def save(self, project: Project) -> None:
         with self.database.connect() as connection:
             connection.execute(
