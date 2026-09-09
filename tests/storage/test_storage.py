@@ -9,9 +9,11 @@ from context_forge.scanner.repository import RepositoryScanner
 from context_forge.storage.cache import (
     ANALYZER_VERSION,
     CACHE_SCHEMA_VERSION,
+    CacheInvalidation,
     FileFingerprint,
     RepositoryCacheMetadata,
     RepositoryIdentity,
+    fingerprint_file,
 )
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
@@ -857,3 +859,389 @@ def test_check_cache_freshness_detects_analyzer_version_mismatch(
 
     assert not result.is_fresh
     assert result.reason == "analyzer_version_mismatch"
+
+
+def test_invalidate_cache_with_fresh_state_preserves_analysis(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text("value = 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=RepositoryIdentity(tmp_path).key,
+            project_id=project.id,
+        ),
+    )
+
+    repository_key = RepositoryIdentity(tmp_path).key
+    invalidation = CacheInvalidation(
+        full=False,
+        paths=frozenset(),
+        reason="fresh",
+    )
+
+    repository.invalidate_cache(repository_key, invalidation)
+
+    assert repository.load_analysis(repository_key) is not None
+
+
+def test_invalidate_cache_selectively_removes_affected_file(
+    tmp_path: Path,
+) -> None:
+    changed = tmp_path / "changed.py"
+    unchanged = tmp_path / "unchanged.py"
+    changed.write_text("changed = 1\n")
+    unchanged.write_text("unchanged = 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=RepositoryIdentity(tmp_path).key,
+            project_id=project.id,
+        ),
+    )
+
+    repository.invalidate_cache(
+        RepositoryIdentity(tmp_path).key,
+        CacheInvalidation(
+            full=False,
+            paths=frozenset({Path("changed.py")}),
+            reason="files_changed",
+        ),
+    )
+
+    loaded = repository.load_analysis(RepositoryIdentity(tmp_path).key)
+    assert loaded is not None
+    loaded_project, _ = loaded
+    assert Path("changed.py") not in {file.path for file in loaded_project.files}
+    assert Path("unchanged.py") in {file.path for file in loaded_project.files}
+
+
+def test_invalidate_cache_selectively_removes_affected_symbols(
+    tmp_path: Path,
+) -> None:
+    changed = tmp_path / "changed.py"
+    unchanged = tmp_path / "unchanged.py"
+    changed.write_text("def changed():\n    return 1\n")
+    unchanged.write_text("def unchanged():\n    return 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=RepositoryIdentity(tmp_path).key,
+            project_id=project.id,
+        ),
+    )
+
+    changed_file = next(
+        file for file in project.files if file.path == Path("changed.py")
+    )
+    changed_symbol_ids = {
+        symbol.id for symbol in project.symbols if symbol.file_id == changed_file.id
+    }
+
+    repository.invalidate_cache(
+        RepositoryIdentity(tmp_path).key,
+        CacheInvalidation(
+            full=False,
+            paths=frozenset({Path("changed.py")}),
+            reason="files_changed",
+        ),
+    )
+
+    loaded = repository.load_analysis(RepositoryIdentity(tmp_path).key)
+    assert loaded is not None
+
+    loaded_project, _ = loaded
+    assert changed_symbol_ids.isdisjoint(
+        {symbol.id for symbol in loaded_project.symbols}
+    )
+
+
+def test_invalidate_cache_selectively_removes_affected_relationships(
+    tmp_path: Path,
+) -> None:
+    changed = tmp_path / "changed.py"
+    unchanged = tmp_path / "unchanged.py"
+    changed.write_text("def changed():\n    return 1\n")
+    unchanged.write_text("def unchanged():\n    return 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=RepositoryIdentity(tmp_path).key,
+            project_id=project.id,
+        ),
+    )
+
+    changed_file = next(
+        file for file in project.files if file.path == Path("changed.py")
+    )
+    changed_symbol_ids = {
+        symbol.id for symbol in project.symbols if symbol.file_id == changed_file.id
+    }
+    affected_ids = changed_symbol_ids | {changed_file.id}
+
+    affected_relationship_ids = {
+        relationship.id
+        for relationship in project.relationships
+        if (
+            relationship.source_id in affected_ids
+            or relationship.target_id in affected_ids
+        )
+    }
+
+    repository.invalidate_cache(
+        RepositoryIdentity(tmp_path).key,
+        CacheInvalidation(
+            full=False,
+            paths=frozenset({Path("changed.py")}),
+            reason="files_changed",
+        ),
+    )
+
+    loaded = repository.load_analysis(RepositoryIdentity(tmp_path).key)
+    assert loaded is not None
+    loaded_project, _ = loaded
+
+    assert affected_relationship_ids.isdisjoint(
+        {relationship.id for relationship in loaded_project.relationships}
+    )
+
+
+def test_invalidate_cache_selectively_removes_affected_fingerprint(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "changed.py").write_text("changed = 1\n")
+    (tmp_path / "unchanged.py").write_text("unchanged = 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=RepositoryIdentity(tmp_path).key,
+            project_id=project.id,
+        ),
+        [fingerprint_file(tmp_path, file.path) for file in project.files],
+    )
+
+    repository.invalidate_cache(
+        RepositoryIdentity(tmp_path).key,
+        CacheInvalidation(
+            full=False,
+            paths=frozenset({Path("changed.py")}),
+            reason="files_changed",
+        ),
+    )
+
+    fingerprints = repository.load_file_fingerprints(
+        RepositoryIdentity(tmp_path).key,
+    )
+
+    assert Path("changed.py") not in fingerprints
+    assert Path("unchanged.py") in fingerprints
+
+
+def test_invalidate_cache_preserves_unaffected_fingerprints(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "changed.py").write_text("changed = 1\n")
+    (tmp_path / "unchanged.py").write_text("unchanged = 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=RepositoryIdentity(tmp_path).key,
+            project_id=project.id,
+        ),
+        [fingerprint_file(tmp_path, file.path) for file in project.files],
+    )
+
+    repository_key = RepositoryIdentity(tmp_path).key
+    before = repository.load_file_fingerprints(repository_key)
+
+    repository.invalidate_cache(
+        repository_key,
+        CacheInvalidation(
+            full=False,
+            paths=frozenset({Path("changed.py")}),
+            reason="files_changed",
+        ),
+    )
+
+    after = repository.load_file_fingerprints(repository_key)
+
+    assert after[Path("unchanged.py")] == before[Path("unchanged.py")]
+
+
+def test_invalidate_cache_fully_removes_analysis(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "main.py").write_text("value = 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=RepositoryIdentity(tmp_path).key,
+            project_id=project.id,
+        ),
+        [fingerprint_file(tmp_path, file.path) for file in project.files],
+    )
+
+    repository_key = RepositoryIdentity(tmp_path).key
+
+    repository.invalidate_cache(
+        repository_key,
+        CacheInvalidation(
+            full=True,
+            paths=frozenset(),
+            reason="schema_version_mismatch",
+        ),
+    )
+
+    assert repository.load_analysis(repository_key) is None
+    assert repository.load_cache_metadata(repository_key) is None
+    assert repository.load_file_fingerprints(repository_key) == {}
+
+
+def test_invalidate_cache_fully_removes_graph_data(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "main.py").write_text("def main():\n    return 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=RepositoryIdentity(tmp_path).key,
+            project_id=project.id,
+        ),
+    )
+
+    repository.invalidate_cache(
+        RepositoryIdentity(tmp_path).key,
+        CacheInvalidation(
+            full=True,
+            paths=frozenset(),
+            reason="analyzer_version_mismatch",
+        ),
+    )
+
+    assert repository.load_analysis(RepositoryIdentity(tmp_path).key) is None
+
+
+def test_invalidate_cache_with_missing_repository_is_safe(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    repository.invalidate_cache(
+        RepositoryIdentity(tmp_path).key,
+        CacheInvalidation(
+            full=False,
+            paths=frozenset({Path("missing.py")}),
+            reason="files_changed",
+        ),
+    )
+
+    assert repository.load_analysis(RepositoryIdentity(tmp_path).key) is None
+
+
+def test_invalidate_cache_ignores_paths_without_persisted_files(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "main.py").write_text("value = 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=RepositoryIdentity(tmp_path).key,
+            project_id=project.id,
+        ),
+    )
+
+    repository.invalidate_cache(
+        RepositoryIdentity(tmp_path).key,
+        CacheInvalidation(
+            full=False,
+            paths=frozenset({Path("new.py")}),
+            reason="files_changed",
+        ),
+    )
+
+    assert repository.load_analysis(RepositoryIdentity(tmp_path).key) is not None
