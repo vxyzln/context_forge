@@ -55,6 +55,13 @@ class CacheFreshness:
     changes: FileChangeSet | None = None
 
 
+@dataclass(frozen=True)
+class CacheInvalidation:
+    full: bool
+    paths: frozenset[Path]
+    reason: str
+
+
 def validate_cache_freshness(
     metadata: RepositoryCacheMetadata | None,
     current_schema_version: int,
@@ -108,6 +115,30 @@ def validate_cache_freshness(
         is_fresh=True,
         reason="fresh",
         changes=changes,
+    )
+
+
+def determine_cache_invalidation(
+    freshness: CacheFreshness,
+) -> CacheInvalidation:
+    if freshness.is_fresh:
+        return CacheInvalidation(
+            full=False,
+            paths=frozenset(),
+            reason="fresh",
+        )
+
+    if freshness.reason == "files_changed" and freshness.changes is not None:
+        return CacheInvalidation(
+            full=False,
+            paths=freshness.changes.changed,
+            reason="files_changed",
+        )
+
+    return CacheInvalidation(
+        full=True,
+        paths=frozenset(),
+        reason=freshness.reason,
     )
 
 

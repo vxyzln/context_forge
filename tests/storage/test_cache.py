@@ -4,9 +4,11 @@ from uuid import UUID
 from context_forge.storage.cache import (
     ANALYZER_VERSION,
     CACHE_SCHEMA_VERSION,
+    CacheInvalidation,
     FileFingerprint,
     RepositoryCacheMetadata,
     detect_file_changes,
+    determine_cache_invalidation,
     fingerprint_file,
     validate_cache_freshness,
 )
@@ -338,3 +340,147 @@ def test_validate_cache_freshness_rejects_missing_metadata() -> None:
 
     assert not result.is_fresh
     assert result.reason == "missing_metadata"
+
+
+def test_determine_cache_invalidation_returns_no_invalidation_for_fresh_cache() -> None:
+    freshness = validate_cache_freshness(
+        metadata=RepositoryCacheMetadata(
+            repository_key="/repo",
+            project_id=UUID("00000000-0000-0000-0000-000000000001"),
+        ),
+        current_schema_version=CACHE_SCHEMA_VERSION,
+        current_analyzer_version=ANALYZER_VERSION,
+        cached_fingerprints={},
+        current_fingerprints={},
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=False,
+        paths=frozenset(),
+        reason="fresh",
+    )
+
+
+def test_determine_cache_invalidation_selects_changed_files() -> None:
+    metadata = RepositoryCacheMetadata(
+        repository_key="/repo",
+        project_id=UUID("00000000-0000-0000-0000-000000000001"),
+    )
+
+    cached = {
+        Path("unchanged.py"): make_fingerprint(
+            "unchanged.py",
+            "same",
+        ),
+        Path("modified.py"): make_fingerprint(
+            "modified.py",
+            "old",
+        ),
+        Path("deleted.py"): make_fingerprint(
+            "deleted.py",
+            "deleted",
+        ),
+    }
+
+    current = {
+        Path("unchanged.py"): make_fingerprint(
+            "unchanged.py",
+            "same",
+        ),
+        Path("modified.py"): make_fingerprint(
+            "modified.py",
+            "new",
+        ),
+        Path("added.py"): make_fingerprint(
+            "added.py",
+            "added",
+        ),
+    }
+
+    freshness = validate_cache_freshness(
+        metadata=metadata,
+        current_schema_version=CACHE_SCHEMA_VERSION,
+        current_analyzer_version=ANALYZER_VERSION,
+        cached_fingerprints=cached,
+        current_fingerprints=current,
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert not invalidation.full
+    assert invalidation.reason == "files_changed"
+    assert invalidation.paths == frozenset(
+        {
+            Path("modified.py"),
+            Path("added.py"),
+            Path("deleted.py"),
+        }
+    )
+
+
+def test_determine_cache_invalidation_fully_invalidates_missing_metadata() -> None:
+    freshness = validate_cache_freshness(
+        metadata=None,
+        current_schema_version=CACHE_SCHEMA_VERSION,
+        current_analyzer_version=ANALYZER_VERSION,
+        cached_fingerprints=None,
+        current_fingerprints={},
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=True,
+        paths=frozenset(),
+        reason="missing_metadata",
+    )
+
+
+def test_determine_cache_invalidation_fully_invalidates_schema_mismatch() -> None:
+    metadata = RepositoryCacheMetadata(
+        repository_key="/repo",
+        project_id=UUID("00000000-0000-0000-0000-000000000001"),
+        cache_schema_version=CACHE_SCHEMA_VERSION - 1,
+    )
+
+    freshness = validate_cache_freshness(
+        metadata=metadata,
+        current_schema_version=CACHE_SCHEMA_VERSION,
+        current_analyzer_version=ANALYZER_VERSION,
+        cached_fingerprints={},
+        current_fingerprints={},
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=True,
+        paths=frozenset(),
+        reason="schema_version_mismatch",
+    )
+
+
+def test_determine_cache_invalidation_fully_invalidates_analyzer_mismatch() -> None:
+    metadata = RepositoryCacheMetadata(
+        repository_key="/repo",
+        project_id=UUID("00000000-0000-0000-0000-000000000001"),
+        analyzer_version="different",
+    )
+
+    freshness = validate_cache_freshness(
+        metadata=metadata,
+        current_schema_version=CACHE_SCHEMA_VERSION,
+        current_analyzer_version=ANALYZER_VERSION,
+        cached_fingerprints={},
+        current_fingerprints={},
+    )
+
+    invalidation = determine_cache_invalidation(freshness)
+
+    assert invalidation == CacheInvalidation(
+        full=True,
+        paths=frozenset(),
+        reason="analyzer_version_mismatch",
+    )
