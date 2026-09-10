@@ -26,7 +26,7 @@ class StructuralEvaluationResult:
     def recall(self) -> float:
         return self._aggregate(
             self.files.recall,
-            self.symbols.recal,
+            self.symbols.recall,
             self.relationships.recall,
         )
 
