@@ -16,7 +16,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="cpython",
             name="CPython",
-            source="https://github.com/python/cpython",
             root_path=root / "cpython",
             description="Python reference implementation.",
             tasks=(
@@ -35,7 +34,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="requests",
             name="Requests",
-            source="https://github.com/psf/requests",
             root_path=root / "requests",
             description="HTTP library for Python.",
             tasks=(
@@ -54,7 +52,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="flask",
             name="Flask",
-            source="https://github.com/pallets/flask",
             root_path=root / "flask",
             description="Python web application framework.",
             tasks=(
@@ -73,7 +70,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="click",
             name="Click",
-            source="https://github.com/pallets/click",
             root_path=root / "click",
             description="Composable command-line interface toolkit.",
             tasks=(
@@ -92,7 +88,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="rich",
             name="Rich",
-            source="https://github.com/Textualize/rich",
             root_path=root / "rich",
             description="Terminal rendering library.",
             tasks=(
@@ -111,7 +106,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="httpx",
             name="HTTPX",
-            source="https://github.com/encode/httpx",
             root_path=root / "httpx",
             description="HTTP client for Python.",
             tasks=(
@@ -130,7 +124,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="pydantic",
             name="Pydantic",
-            source="https://github.com/pydantic/pydantic",
             root_path=root / "pydantic",
             description="Data validation library.",
             tasks=(
@@ -149,7 +142,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="pytest",
             name="pytest",
-            source="https://github.com/pytest-dev/pytest",
             root_path=root / "pytest",
             description="Python testing framework.",
             tasks=(
@@ -168,7 +160,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="typer",
             name="Typer",
-            source="https://github.com/fastapi/typer",
             root_path=root / "typer",
             description="CLI framework based on Python type hints.",
             tasks=(
@@ -187,7 +178,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="fastapi",
             name="FastAPI",
-            source="https://github.com/fastapi/fastapi",
             root_path=root / "fastapi",
             description="Python web API framework.",
             tasks=(
@@ -206,7 +196,6 @@ def default_evaluation_set(
         EvaluationRepository(
             id="sqlalchemy",
             name="SQLAlchemy",
-            source="https://github.com/sqlalchemy/sqlalchemy",
             root_path=root / "sqlalchemy",
             description="Python SQL toolkit and ORM.",
             tasks=(

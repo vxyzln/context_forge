@@ -14,7 +14,6 @@ class EvaluationTask:
 class EvaluationRepository:
     id: str
     name: str
-    source: str
     root_path: Path
     tasks: tuple[EvaluationTask, ...] = ()
     description: str = ""
