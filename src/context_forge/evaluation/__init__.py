@@ -1,3 +1,7 @@
+from context_forge.evaluation.end_to_end import (
+    EndToEndEvaluationResult,
+    EndToEndEvaluator,
+)
 from context_forge.evaluation.ground_truth import (
     ExpectedEntity,
     ExpectedFile,
@@ -22,6 +26,8 @@ from context_forge.evaluation.structural import (
 )
 
 __all__ = [
+    "EndToEndEvaluationResult",
+    "EndToEndEvaluator",
     "ExpectedEntity",
     "ExpectedFile",
     "ExpectedRelationship",
