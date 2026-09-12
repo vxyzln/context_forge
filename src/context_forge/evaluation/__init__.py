@@ -12,6 +12,10 @@ from context_forge.evaluation.retrieval import (
     RetrievalEvaluationResult,
     RetrievalEvaluator,
 )
+from context_forge.evaluation.selection import (
+    SelectionEvaluationResult,
+    SelectionEvaluator,
+)
 from context_forge.evaluation.structural import (
     StructuralEvaluationResult,
     StructuralEvaluator,
@@ -26,6 +30,8 @@ __all__ = [
     "RetrievalEvaluationResult",
     "RetrievalEvaluator",
     "RetrievalGroundTruth",
+    "SelectionEvaluationResult",
+    "SelectionEvaluator",
     "StructuralEvaluationResult",
     "StructuralEvaluator",
     "StructuralGroundTruth",
