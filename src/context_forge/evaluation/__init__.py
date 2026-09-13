@@ -11,6 +11,12 @@ from context_forge.evaluation.ground_truth import (
     StructuralGroundTruth,
 )
 from context_forge.evaluation.metrics import MetricResult
+from context_forge.evaluation.regression import (
+    EvaluationCaseResult,
+    EvaluationSummary,
+    RegressionEvaluator,
+    RegressionResult,
+)
 from context_forge.evaluation.repositories import default_evaluation_set
 from context_forge.evaluation.retrieval import (
     RetrievalEvaluationResult,
@@ -28,11 +34,15 @@ from context_forge.evaluation.structural import (
 __all__ = [
     "EndToEndEvaluationResult",
     "EndToEndEvaluator",
+    "EvaluationCaseResult",
+    "EvaluationSummary",
     "ExpectedEntity",
     "ExpectedFile",
     "ExpectedRelationship",
     "ExpectedSymbol",
     "MetricResult",
+    "RegressionEvaluator",
+    "RegressionResult",
     "RetrievalEvaluationResult",
     "RetrievalEvaluator",
     "RetrievalGroundTruth",
