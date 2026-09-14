@@ -1,3 +1,10 @@
+from context_forge.evaluation.baseline import (
+    BASELINE_SCHEMA_VERSION,
+    DEFAULT_BASELINE_PATH,
+    BaselineCoverage,
+    BaselineStore,
+    EvaluationBaseline,
+)
 from context_forge.evaluation.end_to_end import (
     EndToEndEvaluationResult,
     EndToEndEvaluator,
@@ -32,8 +39,13 @@ from context_forge.evaluation.structural import (
 )
 
 __all__ = [
+    "BASELINE_SCHEMA_VERSION",
+    "DEFAULT_BASELINE_PATH",
+    "BaselineCoverage",
+    "BaselineStore",
     "EndToEndEvaluationResult",
     "EndToEndEvaluator",
+    "EvaluationBaseline",
     "EvaluationCaseResult",
     "EvaluationSummary",
     "ExpectedEntity",
