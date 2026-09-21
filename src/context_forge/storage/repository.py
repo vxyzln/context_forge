@@ -8,7 +8,7 @@ from context_forge.models.directory import Directory
 from context_forge.models.enums import DirectoryType, FileType
 from context_forge.models.file import File
 from context_forge.models.project import Project
-from context_forge.models.relationship import Relationship
+from context_forge.models.relationship import Relationship, RelationshipType
 from context_forge.models.symbol import Symbol
 from context_forge.storage.cache import (
     ANALYZER_VERSION,
@@ -463,6 +463,7 @@ class ProjectRepository:
                 """,
                 (str(project.id), str(project.id)),
             )
+
             connection.execute(
                 """
                 INSERT OR REPLACE INTO projects (
@@ -632,6 +633,7 @@ class ProjectRepository:
                         json.dumps(relationship.metadata),
                     ),
                 )
+
             for error in project.errors:
                 connection.execute(
                     """
@@ -725,13 +727,36 @@ class ProjectRepository:
                 SELECT *
                 FROM relationships
                 WHERE source_id IN (
-                    SELECT id FROM files WHERE project_id = ?
+                    SELECT id
+                    FROM files
+                    WHERE project_id = ?
                 )
                 OR target_id IN (
-                    SELECT id FROM files WHERE project_id = ?
+                    SELECT id
+                    FROM files
+                    WHERE project_id = ?
+                )
+                OR source_id IN (
+                    SELECT symbols.id
+                    FROM symbols
+                    JOIN files
+                        ON files.id = symbols.file_id
+                    WHERE files.project_id = ?
+                )
+                OR target_id IN (
+                    SELECT symbols.id
+                    FROM symbols
+                    JOIN files
+                        ON files.id = symbols.file_id
+                    WHERE files.project_id = ?
                 )
                 """,
-                (str(project_id), str(project_id)),
+                (
+                    str(project_id),
+                    str(project_id),
+                    str(project_id),
+                    str(project_id),
+                ),
             ).fetchall()
 
             error_rows = connection.execute(
@@ -816,7 +841,7 @@ class ProjectRepository:
             relationship = Relationship(
                 source_id=UUID(row["source_id"]),
                 target_id=UUID(row["target_id"]),
-                relationship_type=row["relationship_type"],
+                relationship_type=RelationshipType(row["relationship_type"]),
                 id=UUID(row["id"]),
                 confidence=row["confidence"],
                 metadata=json.loads(row["metadata"]),

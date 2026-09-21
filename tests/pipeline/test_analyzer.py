@@ -1,7 +1,12 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from context_forge.models.file import File
 from context_forge.models.relationship import RelationshipType
+from context_forge.parser.python import PythonParser
+from context_forge.parser.result import ParseResult
 from context_forge.pipeline.analyzer import ProjectAnalyzer
 from context_forge.query import ProjectQuery
 from context_forge.storage.cache import (
@@ -1272,3 +1277,141 @@ def test_analyzer_persists_file_fingerprints(
     }
 
     assert fingerprints[Path("main.py")].content_hash
+
+
+def test_analyzer_reuses_cached_analysis_when_repository_is_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        "def hello() -> str:\n    return 'hello'\n",
+        encoding="utf-8",
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+    analyzer = ProjectAnalyzer(tmp_path, database_path)
+
+    first_project = analyzer.analyze()
+
+    def fail_parse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("unchanged files must not be parsed")
+
+    monkeypatch.setattr(
+        PythonParser,
+        "parse",
+        fail_parse,
+    )
+
+    second_project = ProjectAnalyzer(
+        tmp_path,
+        database_path,
+    ).analyze()
+
+    assert second_project.id == first_project.id
+    assert second_project.files == first_project.files
+    assert second_project.symbols == first_project.symbols
+    assert second_project.relationships == first_project.relationships
+
+
+def test_analyzer_reparses_only_modified_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_source = tmp_path / "first.py"
+    second_source = tmp_path / "second.py"
+
+    first_source.write_text(
+        "def first() -> str:\n    return 'first'\n",
+        encoding="utf-8",
+    )
+    second_source.write_text(
+        "def second() -> str:\n    return 'second'\n",
+        encoding="utf-8",
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+    analyzer = ProjectAnalyzer(tmp_path, database_path)
+    first_project = analyzer.analyze()
+
+    parsed_paths: list[Path] = []
+    original_parse = PythonParser.parse
+
+    def tracking_parse(
+        parser: PythonParser,
+        source: str,
+        file: File,
+    ) -> ParseResult:
+        parsed_paths.append(file.path)
+        return original_parse(parser, source, file)
+
+    monkeypatch.setattr(
+        PythonParser,
+        "parse",
+        tracking_parse,
+    )
+
+    first_source.write_text(
+        "def first() -> str:\n    return 'updated'\n",
+        encoding="utf-8",
+    )
+
+    second_project = ProjectAnalyzer(
+        tmp_path,
+        database_path,
+    ).analyze()
+
+    assert parsed_paths == [Path("first.py")]
+    assert second_project.id == first_project.id
+    assert {symbol.name for symbol in second_project.symbols} == {"first", "second"}
+
+
+def test_analyzer_detects_added_and_deleted_files_incrementally(
+    tmp_path: Path,
+) -> None:
+    retained_source = tmp_path / "retained.py"
+    deleted_source = tmp_path / "deleted.py"
+
+    retained_source.write_text(
+        "def retained() -> str:\n    return 'retained'\n",
+        encoding="utf-8",
+    )
+    deleted_source.write_text(
+        "def deleted() -> str:\n    return 'deleted'\n",
+        encoding="utf-8",
+    )
+
+    database_path = tmp_path / ".context_forge.db"
+    analyzer = ProjectAnalyzer(tmp_path, database_path)
+    first_project = analyzer.analyze()
+
+    retained_file = next(
+        file for file in first_project.files if file.path == Path("retained.py")
+    )
+
+    deleted_source.unlink()
+
+    added_source = tmp_path / "added.py"
+    added_source.write_text(
+        "def added() -> str:\n    return 'added'\n",
+        encoding="utf-8",
+    )
+
+    second_project = ProjectAnalyzer(
+        tmp_path,
+        database_path,
+    ).analyze()
+
+    assert second_project.id == first_project.id
+    assert {file.path for file in second_project.files} == {
+        Path("retained.py"),
+        Path("added.py"),
+    }
+
+    retained_after = next(
+        file for file in second_project.files if file.path == Path("retained.py")
+    )
+
+    assert retained_after.id == retained_file.id
+
+    assert {symbol.name for symbol in second_project.symbols} == {"retained", "added"}
