@@ -18,6 +18,18 @@ from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
 
 
+def current_fingerprints(
+    project: Project,
+) -> dict[Path, object]:
+    return {
+        file.path: fingerprint_file(
+            project.root_path,
+            file.path,
+        )
+        for file in project.files
+    }
+
+
 class ProjectAnalyzer:
     def __init__(self, root_path: Path, database_path: Path) -> None:
         self.root_path = root_path.resolve()
@@ -193,13 +205,7 @@ class ProjectAnalyzer:
         self,
         project: Project,
     ) -> dict[Path, object]:
-        return {
-            file.path: fingerprint_file(
-                project.root_path,
-                file.path,
-            )
-            for file in project.files
-        }
+        return current_fingerprints(project)
 
     def analyze(self) -> Project:
         self.database.initialize()
