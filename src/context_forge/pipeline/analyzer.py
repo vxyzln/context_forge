@@ -206,29 +206,35 @@ class ProjectAnalyzer:
 
         scanned_project = RepositoryScanner(self.root_path).scan()
 
-        current_fingerprints = self._current_fingerprints(scanned_project)
+        current_fingerprints = self._current_fingerprints(
+            scanned_project,
+        )
+
         freshness = self.repository.check_cache_freshness(
             self.identity.key,
             current_fingerprints,
         )
 
-        cached_analysis = self.repository.load_analysis(self.identity.key)
+        cached_analysis = self.repository.load_analysis(
+            self.identity.key,
+        )
 
         if freshness.is_fresh and cached_analysis is not None:
             project, _ = cached_analysis
             project.analysis_status = "analyzed"
             return project
 
-        changed_paths = (
-            freshness.changes.changed
-            if freshness.changes is not None
-            else frozenset(current_fingerprints)
+        invalidation = self.repository.refresh_cache_state(
+            self.identity.key,
+            current_fingerprints,
         )
 
-        if cached_analysis is None:
+        if cached_analysis is None or invalidation.full:
             project = scanned_project
+            changed_paths = frozenset(current_fingerprints)
         else:
             cached_project, _ = cached_analysis
+            changed_paths = invalidation.paths
             project = self._merge_cached_project(
                 cached_project,
                 scanned_project,
@@ -273,13 +279,7 @@ class ProjectAnalyzer:
             project_id=project.id,
         )
 
-        fingerprints = [
-            fingerprint_file(
-                project.root_path,
-                file.path,
-            )
-            for file in project.files
-        ]
+        fingerprints = list(current_fingerprints.values())
 
         self.repository.save_analysis(
             project,

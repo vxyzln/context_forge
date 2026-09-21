@@ -1245,3 +1245,149 @@ def test_invalidate_cache_ignores_paths_without_persisted_files(
     )
 
     assert repository.load_analysis(RepositoryIdentity(tmp_path).key) is not None
+
+
+def test_refresh_cache_state_returns_fresh_invalidation(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+
+    repository_key = RepositoryIdentity(tmp_path).key
+
+    metadata = RepositoryCacheMetadata(
+        repository_key=repository_key,
+        project_id=project.id,
+    )
+
+    fingerprint = FileFingerprint(
+        path=Path("main.py"),
+        size=10,
+        modified_at_ns=1,
+        content_hash="same",
+    )
+
+    repository.save_analysis(
+        project,
+        metadata,
+        [fingerprint],
+    )
+
+    invalidation = repository.refresh_cache_state(
+        repository_key,
+        {Path("main.py"): fingerprint},
+    )
+
+    assert not invalidation.full
+    assert invalidation.paths == frozenset()
+    assert invalidation.reason == "fresh"
+
+    assert repository.load_analysis(repository_key) is not None
+
+
+def test_refresh_cache_state_selectively_invalidates_changed_files(
+    tmp_path: Path,
+) -> None:
+    changed = tmp_path / "changed.py"
+    unchanged = tmp_path / "unchanged.py"
+
+    changed.write_text("changed = 1\n")
+    unchanged.write_text("unchanged = 1\n")
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, [])
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    repository_key = RepositoryIdentity(tmp_path).key
+
+    metadata = RepositoryCacheMetadata(
+        repository_key=repository_key,
+        project_id=project.id,
+    )
+
+    cached_fingerprints = [
+        fingerprint_file(tmp_path, file.path) for file in project.files
+    ]
+
+    repository.save_analysis(
+        project,
+        metadata,
+        cached_fingerprints,
+    )
+
+    changed.write_text("changed = 2\n")
+
+    current_fingerprints = {
+        file.path: fingerprint_file(tmp_path, file.path) for file in project.files
+    }
+
+    invalidation = repository.refresh_cache_state(
+        repository_key,
+        current_fingerprints,
+    )
+
+    assert not invalidation.full
+    assert invalidation.paths == frozenset({Path("changed.py")})
+    assert invalidation.reason == "files_changed"
+
+    loaded = repository.load_analysis(repository_key)
+
+    assert loaded is not None
+
+    loaded_project, _ = loaded
+
+    assert Path("changed.py") not in {file.path for file in loaded_project.files}
+
+    assert Path("unchanged.py") in {file.path for file in loaded_project.files}
+
+
+def test_refresh_cache_state_fully_invalidates_incompatible_cache(
+    tmp_path: Path,
+) -> None:
+    project = Project(
+        name="Test Project",
+        root_path=tmp_path,
+    )
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+
+    repository = ProjectRepository(database)
+
+    repository_key = RepositoryIdentity(tmp_path).key
+
+    repository.save_analysis(
+        project,
+        RepositoryCacheMetadata(
+            repository_key=repository_key,
+            project_id=project.id,
+            analyzer_version="old-version",
+        ),
+    )
+
+    current_fingerprints: dict[Path, FileFingerprint] = {}
+
+    invalidation = repository.refresh_cache_state(
+        repository_key,
+        current_fingerprints,
+    )
+
+    assert invalidation.full
+    assert invalidation.paths == frozenset()
+    assert invalidation.reason == "analyzer_version_mismatch"
+
+    assert repository.load_analysis(repository_key) is None
+    assert repository.load_cache_metadata(repository_key) is None
+    assert repository.load_file_fingerprints(repository_key) == {}
