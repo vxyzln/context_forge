@@ -13,6 +13,7 @@ from context_forge.config import (
 from context_forge.main import (
     build_provider_config,
     main,
+    parse_args,
     resolve_project_path,
 )
 from context_forge.provider import ProviderConfig
@@ -853,12 +854,363 @@ def test_main_rejects_empty_task(
     with (
         patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
         patch("context_forge.main.ProjectAnalyzer"),
-        patch("context_forge.main.log_generation_failed") as log_failed,
         patch("builtins.input", return_value=task),
+        patch("context_forge.main.build_generation_service"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: Task cannot be empty\n"
+
+
+def test_analyze_command_prints_repository_summary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": Path("/tmp/project"),
+            "files": [1, 2, 3],
+            "symbols": [1, 2],
+            "relationships": [1, 2, 3, 4],
+            "analysis_status": "analyzed",
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "analyze", "."],
+        ),
+        patch(
+            "context_forge.main.ProjectAnalyzer",
+        ) as analyzer,
+    ):
+        analyzer.return_value.analyze.return_value = project
+
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == (
+        "Analyzed: /tmp/project\n"
+        "Files: 3\n"
+        "Symbols: 2\n"
+        "Relationships: 4\n"
+        "Status: analyzed\n"
+    )
+    assert captured.err == ""
+
+
+def test_legacy_path_invocation_uses_generate_command() -> None:
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "."],
+    ):
+        args = __import__("context_forge.main", fromlist=["parse_args"]).parse_args()
+
+    assert args.command == "generate"
+    assert args.path == Path(".")
+
+
+def test_explicit_generate_command_parses_provider_options() -> None:
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "generate",
+            ".",
+            "--provider",
+            "deterministic",
+            "--model",
+            "test-model",
+        ],
+    ):
+        args = __import__("context_forge.main", fromlist=["parse_args"]).parse_args()
+
+    assert args.command == "generate"
+    assert args.path == Path(".")
+    assert args.provider == "deterministic"
+    assert args.model == "test-model"
+
+
+def test_generate_command_uses_explicit_task(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = type(
+        "Response",
+        (),
+        {"content": "Done."},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+            ],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
         patch("context_forge.main.build_generation_service") as build_service,
     ):
-        build_service.return_value.generate.side_effect = ValueError(
-            "task must not be empty"
+        build_service.return_value.generate.return_value = response
+
+        main()
+
+    call = build_service.return_value.generate.call_args
+
+    assert call.kwargs["task"] == "Explain authentication"
+
+    captured = capsys.readouterr()
+
+    assert captured.out == "\nDone.\n"
+    assert captured.err == ""
+
+
+def test_generate_command_strips_explicit_task() -> None:
+    response = type(
+        "Response",
+        (),
+        {"content": "Done."},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "  Explain authentication  ",
+            ],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch("context_forge.main.build_generation_service") as build_service,
+    ):
+        build_service.return_value.generate.return_value = response
+
+        main()
+
+    call = build_service.return_value.generate.call_args
+
+    assert call.kwargs["task"] == "Explain authentication"
+
+
+def test_generate_command_rejects_empty_explicit_task(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "   ",
+            ],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: Task cannot be empty\n"
+
+
+def test_generate_command_reads_interactive_task(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = type(
+        "Response",
+        (),
+        {"content": "Done."},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "generate", "."],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch("context_forge.main.build_generation_service") as build_service,
+        patch("builtins.input", return_value="  Explain authentication  "),
+    ):
+        build_service.return_value.generate.return_value = response
+
+        main()
+
+    call = build_service.return_value.generate.call_args
+
+    assert call.kwargs["task"] == "Explain authentication"
+
+    captured = capsys.readouterr()
+
+    assert captured.out == "\nDone.\n"
+    assert captured.err == ""
+
+
+def test_generate_command_rejects_empty_interactive_task(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "generate", "."],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch("builtins.input", return_value="   "),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: Task cannot be empty\n"
+
+
+def test_generate_command_handles_eof(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "generate", "."],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "builtins.input",
+            side_effect=EOFError,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: Task input ended unexpectedly\n"
+
+
+def test_generate_command_handles_keyboard_interrupt(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "generate", "."],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "builtins.input",
+            side_effect=KeyboardInterrupt,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 130
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "\n"
+
+
+def test_explicit_generate_command_parses_task() -> None:
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "generate",
+            ".",
+            "--task",
+            "Explain the repository",
+        ],
+    ):
+        args = parse_args()
+
+    assert args.command == "generate"
+    assert args.path == Path(".")
+    assert args.task == "Explain the repository"
+
+
+def test_analyze_command_reports_analysis_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "analyze", "."],
+        ),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+    ):
+        analyzer.return_value.analyze.side_effect = RuntimeError("analysis failed")
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: analysis failed\n"
+
+
+def test_generate_command_reports_generation_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+            ],
+        ),
+        patch("context_forge.main.ProjectAnalyzer"),
+        patch("context_forge.main.build_generation_service") as build_service,
+    ):
+        build_service.return_value.generate.side_effect = RuntimeError(
+            "generation failed"
         )
 
         with pytest.raises(SystemExit) as exc_info:
@@ -869,7 +1221,4 @@ def test_main_rejects_empty_task(
     captured = capsys.readouterr()
 
     assert captured.out == ""
-    assert captured.err == "Error: task must not be empty\n"
-
-    build_service.assert_called_once()
-    log_failed.assert_called_once()
+    assert captured.err == "Error: generation failed\n"

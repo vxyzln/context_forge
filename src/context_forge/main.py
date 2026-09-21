@@ -23,21 +23,52 @@ def create_parser() -> argparse.ArgumentParser:
         prog="context-forge",
         description="Generate context-forge responses for software projects.",
     )
-    parser.add_argument(
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    analyze_parser = subparsers.add_parser(
+        "analyze",
+        help="Analyze a repository and persist repository intelligence.",
+    )
+    analyze_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
+        default=Path("."),
     )
-    parser.add_argument("--provider", default=None)
-    parser.add_argument("--model", default=None)
-    parser.add_argument("--temperature", type=float, default=None)
-    parser.add_argument("--max-tokens", type=int, default=None)
-    parser.add_argument("--base-url", default=None)
+
+    generate_parser = subparsers.add_parser(
+        "generate",
+        help="Analyze a repository and generate a response.",
+    )
+    generate_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+    )
+    generate_parser.add_argument("--provider", default=None)
+    generate_parser.add_argument("--model", default=None)
+    generate_parser.add_argument("--temperature", type=float, default=None)
+    generate_parser.add_argument("--max-tokens", type=int, default=None)
+    generate_parser.add_argument("--base-url", default=None)
+    generate_parser.add_argument(
+        "--task",
+        default=None,
+        help="Task to generate a response for.",
+    )
+
     return parser
 
 
 def parse_args() -> argparse.Namespace:
-    return create_parser().parse_args()
+    argv = sys.argv[1:]
+
+    # Preserve the existing `context-forge .` workflow.
+    if argv and argv[0] not in {"analyze", "generate", "-h", "--help"}:
+        argv = ["generate", *argv]
+
+    return create_parser().parse_args(argv)
 
 
 def resolve_project_path(path: Path) -> Path:
@@ -58,7 +89,6 @@ def build_provider_config(
 ) -> ProviderConfig:
     global_config = load_global_configuration()
     project_config = load_project_configuration(project_root)
-
     resolved = resolve_configuration(
         global_config=global_config,
         project_config=project_config,
@@ -77,13 +107,53 @@ def build_provider_config(
     )
 
 
-def main() -> None:
-    args = parse_args()
+def analyze_project(root_path: Path):
+    database_path = root_path / ".context_forge.db"
 
-    if args.path is None:
-        create_parser().print_help()
-        return
+    return ProjectAnalyzer(
+        root_path=root_path,
+        database_path=database_path,
+    ).analyze()
 
+
+def print_analysis_summary(project) -> None:
+    print(f"Analyzed: {project.root_path}")
+    print(f"Files: {len(project.files)}")
+    print(f"Symbols: {len(project.symbols)}")
+    print(f"Relationships: {len(project.relationships)}")
+    print(f"Status: {project.analysis_status}")
+
+
+def run_analyze(path: Path) -> None:
+    root_path = resolve_project_path(path)
+    project = analyze_project(root_path)
+    print_analysis_summary(project)
+
+
+def read_task(task: str | None) -> str:
+    if task is not None:
+        normalized = task.strip()
+
+        if not normalized:
+            raise ValueError("Task cannot be empty")
+
+        return normalized
+
+    try:
+        normalized = input("Task: ").strip()
+    except KeyboardInterrupt:
+        print(file=sys.stderr)
+        raise SystemExit(130) from None
+    except EOFError:
+        raise ValueError("Task input ended unexpectedly") from None
+
+    if not normalized:
+        raise ValueError("Task cannot be empty")
+
+    return normalized
+
+
+def run_generate(args: argparse.Namespace) -> None:
     root_path: Path | None = None
     generation_config: ProviderConfig | None = None
     started_at = time.monotonic()
@@ -91,21 +161,9 @@ def main() -> None:
 
     try:
         root_path = resolve_project_path(args.path)
-        database_path = root_path / ".context_forge.db"
+        project = analyze_project(root_path)
 
-        project = ProjectAnalyzer(
-            root_path=root_path,
-            database_path=database_path,
-        ).analyze()
-
-        try:
-            task = input("Task: ").strip()
-        except KeyboardInterrupt:
-            print(file=sys.stderr)
-            raise SystemExit(130) from None
-        except EOFError:
-            print("Error: Task input ended unexpectedly", file=sys.stderr)
-            raise SystemExit(1) from None
+        task = read_task(args.task)
 
         generation_config = build_provider_config(
             args,
@@ -155,3 +213,21 @@ def main() -> None:
 
     print()
     print(response.content)
+
+
+def main() -> None:
+    args = parse_args()
+
+    if args.command is None:
+        create_parser().print_help()
+        return
+
+    if args.command == "analyze":
+        try:
+            run_analyze(args.path)
+        except (RuntimeError, TypeError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        return
+
+    run_generate(args)
