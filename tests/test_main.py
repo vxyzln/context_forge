@@ -12,9 +12,11 @@ from context_forge.config import (
 )
 from context_forge.main import (
     build_provider_config,
+    load_project_analysis,
     main,
     parse_args,
     resolve_project_path,
+    run_status,
 )
 from context_forge.provider import ProviderConfig
 
@@ -1222,3 +1224,165 @@ def test_generate_command_reports_generation_failure(
 
     assert captured.out == ""
     assert captured.err == "Error: generation failed\n"
+
+
+def test_parse_args_status_command(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["context-forge", "status", "/tmp/project"],
+    )
+
+    args = parse_args()
+
+    assert args.command == "status"
+    assert args.path == Path("/tmp/project")
+
+
+def test_parse_args_cache_command(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["context-forge", "cache", "/tmp/project"],
+    )
+
+    args = parse_args()
+
+    assert args.command == "cache"
+    assert args.path == Path("/tmp/project")
+
+
+def test_parse_args_inspect_command(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["context-forge", "inspect", "/tmp/project"],
+    )
+
+    args = parse_args()
+
+    assert args.command == "inspect"
+    assert args.path == Path("/tmp/project")
+
+
+def test_parse_args_diagnostics_command(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["context-forge", "diagnostics", "/tmp/project"],
+    )
+
+    args = parse_args()
+
+    assert args.command == "diagnostics"
+    assert args.path == Path("/tmp/project")
+
+
+def test_parse_args_legacy_repository_path_still_means_generate(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["context-forge", "/tmp/project"],
+    )
+
+    args = parse_args()
+
+    assert args.command == "generate"
+    assert args.path == Path("/tmp/project")
+
+
+def test_run_status_does_not_analyze(monkeypatch, tmp_path):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("status must not analyze the repository")
+
+    monkeypatch.setattr(
+        "context_forge.main.ProjectAnalyzer.analyze",
+        fail_if_called,
+    )
+
+    class FakeRepository:
+        def check_cache_freshness(
+            self,
+            repository_key,
+            fingerprints,
+        ):
+            class Freshness:
+                is_fresh = True
+
+            return Freshness()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": tmp_path,
+            "name": "test-project",
+            "analysis_status": "complete",
+            "project_type": "python",
+            "files": [],
+            "symbols": [],
+            "relationships": [],
+            "errors": [],
+        },
+    )()
+
+    metadata = type(
+        "Metadata",
+        (),
+        {
+            "cache_schema_version": 1,
+            "analyzer_version": "0.1.0",
+        },
+    )()
+
+    monkeypatch.setattr(
+        "context_forge.main.load_project_analysis",
+        lambda root_path: (
+            FakeRepository(),
+            "/tmp/project",
+            project,
+            metadata,
+        ),
+    )
+
+    monkeypatch.setattr(
+        "context_forge.main.current_fingerprints",
+        lambda project: {},
+    )
+
+    run_status(tmp_path)
+
+
+def test_load_project_analysis_requires_persisted_analysis(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "context_forge.main.ProjectRepository.load_analysis",
+        lambda self, repository_key: None,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="No persisted analysis found; run 'context-forge analyze' first",
+    ):
+        load_project_analysis(tmp_path)
+
+
+def test_load_project_analysis_does_not_analyze(
+    tmp_path,
+    monkeypatch,
+):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("loading persisted analysis must not analyze")
+
+    monkeypatch.setattr(
+        "context_forge.main.ProjectAnalyzer.analyze",
+        fail_if_called,
+    )
+
+    monkeypatch.setattr(
+        "context_forge.main.ProjectRepository.load_analysis",
+        lambda self, repository_key: None,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="No persisted analysis found",
+    ):
+        load_project_analysis(tmp_path)
