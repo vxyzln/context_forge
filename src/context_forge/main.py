@@ -18,7 +18,7 @@ from context_forge.pipeline.analyzer import (
     ProjectAnalyzer,
     current_fingerprints,
 )
-from context_forge.provider import ProviderConfig
+from context_forge.provider import OllamaRuntime, ProviderConfig
 from context_forge.storage.cache import RepositoryIdentity
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
@@ -104,6 +104,18 @@ def create_parser() -> argparse.ArgumentParser:
         default=Path("."),
     )
 
+    runtime_parser = subparsers.add_parser(
+        "runtime", help="Check Ollama runtime and model availability."
+    )
+    runtime_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+    )
+    runtime_parser.add_argument("--model", default=None)
+    runtime_parser.add_argument("--base-url", default=None)
+
     return parser
 
 
@@ -118,6 +130,7 @@ def parse_args() -> argparse.Namespace:
         "cache",
         "inspect",
         "diagnostics",
+        "runtime",
         "-h",
         "--help",
     }:
@@ -158,6 +171,26 @@ def build_provider_config(
         max_tokens=(
             args.max_tokens if args.max_tokens is not None else resolved.max_tokens
         ),
+        base_url=(args.base_url if args.base_url is not None else resolved.base_url),
+    )
+
+
+def build_runtime_config(
+    args: argparse.Namespace,
+    project_root: Path,
+) -> ProviderConfig:
+    global_config = load_global_configuration()
+    project_config = load_project_configuration(project_root)
+    resolved = resolve_configuration(
+        global_config=global_config,
+        project_config=project_config,
+    )
+
+    return ProviderConfig(
+        provider="ollama",
+        model=args.model if args.model is not None else resolved.model,
+        temperature=resolved.temperature,
+        max_tokens=resolved.max_tokens,
         base_url=(args.base_url if args.base_url is not None else resolved.base_url),
     )
 
@@ -315,6 +348,15 @@ def print_diagnostics_summary(project) -> None:
             print(f"  Line: {error.line}")
 
 
+def print_runtime_summary(status) -> None:
+    print(f"Ollama runtime: {'available' if status.available else 'unavailable'}")
+    print(f"Base URL: {status.base_url}")
+    print(f"Model: {status.model}")
+    print(f"Model status: {'available' if status.model_available else 'unavailable'}")
+    print(f"Ready: {'yes' if status.ready else 'no'}")
+    print(f"Reason: {status.reason}")
+
+
 def read_task(task: str | None) -> str:
     if task is not None:
         normalized = task.strip()
@@ -454,6 +496,22 @@ def run_generate(args: argparse.Namespace) -> None:
     print(response.content)
 
 
+def run_runtime(path: Path, args: argparse.Namespace) -> None:
+    root_path = resolve_project_path(path)
+    config = build_runtime_config(args, root_path)
+
+    runtime = OllamaRuntime(
+        base_url=config.base_url,
+        timeout=config.transport.timeout,
+    )
+    status = runtime.check(config.model)
+
+    print_runtime_summary(status)
+
+    if not status.ready:
+        raise RuntimeError(f"Ollama runtime check failed: {status.reason}")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -496,6 +554,14 @@ def main() -> None:
     if args.command == "diagnostics":
         try:
             run_diagnostics(args.path)
+        except (RuntimeError, TypeError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        return
+
+    if args.command == "runtime":
+        try:
+            run_runtime(args.path, args)
         except (RuntimeError, TypeError, ValueError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             raise SystemExit(1) from None

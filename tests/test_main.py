@@ -18,7 +18,7 @@ from context_forge.main import (
     resolve_project_path,
     run_status,
 )
-from context_forge.provider import ProviderConfig
+from context_forge.provider import OllamaRuntimeStatus, ProviderConfig
 
 
 def test_main_reports_provider_error_without_traceback(
@@ -1386,3 +1386,178 @@ def test_load_project_analysis_does_not_analyze(
         match="No persisted analysis found",
     ):
         load_project_analysis(tmp_path)
+
+
+def test_parse_args_runtime_command(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "runtime",
+            "/tmp/project",
+            "--model",
+            "test-model",
+            "--base-url",
+            "http://example.test:11434",
+        ],
+    )
+
+    args = parse_args()
+
+    assert args.command == "runtime"
+    assert args.path == Path("/tmp/project")
+    assert args.model == "test-model"
+    assert args.base_url == "http://example.test:11434"
+
+
+def test_main_runtime_reports_ready(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    status = OllamaRuntimeStatus(
+        available=True,
+        model_available=True,
+        base_url="http://localhost:11434",
+        model="qwen2.5-coder:7b",
+        reason="ready",
+    )
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "runtime", str(tmp_path)],
+        ),
+        patch("context_forge.main.OllamaRuntime") as runtime_class,
+    ):
+        runtime_class.return_value.check.return_value = status
+
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == (
+        "Ollama runtime: available\n"
+        "Base URL: http://localhost:11434\n"
+        "Model: qwen2.5-coder:7b\n"
+        "Model status: available\n"
+        "Ready: yes\n"
+        "Reason: ready\n"
+    )
+    assert captured.err == ""
+
+    runtime_class.assert_called_once()
+    runtime_class.return_value.check.assert_called_once_with(
+        "qwen2.5-coder:7b",
+    )
+
+
+def test_main_runtime_reports_missing_model(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    status = OllamaRuntimeStatus(
+        available=True,
+        model_available=False,
+        base_url="http://localhost:11434",
+        model="missing-model",
+        reason="model_unavailable",
+    )
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "runtime", str(tmp_path)],
+        ),
+        patch("context_forge.main.OllamaRuntime") as runtime_class,
+    ):
+        runtime_class.return_value.check.return_value = status
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert "Ollama runtime: available\n" in captured.out
+    assert "Model: missing-model\n" in captured.out
+    assert "Model status: unavailable\n" in captured.out
+    assert "Ready: no\n" in captured.out
+    assert "Reason: model_unavailable\n" in captured.out
+    assert captured.err == ("Error: Ollama runtime check failed: model_unavailable\n")
+
+
+def test_main_runtime_reports_unavailable_runtime(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    status = OllamaRuntimeStatus(
+        available=False,
+        model_available=False,
+        base_url="http://localhost:11434",
+        model="qwen2.5-coder:7b",
+        reason="ollama_unavailable",
+    )
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "runtime", str(tmp_path)],
+        ),
+        patch("context_forge.main.OllamaRuntime") as runtime_class,
+    ):
+        runtime_class.return_value.check.return_value = status
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert "Ollama runtime: unavailable\n" in captured.out
+    assert "Ready: no\n" in captured.out
+    assert "Reason: ollama_unavailable\n" in captured.out
+    assert captured.err == ("Error: Ollama runtime check failed: ollama_unavailable\n")
+
+
+def test_main_runtime_uses_explicit_model_and_base_url(
+    tmp_path: Path,
+) -> None:
+    argv = [
+        "context-forge",
+        "runtime",
+        str(tmp_path),
+        "--model",
+        "custom-model",
+        "--base-url",
+        "http://example.test:11434",
+    ]
+
+    status = OllamaRuntimeStatus(
+        available=True,
+        model_available=True,
+        base_url="http://example.test:11434",
+        model="custom-model",
+        reason="ready",
+    )
+
+    with (
+        patch.object(sys, "argv", argv),
+        patch("context_forge.main.OllamaRuntime") as runtime_class,
+    ):
+        runtime_class.return_value.check.return_value = status
+
+        main()
+
+    runtime_class.assert_called_once_with(
+        base_url="http://example.test:11434",
+        timeout=60.0,
+    )
+    runtime_class.return_value.check.assert_called_once_with(
+        "custom-model",
+    )
