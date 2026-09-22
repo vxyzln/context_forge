@@ -8,6 +8,10 @@ from context_forge.provider.models import (
     ProviderUsage,
 )
 from context_forge.provider.ollama import OllamaProvider
+from context_forge.provider.runtime import (
+    OllamaRuntime,
+    OllamaRuntimeStatus,
+)
 from context_forge.provider.transport import ProviderTransportConfig
 
 __all__ = [
@@ -16,6 +20,8 @@ __all__ = [
     "GenerationRequest",
     "GenerationResponse",
     "OllamaProvider",
+    "OllamaRuntime",
+    "OllamaRuntimeStatus",
     "ProviderConfig",
     "ProviderFactory",
     "ProviderTransportConfig",
