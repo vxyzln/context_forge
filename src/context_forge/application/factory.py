@@ -21,6 +21,7 @@ from context_forge.context import (
 )
 from context_forge.context.depth import ContextDepthSelector
 from context_forge.provider import ProviderConfig, ProviderFactory
+from context_forge.provider.runtime import OllamaRuntime
 from context_forge.task import (
     TaskGroundingService,
     TaskRepositoryGroundingService,
@@ -85,4 +86,12 @@ def build_generation_service(
         task_validator=TaskValidator(),
         task_grounding=TaskGroundingService(),
         task_repository_grounding=TaskRepositoryGroundingService(),
+        ollama_runtime=(
+            OllamaRuntime(
+                base_url=generation_config.base_url,
+                timeout=generation_config.transport.timeout,
+            )
+            if generation_config.provider == "ollama"
+            else None
+        ),
     )

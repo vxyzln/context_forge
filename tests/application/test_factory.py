@@ -10,6 +10,7 @@ from context_forge.context import (
 from context_forge.provider import (
     DeterministicProvider,
     OllamaProvider,
+    OllamaRuntime,
     ProviderConfig,
 )
 
@@ -86,3 +87,28 @@ def test_build_generation_service_wires_selection_service() -> None:
 
     assert isinstance(service.engine, DefaultContextEngine)
     assert isinstance(service.engine.selection_service, ContextSelectionService)
+
+
+def test_build_generation_service_injects_ollama_runtime() -> None:
+    config = ProviderConfig(
+        provider="ollama",
+        model="qwen2.5-coder:7b",
+        base_url="http://example.test:11434",
+    )
+
+    service = build_generation_service(config)
+
+    assert isinstance(service.ollama_runtime, OllamaRuntime)
+    assert service.ollama_runtime.base_url == "http://example.test:11434"
+    assert service.ollama_runtime.timeout == config.transport.timeout
+
+
+def test_build_generation_service_does_not_inject_ollama_runtime() -> None:
+    config = ProviderConfig(
+        provider="deterministic",
+        model="deterministic",
+    )
+
+    service = build_generation_service(config)
+
+    assert service.ollama_runtime is None

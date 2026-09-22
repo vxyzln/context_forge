@@ -5,6 +5,7 @@ from context_forge.models.project import Project
 from context_forge.provider.base import ContextProvider
 from context_forge.provider.config import ProviderConfig
 from context_forge.provider.models import GenerationRequest, GenerationResponse
+from context_forge.provider.runtime import OllamaRuntime
 from context_forge.task import (
     TaskGroundingService,
     TaskRepositoryGroundingService,
@@ -24,6 +25,7 @@ class ContextGenerationService:
         task_validator: TaskValidator | None = None,
         task_grounding: TaskGroundingService | None = None,
         task_repository_grounding: TaskRepositoryGroundingService | None = None,
+        ollama_runtime: OllamaRuntime | None = None,
     ) -> None:
         self.engine = engine
         self.serializer = serializer
@@ -32,6 +34,24 @@ class ContextGenerationService:
         self.task_validator = task_validator
         self.task_grounding = task_grounding
         self.task_repository_grounding = task_repository_grounding
+        self.ollama_runtime = ollama_runtime
+
+    def _validate_runtime(self, config: ProviderConfig) -> None:
+        if config.provider != "ollama":
+            return
+
+        if self.ollama_runtime is None:
+            return
+
+        status = self.ollama_runtime.check(config.model)
+
+        if not status.available:
+            raise RuntimeError(f"Ollama runtime is unavailable at {config.base_url}")
+
+        if not status.model_available:
+            raise RuntimeError(
+                f"Ollama model '{config.model}' is not available at {config.base_url}"
+            )
 
     def generate(
         self,
@@ -48,6 +68,8 @@ class ContextGenerationService:
 
             if validation.state != TaskState.CLEAR:
                 raise ValueError(f"task validation failed: {validation.state.value}")
+
+        self._validate_runtime(config)
 
         if interpretation is not None and self.task_grounding is not None:
             grounded_task = self.task_grounding.ground(

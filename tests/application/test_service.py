@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -14,6 +15,8 @@ from context_forge.provider import (
     DeterministicProvider,
     GenerationRequest,
     GenerationResponse,
+    OllamaRuntime,
+    OllamaRuntimeStatus,
     ProviderConfig,
 )
 from context_forge.task import (
@@ -660,3 +663,143 @@ def test_service_does_not_repository_ground_invalid_task() -> None:
     assert repository_grounding_service.calls == []
     assert engine.calls == []
     assert provider.requests == []
+
+
+def test_generation_service_rejects_unavailable_ollama() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    runtime = Mock(spec=OllamaRuntime)
+    runtime.check.return_value = OllamaRuntimeStatus(
+        available=False,
+        model_available=False,
+        base_url="http://localhost:11434",
+        model="qwen2.5-coder:7b",
+        reason="ollama_unavailable",
+    )
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+        ollama_runtime=runtime,
+    )
+
+    config = ProviderConfig(
+        provider="ollama",
+        model="qwen2.5-coder:7b",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Ollama runtime is unavailable",
+    ):
+        service.generate(
+            project=project,
+            task="Explain the project",
+            config=config,
+        )
+
+    runtime.check.assert_called_once_with("qwen2.5-coder:7b")
+
+
+def test_generation_service_rejects_missing_ollama_model() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    runtime = Mock(spec=OllamaRuntime)
+    runtime.check.return_value = OllamaRuntimeStatus(
+        available=True,
+        model_available=False,
+        base_url="http://localhost:11434",
+        model="missing-model",
+        reason="model_unavailable",
+    )
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+        ollama_runtime=runtime,
+    )
+
+    config = ProviderConfig(
+        provider="ollama",
+        model="missing-model",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Ollama model 'missing-model' is not available",
+    ):
+        service.generate(
+            project=project,
+            task="Explain the project",
+            config=config,
+        )
+
+    runtime.check.assert_called_once_with("missing-model")
+
+
+def test_generation_service_skips_runtime_without_ollama_runtime() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+    )
+
+    config = ProviderConfig(
+        provider="ollama",
+        model="test-model",
+    )
+
+    service.generate(
+        project=project,
+        task="Explain the project",
+        config=config,
+    )
+
+
+def test_generation_service_accepts_ready_ollama_runtime() -> None:
+    project = make_project()
+    package = make_package()
+    engine = StubContextEngine(package)
+    provider = StubProvider(make_response())
+
+    runtime = Mock(spec=OllamaRuntime)
+    runtime.check.return_value = OllamaRuntimeStatus(
+        available=True,
+        model_available=True,
+        base_url="http://localhost:11434",
+        model="qwen2.5-coder:7b",
+        reason="ready",
+    )
+
+    service = ContextGenerationService(
+        engine=engine,
+        serializer=ContextPackageSerializer(),
+        provider=provider,
+        ollama_runtime=runtime,
+    )
+
+    config = ProviderConfig(
+        provider="ollama",
+        model="qwen2.5-coder:7b",
+    )
+
+    service.generate(
+        project=project,
+        task="Explain the project",
+        config=config,
+    )
+
+    runtime.check.assert_called_once_with("qwen2.5-coder:7b")
