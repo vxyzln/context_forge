@@ -595,4 +595,3 @@ def main() -> None:
         return
 
     run_generate(args)
-----
