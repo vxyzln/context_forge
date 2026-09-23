@@ -1,10 +1,11 @@
 import argparse
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
+from context_forge import main as main_module
 from context_forge.config import (
     ProjectConfiguration,
     ProjectGenerationConfiguration,
@@ -12,6 +13,7 @@ from context_forge.config import (
 )
 from context_forge.main import (
     build_provider_config,
+    load_generation_project,
     load_project_analysis,
     main,
     parse_args,
@@ -26,7 +28,10 @@ def test_main_reports_provider_error_without_traceback(
 ) -> None:
     with (
         patch.object(sys, "argv", ["context-forge", "."]),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="Fix scrolling"),
     ):
@@ -56,7 +61,10 @@ def test_main_prints_generation_response(
 
     with (
         patch.object(sys, "argv", ["context-forge", "."]),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="Fix scrolling"),
     ):
@@ -81,7 +89,10 @@ def test_main_uses_default_provider_configuration() -> None:
 
     with (
         patch.object(sys, "argv", ["context-forge", "."]),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="Fix scrolling"),
     ):
@@ -129,7 +140,10 @@ def test_main_uses_custom_provider_configuration() -> None:
 
     with (
         patch.object(sys, "argv", argv),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="Fix scrolling"),
     ):
@@ -154,7 +168,10 @@ def test_main_uses_custom_provider_configuration() -> None:
 def test_main_passes_same_configuration_to_service_and_generation() -> None:
     with (
         patch.object(sys, "argv", ["context-forge", "."]),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="Fix scrolling"),
     ):
@@ -523,7 +540,10 @@ def test_main_logs_generation_lifecycle(
             "argv",
             ["context-forge", str(project)],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch(
             "context_forge.main.build_generation_service",
         ) as build_service,
@@ -569,7 +589,10 @@ def test_main_logs_generation_failure_without_task(
             "argv",
             ["context-forge", str(project)],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch(
             "context_forge.main.build_generation_service",
         ) as build_service,
@@ -649,6 +672,9 @@ def authenticate(username, password):
         "deterministic-test",
     ]
 
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+
     with (
         patch.object(sys, "argv", argv),
         patch("builtins.input", return_value="Explain the authenticate function"),
@@ -671,7 +697,10 @@ def test_main_reports_generation_provider_failure_without_traceback(
 
     with (
         patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.log_generation_started"),
         patch("context_forge.main.log_generation_completed") as log_completed,
         patch("context_forge.main.log_generation_failed") as log_failed,
@@ -717,6 +746,11 @@ def test_main_handles_keyboard_interrupt_during_task_input(
         "deterministic-test",
     ]
 
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+
+    capsys.readouterr()
+
     with (
         patch.object(sys, "argv", argv),
         patch("builtins.input", side_effect=KeyboardInterrupt),
@@ -744,6 +778,11 @@ def test_main_handles_eof_during_task_input(
         "deterministic-test",
     ]
 
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+
+    capsys.readouterr()
+
     with (
         patch.object(sys, "argv", argv),
         patch("builtins.input", side_effect=EOFError),
@@ -759,32 +798,32 @@ def test_main_handles_eof_during_task_input(
     assert "Traceback" not in captured.err
 
 
-def test_main_reports_analysis_failure_without_traceback(
+def test_main_reports_persisted_analysis_failure_without_traceback(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    error = RuntimeError("repository analysis failed")
+    error = ValueError("No persisted analysis found; run 'context-forge analyze' first")
 
     with (
         patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
-        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch(
+            "context_forge.main.load_generation_project",
+            side_effect=error,
+        ),
         patch("builtins.input") as input_mock,
-        patch("context_forge.main.build_generation_service") as build_service,
+        pytest.raises(SystemExit) as exc_info,
     ):
-        analyzer.return_value.analyze.side_effect = error
-
-        with pytest.raises(SystemExit) as exc_info:
-            main()
+        main()
 
     assert exc_info.value.code == 1
+    input_mock.assert_not_called()
 
     captured = capsys.readouterr()
 
     assert captured.out == ""
-    assert captured.err == "Error: repository analysis failed\n"
-
-    input_mock.assert_not_called()
-    build_service.assert_not_called()
+    assert captured.err == (
+        "Error: No persisted analysis found; run 'context-forge analyze' first\n"
+    )
 
 
 def test_main_reports_configuration_failure_without_generation_failure_log(
@@ -795,7 +834,10 @@ def test_main_reports_configuration_failure_without_generation_failure_log(
 
     with (
         patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_provider_config", side_effect=error),
         patch("context_forge.main.log_generation_failed") as log_failed,
         patch("builtins.input", return_value="Fix scrolling"),
@@ -828,7 +870,10 @@ def test_main_reports_unsupported_provider_without_traceback(
 
     with (
         patch.object(sys, "argv", argv),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("context_forge.main.log_generation_failed") as log_failed,
         patch("builtins.input", return_value="Fix scrolling"),
@@ -855,7 +900,10 @@ def test_main_rejects_empty_task(
 ) -> None:
     with (
         patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("builtins.input", return_value=task),
         patch("context_forge.main.build_generation_service"),
         pytest.raises(SystemExit) as exc_info,
@@ -966,7 +1014,10 @@ def test_generate_command_uses_explicit_task(
                 "Explain authentication",
             ],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
     ):
         build_service.return_value.generate.return_value = response
@@ -1002,7 +1053,10 @@ def test_generate_command_strips_explicit_task() -> None:
                 "  Explain authentication  ",
             ],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
     ):
         build_service.return_value.generate.return_value = response
@@ -1029,7 +1083,10 @@ def test_generate_command_rejects_empty_explicit_task(
                 "   ",
             ],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         pytest.raises(SystemExit) as exc_info,
     ):
         main()
@@ -1057,7 +1114,10 @@ def test_generate_command_reads_interactive_task(
             "argv",
             ["context-forge", "generate", "."],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
         patch("builtins.input", return_value="  Explain authentication  "),
     ):
@@ -1084,7 +1144,10 @@ def test_generate_command_rejects_empty_interactive_task(
             "argv",
             ["context-forge", "generate", "."],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("builtins.input", return_value="   "),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -1107,7 +1170,10 @@ def test_generate_command_handles_eof(
             "argv",
             ["context-forge", "generate", "."],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch(
             "builtins.input",
             side_effect=EOFError,
@@ -1133,7 +1199,10 @@ def test_generate_command_handles_keyboard_interrupt(
             "argv",
             ["context-forge", "generate", "."],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch(
             "builtins.input",
             side_effect=KeyboardInterrupt,
@@ -1208,7 +1277,10 @@ def test_generate_command_reports_generation_failure(
                 "Explain authentication",
             ],
         ),
-        patch("context_forge.main.ProjectAnalyzer"),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
         patch("context_forge.main.build_generation_service") as build_service,
     ):
         build_service.return_value.generate.side_effect = RuntimeError(
@@ -1388,6 +1460,124 @@ def test_load_project_analysis_does_not_analyze(
         load_project_analysis(tmp_path)
 
 
+def test_load_generation_project_accepts_fresh_analysis(
+    tmp_path,
+    monkeypatch,
+):
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": tmp_path,
+            "name": "test-project",
+            "analysis_status": "analyzed",
+            "files": [],
+        },
+    )()
+
+    metadata = type(
+        "Metadata",
+        (),
+        {
+            "cache_schema_version": 1,
+            "analyzer_version": "0.1.0",
+        },
+    )()
+
+    class Freshness:
+        is_fresh = True
+
+    class FakeRepository:
+        def check_cache_freshness(
+            self,
+            repository_key,
+            fingerprints,
+        ):
+            assert repository_key == "test-repository"
+            assert fingerprints == {}
+            return Freshness()
+
+    monkeypatch.setattr(
+        "context_forge.main.load_project_analysis",
+        lambda root_path: (
+            FakeRepository(),
+            "test-repository",
+            project,
+            metadata,
+        ),
+    )
+
+    monkeypatch.setattr(
+        "context_forge.main.current_fingerprints",
+        lambda project: {},
+    )
+
+    loaded_project, loaded_metadata = load_generation_project(tmp_path)
+
+    assert loaded_project is project
+    assert loaded_metadata is metadata
+
+
+def test_load_generation_project_rejects_stale_analysis(
+    tmp_path,
+    monkeypatch,
+):
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": tmp_path,
+            "name": "test-project",
+            "analysis_status": "analyzed",
+            "files": [],
+        },
+    )()
+
+    metadata = type(
+        "Metadata",
+        (),
+        {
+            "cache_schema_version": 1,
+            "analyzer_version": "0.1.0",
+        },
+    )()
+
+    class StaleFreshness:
+        is_fresh = False
+
+    class FakeRepository:
+        def check_cache_freshness(
+            self,
+            repository_key,
+            fingerprints,
+        ):
+            return StaleFreshness()
+
+    monkeypatch.setattr(
+        "context_forge.main.load_project_analysis",
+        lambda root_path: (
+            FakeRepository(),
+            "test-repository",
+            project,
+            metadata,
+        ),
+    )
+
+    monkeypatch.setattr(
+        "context_forge.main.current_fingerprints",
+        lambda project: {},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"Repository analysis is stale; run "
+            r"'context-forge analyze .*' first"
+        ),
+    ):
+        load_generation_project(tmp_path)
+
+
 def test_parse_args_runtime_command(monkeypatch) -> None:
     monkeypatch.setattr(
         sys,
@@ -1561,3 +1751,279 @@ def test_main_runtime_uses_explicit_model_and_base_url(
     runtime_class.return_value.check.assert_called_once_with(
         "custom-model",
     )
+
+
+def test_generate_uses_persisted_analysis_instead_of_analyzer(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = type(
+        "Response",
+        (),
+        {"content": "Done."},
+    )()
+
+    project = object()
+    metadata = object()
+
+    load_generation_project = Mock(
+        return_value=(project, metadata),
+    )
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+                "--provider",
+                "deterministic",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_generation_project",
+            load_generation_project,
+        ),
+        patch(
+            "context_forge.main.ProjectAnalyzer",
+        ) as analyzer,
+        patch(
+            "context_forge.main.build_generation_service",
+        ) as build_service,
+    ):
+        build_service.return_value.generate.return_value = response
+
+        main()
+
+    load_generation_project.assert_called_once_with(Path.cwd())
+    analyzer.return_value.analyze.assert_not_called()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == "\nDone.\n"
+    assert captured.err == ""
+
+
+def test_print_generation_response_prints_content(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = type(
+        "Response",
+        (),
+        {"content": "Generated answer."},
+    )()
+
+    main_module.print_generation_response(response)
+
+    captured = capsys.readouterr()
+
+    assert captured.out == "\nGenerated answer.\n"
+    assert captured.err == ""
+
+
+def test_print_generation_response_rejects_non_string_content() -> None:
+    response = type(
+        "Response",
+        (),
+        {"content": None},
+    )()
+
+    with pytest.raises(TypeError, match="Generation response content must be a string"):
+        main_module.print_generation_response(response)
+
+
+def test_generate_provider_failure_is_reported_on_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response_error = RuntimeError("generation failed")
+
+    project = object()
+    metadata = object()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+                "--provider",
+                "deterministic",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(project, metadata),
+        ),
+        patch(
+            "context_forge.main.build_generation_service",
+        ) as build_service,
+    ):
+        build_service.return_value.generate.side_effect = response_error
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: generation failed\n"
+
+
+def test_generate_writes_response_only_to_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = type(
+        "Response",
+        (),
+        {"content": "Generated answer."},
+    )()
+
+    project = object()
+    metadata = object()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+                "--provider",
+                "deterministic",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(project, metadata),
+        ),
+        patch(
+            "context_forge.main.build_generation_service",
+        ) as build_service,
+    ):
+        build_service.return_value.generate.return_value = response
+
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == "\nGenerated answer.\n"
+    assert captured.err == ""
+
+
+def test_generate_passes_persisted_project_to_generation_service(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    persisted_project = object()
+    metadata = object()
+
+    response = type(
+        "Response",
+        (),
+        {"content": "Generated answer."},
+    )()
+
+    load_generation_project = Mock(
+        return_value=(persisted_project, metadata),
+    )
+
+    build_service = Mock()
+    build_service.return_value.generate.return_value = response
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+                "--provider",
+                "deterministic",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_generation_project",
+            load_generation_project,
+        ),
+        patch(
+            "context_forge.main.build_generation_service",
+            build_service,
+        ),
+    ):
+        main()
+
+    generate_call = build_service.return_value.generate.call_args
+
+    assert generate_call.kwargs["project"] is persisted_project
+
+    captured = capsys.readouterr()
+
+    assert captured.out == "\nGenerated answer.\n"
+    assert captured.err == ""
+
+
+def test_generate_workflow_uses_persisted_project_and_returns_response(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    persisted_project = object()
+    metadata = object()
+
+    response = type(
+        "Response",
+        (),
+        {"content": "Authentication uses token validation."},
+    )()
+
+    service = Mock()
+    service.generate.return_value = response
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+                "--provider",
+                "deterministic",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(persisted_project, metadata),
+        ),
+        patch(
+            "context_forge.main.build_generation_service",
+            return_value=service,
+        ),
+    ):
+        main()
+
+    service.generate.assert_called_once()
+
+    call = service.generate.call_args
+
+    assert call.kwargs["project"] is persisted_project
+    assert call.kwargs["task"] == "Explain authentication"
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ("\nAuthentication uses token validation.\n")
+    assert captured.err == ""

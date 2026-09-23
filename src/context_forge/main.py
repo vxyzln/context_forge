@@ -45,7 +45,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     generate_parser = subparsers.add_parser(
         "generate",
-        help="Analyze a repository and generate a response.",
+        help="Generate a response using persisted repository intelligence.",
     )
     generate_parser.add_argument(
         "path",
@@ -218,6 +218,24 @@ def load_project_analysis(root_path: Path):
 
     project, metadata = loaded
     return repository, repository_key, project, metadata
+
+
+def load_generation_project(root_path: Path):
+    repository, repository_key, project, metadata = load_project_analysis(root_path)
+
+    fingerprints = current_fingerprints(project)
+
+    freshness = repository.check_cache_freshness(
+        repository_key,
+        fingerprints,
+    )
+
+    if not freshness.is_fresh:
+        raise ValueError(
+            f"Repository analysis is stale; run "
+            f"'context-forge analyze {root_path}' first"
+        )
+    return project, metadata
 
 
 def print_analysis_summary(project) -> None:
@@ -435,6 +453,16 @@ def run_diagnostics(path: Path) -> None:
     print_diagnostics_summary(project)
 
 
+def print_generation_response(response: object) -> None:
+    content = getattr(response, "content", None)
+
+    if not isinstance(content, str):
+        raise TypeError("Generation response content must be a string")
+
+    print()
+    print(content)
+
+
 def run_generate(args: argparse.Namespace) -> None:
     root_path: Path | None = None
     generation_config: ProviderConfig | None = None
@@ -443,7 +471,7 @@ def run_generate(args: argparse.Namespace) -> None:
 
     try:
         root_path = resolve_project_path(args.path)
-        project = analyze_project(root_path)
+        project, _ = load_generation_project(root_path)
         task = read_task(args.task)
 
         generation_config = build_provider_config(
@@ -492,8 +520,7 @@ def run_generate(args: argparse.Namespace) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
 
-    print()
-    print(response.content)
+    print_generation_response(response)
 
 
 def run_runtime(path: Path, args: argparse.Namespace) -> None:
@@ -568,3 +595,4 @@ def main() -> None:
         return
 
     run_generate(args)
+----
