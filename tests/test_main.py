@@ -20,7 +20,11 @@ from context_forge.main import (
     resolve_project_path,
     run_status,
 )
-from context_forge.provider import OllamaRuntimeStatus, ProviderConfig
+from context_forge.provider import (
+    GenerationResponse,
+    OllamaRuntimeStatus,
+    ProviderConfig,
+)
 
 
 def test_main_reports_provider_error_without_traceback(
@@ -1810,11 +1814,11 @@ def test_generate_uses_persisted_analysis_instead_of_analyzer(
 def test_print_generation_response_prints_content(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    response = type(
-        "Response",
-        (),
-        {"content": "Generated answer."},
-    )()
+    response = GenerationResponse(
+        content="Generated answer.",
+        provider="deterministic",
+        model="deterministic",
+    )
 
     main_module.print_generation_response(response)
 
@@ -2027,3 +2031,258 @@ def test_generate_workflow_uses_persisted_project_and_returns_response(
 
     assert captured.out == ("\nAuthentication uses token validation.\n")
     assert captured.err == ""
+
+
+def test_print_generation_response_does_not_print_response_metadata(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = GenerationResponse(
+        content="Generated answer",
+        provider="ollama",
+        model="qwen2.5-coder:7b",
+    )
+
+    main_module.print_generation_response(response)
+
+    captured = capsys.readouterr()
+
+    assert captured.out == "\nGenerated answer\n"
+    assert captured.err == ""
+    assert "ollama" not in captured.out
+    assert "qwen2.5-coder:7b" not in captured.out
+
+
+def test_generate_writes_response_to_output_file(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "answer.md"
+
+    response = type(
+        "Response",
+        (),
+        {"content": "Generated answer."},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+                "--provider",
+                "deterministic",
+                "--output",
+                str(output_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
+        patch(
+            "context_forge.main.build_generation_service",
+        ) as build_service,
+    ):
+        build_service.return_value.generate.return_value = response
+
+        main()
+    build_service.return_value.generate.assert_called_once()
+    assert output_path.read_text(encoding="utf-8") == ("Generated answer.\n")
+
+    assert output_path.read_text(encoding="utf-8") == ("Generated answer.\n")
+
+
+def test_generate_output_file_mode_does_not_print_response(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output_path = tmp_path / "answer.md"
+
+    response = type(
+        "Response",
+        (),
+        {"content": "Generated answer."},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+                "--provider",
+                "deterministic",
+                "--output",
+                str(output_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
+        patch(
+            "context_forge.main.build_generation_service",
+        ) as build_service,
+    ):
+        build_service.return_value.generate.return_value = response
+
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_write_generation_response_rejects_non_string_content(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "answer.md"
+
+    response = type(
+        "Response",
+        (),
+        {"content": None},
+    )()
+
+    with pytest.raises(
+        TypeError,
+        match="Generation response content must be a string",
+    ):
+        main_module.write_generation_response(
+            response,
+            output_path,
+        )
+
+    assert not output_path.exists()
+
+
+def test_generate_help_describes_generation_options(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "generate", "--help"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 0
+
+    captured = capsys.readouterr()
+
+    assert "--provider PROVIDER" in captured.out
+    assert "--model MODEL" in captured.out
+    assert "--temperature TEMPERATURE" in captured.out
+    assert "--max-tokens MAX_TOKENS" in captured.out
+    assert "--base-url BASE_URL" in captured.out
+    assert "--task TASK" in captured.out
+    assert "--output OUTPUT" in captured.out
+
+    assert "Generation provider." not in captured.out
+    assert "Generation model." not in captured.out
+    assert "Generation temperature." not in captured.out
+    assert "Maximum output tokens." not in captured.out
+    assert "Provider runtime URL." not in captured.out
+    assert "Generation task." not in captured.out
+    assert "Write response to a file instead of stdout." not in captured.out
+
+
+def test_write_generation_response_preserves_generated_content(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "answer.md"
+    response = GenerationResponse(
+        content="# Authentication\n\nUse token validation.",
+        provider="deterministic",
+        model="deterministic",
+    )
+
+    main_module.write_generation_response(
+        response,
+        output_path,
+    )
+
+    assert output_path.read_text(encoding="utf-8") == (
+        "# Authentication\n\nUse token validation.\n"
+    )
+
+
+def test_write_generation_response_converts_os_error(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "missing" / "answer.md"
+    response = GenerationResponse(
+        content="Generated answer.",
+        provider="deterministic",
+        model="deterministic",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Could not write generation output to .*answer\.md:",
+    ):
+        main_module.write_generation_response(
+            response,
+            output_path,
+        )
+
+
+def test_generate_reports_output_write_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = type(
+        "Response",
+        (),
+        {"content": "Generated answer."},
+    )()
+
+    output_path = tmp_path / "missing" / "answer.md"
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "generate",
+                ".",
+                "--task",
+                "Explain authentication",
+                "--provider",
+                "deterministic",
+                "--output",
+                str(output_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_generation_project",
+            return_value=(object(), object()),
+        ),
+        patch(
+            "context_forge.main.build_generation_service",
+        ) as build_service,
+    ):
+        build_service.return_value.generate.return_value = response
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err.startswith("Error: Could not write generation output to ")

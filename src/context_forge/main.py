@@ -36,12 +36,7 @@ def create_parser() -> argparse.ArgumentParser:
         "analyze",
         help="Analyze a repository and persist repository intelligence.",
     )
-    analyze_parser.add_argument(
-        "path",
-        nargs="?",
-        type=Path,
-        default=Path("."),
-    )
+    analyze_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
 
     generate_parser = subparsers.add_parser(
         "generate",
@@ -53,12 +48,36 @@ def create_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("."),
     )
-    generate_parser.add_argument("--provider", default=None)
-    generate_parser.add_argument("--model", default=None)
-    generate_parser.add_argument("--temperature", type=float, default=None)
-    generate_parser.add_argument("--max-tokens", type=int, default=None)
-    generate_parser.add_argument("--base-url", default=None)
-    generate_parser.add_argument("--task", default=None)
+    generate_parser.add_argument(
+        "--provider",
+        default=None,
+    )
+    generate_parser.add_argument(
+        "--model",
+        default=None,
+    )
+    generate_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+    )
+    generate_parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+    )
+    generate_parser.add_argument(
+        "--base-url",
+        default=None,
+    )
+    generate_parser.add_argument(
+        "--task",
+        default=None,
+    )
+    generate_parser.add_argument(
+        "--output",
+        type=Path,
+    )
 
     status_parser = subparsers.add_parser(
         "status",
@@ -104,17 +123,21 @@ def create_parser() -> argparse.ArgumentParser:
         default=Path("."),
     )
 
-    runtime_parser = subparsers.add_parser(
-        "runtime", help="Check Ollama runtime and model availability."
-    )
+    runtime_parser = subparsers.add_parser("runtime")
     runtime_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
     )
-    runtime_parser.add_argument("--model", default=None)
-    runtime_parser.add_argument("--base-url", default=None)
+    runtime_parser.add_argument(
+        "--model",
+        default=None,
+    )
+    runtime_parser.add_argument(
+        "--base-url",
+        default=None,
+    )
 
     return parser
 
@@ -463,6 +486,23 @@ def print_generation_response(response: object) -> None:
     print(content)
 
 
+def write_generation_response(response: object, output_path: Path) -> None:
+    content = getattr(response, "content", None)
+
+    if not isinstance(content, str):
+        raise TypeError("Generation response content must be a string")
+
+    try:
+        output_path.write_text(
+            content + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise ValueError(
+            f"Could not write generation output to {output_path}: {exc}"
+        ) from exc
+
+
 def run_generate(args: argparse.Namespace) -> None:
     root_path: Path | None = None
     generation_config: ProviderConfig | None = None
@@ -494,6 +534,11 @@ def run_generate(args: argparse.Namespace) -> None:
             config=generation_config,
         )
 
+        if args.output is None:
+            print_generation_response(response)
+        else:
+            write_generation_response(response, args.output)
+
         log_generation_completed(
             project_path=root_path,
             provider=generation_config.provider,
@@ -519,8 +564,6 @@ def run_generate(args: argparse.Namespace) -> None:
 
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
-
-    print_generation_response(response)
 
 
 def run_runtime(path: Path, args: argparse.Namespace) -> None:
