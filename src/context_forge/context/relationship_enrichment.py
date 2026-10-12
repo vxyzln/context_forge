@@ -36,6 +36,7 @@ class RelationshipContextEnricher:
             entity_id=unit.entity_id,
             unit_type=unit.unit_type,
             relevance=unit.relevance,
+            content=unit.content,
             signals=unit.signals,
             facts=unit.facts + facts,
             inferences=unit.inferences,

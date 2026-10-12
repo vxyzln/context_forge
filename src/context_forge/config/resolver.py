@@ -8,30 +8,15 @@ def resolve_configuration(
     project_config: ProjectConfiguration,
 ) -> ConfigurationDefaults:
     return ConfigurationDefaults(
-        provider=_resolve(
-            project_config.provider.provider,
-            global_config.provider.provider,
-            DEFAULTS.provider,
+        database_path=_resolve(
+            project_config.storage.database_path,
+            global_config.storage.database_path,
+            DEFAULTS.database_path,
         ),
-        model=_resolve(
-            project_config.provider.model,
-            global_config.provider.model,
-            DEFAULTS.model,
-        ),
-        base_url=_resolve(
-            project_config.provider.base_url,
-            global_config.provider.base_url,
-            DEFAULTS.base_url,
-        ),
-        temperature=_resolve(
-            project_config.generation.temperature,
-            global_config.generation.temperature,
-            DEFAULTS.temperature,
-        ),
-        max_tokens=_resolve(
-            project_config.generation.max_tokens,
-            global_config.generation.max_tokens,
-            DEFAULTS.max_tokens,
+        max_context_units=_resolve(
+            project_config.analysis.max_context_units,
+            global_config.analysis.max_context_units,
+            DEFAULTS.max_context_units,
         ),
     )
 

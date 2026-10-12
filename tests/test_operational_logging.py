@@ -6,9 +6,9 @@ import pytest
 
 from context_forge.operational_logging import (
     get_logger,
-    log_generation_completed,
-    log_generation_failed,
-    log_generation_started,
+    log_analysis_completed,
+    log_analysis_failed,
+    log_analysis_started,
     log_path,
 )
 
@@ -52,17 +52,15 @@ def test_get_logger_creates_log_file(
         assert "test_event" in path.read_text(encoding="utf-8")
 
 
-def test_generation_started_logs_operational_metadata(
+def test_analysis_started_logs_operational_metadata(
     tmp_path: Path,
 ) -> None:
     with patch(
         "context_forge.operational_logging.global_config_directory",
         return_value=tmp_path,
     ):
-        log_generation_started(
+        log_analysis_started(
             project_path=Path("/tmp/project"),
-            provider="ollama",
-            model="qwen2.5-coder:7b",
         )
 
         logger = get_logger()
@@ -72,24 +70,22 @@ def test_generation_started_logs_operational_metadata(
 
         content = (tmp_path / "logs" / "context-forge.log").read_text(encoding="utf-8")
 
-    assert "generation_started" in content
+    assert "analysis_started" in content
     assert "project=/tmp/project" in content
-    assert "provider=ollama" in content
-    assert "model=qwen2.5-coder:7b" in content
 
 
-def test_generation_completed_logs_duration(
+def test_analysis_completed_logs_duration_and_counts(
     tmp_path: Path,
 ) -> None:
     with patch(
         "context_forge.operational_logging.global_config_directory",
         return_value=tmp_path,
     ):
-        log_generation_completed(
+        log_analysis_completed(
             project_path=Path("/tmp/project"),
-            provider="ollama",
-            model="qwen2.5-coder:7b",
             duration_seconds=1.234,
+            files_count=12,
+            symbols_count=45,
         )
 
         logger = get_logger()
@@ -99,25 +95,24 @@ def test_generation_completed_logs_duration(
 
         content = (tmp_path / "logs" / "context-forge.log").read_text(encoding="utf-8")
 
-    assert "generation_completed" in content
+    assert "analysis_completed" in content
+    assert "project=/tmp/project" in content
     assert "duration=1.234" in content
+    assert "files=12" in content
+    assert "symbols=45" in content
 
 
-def test_generation_failed_logs_error_metadata_without_task(
+def test_analysis_failed_logs_error_metadata(
     tmp_path: Path,
 ) -> None:
-    error = RuntimeError("Ollama provider request timed out")
-
     with patch(
         "context_forge.operational_logging.global_config_directory",
         return_value=tmp_path,
     ):
-        log_generation_failed(
+        log_analysis_failed(
             project_path=Path("/tmp/project"),
-            provider="ollama",
-            model="qwen2.5-coder:7b",
-            duration_seconds=60.123,
-            error=error,
+            duration_seconds=0.456,
+            error=ValueError("corrupt index"),
         )
 
         logger = get_logger()
@@ -127,41 +122,8 @@ def test_generation_failed_logs_error_metadata_without_task(
 
         content = (tmp_path / "logs" / "context-forge.log").read_text(encoding="utf-8")
 
-    assert "generation_failed" in content
-    assert "error_type=RuntimeError" in content
-    assert "Ollama provider request timed out" in content
-    assert "task=" not in content
-
-
-def test_logging_does_not_record_generated_content_or_task(
-    tmp_path: Path,
-) -> None:
-    task = "Explain the secret authentication implementation"
-    response = "The secret implementation is in auth.py"
-
-    with patch(
-        "context_forge.operational_logging.global_config_directory",
-        return_value=tmp_path,
-    ):
-        log_generation_started(
-            project_path=Path("/tmp/project"),
-            provider="ollama",
-            model="qwen2.5-coder:7b",
-        )
-
-        log_generation_completed(
-            project_path=Path("/tmp/project"),
-            provider="ollama",
-            model="qwen2.5-coder:7b",
-            duration_seconds=1.0,
-        )
-
-        logger = get_logger()
-
-        for handler in logger.handlers:
-            handler.flush()
-
-        content = (tmp_path / "logs" / "context-forge.log").read_text(encoding="utf-8")
-
-    assert task not in content
-    assert response not in content
+    assert "analysis_failed" in content
+    assert "project=/tmp/project" in content
+    assert "duration=0.456" in content
+    assert "error_type=ValueError" in content
+    assert "error=corrupt index" in content

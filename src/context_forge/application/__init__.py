@@ -1,11 +1,11 @@
 from context_forge.application.factory import (
     build_context_engine,
-    build_generation_service,
+    build_context_service,
 )
-from context_forge.application.service import ContextGenerationService
+from context_forge.application.service import RepositoryContextService
 
 __all__ = [
-    "ContextGenerationService",
+    "RepositoryContextService",
     "build_context_engine",
-    "build_generation_service",
+    "build_context_service",
 ]

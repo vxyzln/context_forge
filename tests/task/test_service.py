@@ -1,191 +1,50 @@
-from context_forge.provider import (
-    ContextProvider,
-    GenerationRequest,
-    GenerationResponse,
-    ProviderConfig,
-    ProviderUsage,
-)
+import pytest
+
 from context_forge.task import TaskUnderstandingService
 
 
-class StubProvider(ContextProvider):
-    def __init__(self, content: str) -> None:
-        self.content = content
-        self.requests: list[GenerationRequest] = []
-
-    def generate(self, request: GenerationRequest) -> GenerationResponse:
-        self.requests.append(request)
-
-        return GenerationResponse(
-            content=self.content,
-            provider="test",
-            model="test-model",
-            usage=ProviderUsage(),
-        )
-
-
-def make_service(
-    content: str,
-) -> tuple[TaskUnderstandingService, StubProvider]:
-    provider = StubProvider(content)
-
-    service = TaskUnderstandingService(
-        provider=provider,
-        config=ProviderConfig(model="test-model"),
-    )
-
-    return service, provider
-
-
-def test_understand_parses_structured_response() -> None:
-    service, _ = make_service(
-        '{"intent":"bug_fix",'
-        '"target":"settings page",'
-        '"concepts":["scrolling","overflow"],'
-        '"requested_action":"fix",'
-        '"constraints":["preserve existing behavior"],'
-        '"ambiguity":null}'
-    )
-
+def test_understand_extracts_action_and_concepts() -> None:
+    service = TaskUnderstandingService()
     result = service.understand("Fix the scrolling on the settings page.")
 
     assert result.task == "Fix the scrolling on the settings page."
-    assert result.intent == "bug_fix"
-    assert result.target == "settings page"
-    assert result.concepts == ("scrolling", "overflow")
+    assert result.intent == "Fix the scrolling on the settings page."
     assert result.requested_action == "fix"
-    assert result.constraints == ("preserve existing behavior",)
+    assert "scrolling" in result.concepts
+    assert "settings" in result.concepts
     assert result.ambiguity is None
 
 
-def test_understand_sends_task_and_prepared_prompt_to_provider() -> None:
-    service, provider = make_service(
-        '{"intent":"bug_fix",'
-        '"target":"settings page",'
-        '"concepts":[],"requested_action":"fix",'
-        '"constraints":[],"ambiguity":null}'
-    )
+def test_understand_extracts_target_path() -> None:
+    service = TaskUnderstandingService()
+    result = service.understand("Refactor src/context_forge/application/service.py")
 
-    service.understand("Fix the scrolling on the settings page.")
+    assert result.requested_action == "refactor"
+    assert result.target == "src/context_forge/application/service.py"
+    assert "src/context_forge/application/service.py" in result.concepts
 
-    request = provider.requests[0]
 
-    assert request.task == "Fix the scrolling on the settings page."
-    assert request.context == ""
-    assert request.prompt == (
-        "Interpret the following software-development task. "
-        "Return ONLY valid JSON with exactly these fields: "
-        "intent, target, concepts, requested_action, constraints, "
-        "ambiguity. "
-        "intent must be a string. "
-        "target must be a string or null. "
-        "concepts must be an array of strings. "
-        "requested_action must be a string or null. "
-        "constraints must be an array of strings. "
-        "ambiguity must be a string or null. "
-        "Do not invent repository facts.\n\n"
-        "Task:\nFix the scrolling on the settings page."
-    )
-    assert request.config == ProviderConfig(model="test-model")
+def test_understand_extracts_symbol_target() -> None:
+    service = TaskUnderstandingService()
+    result = service.understand("Explain ProjectAnalyzer class hierarchy")
+
+    assert result.requested_action == "explain"
+    assert result.target == "ProjectAnalyzer"
+    assert "ProjectAnalyzer" in result.concepts
 
 
 def test_understand_rejects_empty_task() -> None:
-    service, provider = make_service("{}")
+    service = TaskUnderstandingService()
 
-    try:
+    with pytest.raises(ValueError, match="task must not be empty"):
         service.understand("   ")
-    except ValueError as exc:
-        assert str(exc) == "task must not be empty"
-    else:
-        raise AssertionError("Expected ValueError")
-
-    assert provider.requests == []
 
 
-def test_understand_rejects_invalid_json() -> None:
-    service, _ = make_service("not json")
+def test_understand_is_deterministic_and_reproducible() -> None:
+    service = TaskUnderstandingService()
+    task = "Analyze repository dependencies and imports"
 
-    try:
-        service.understand("Fix scrolling")
-    except ValueError as exc:
-        assert str(exc) == "provider returned invalid task interpretation JSON"
-    else:
-        raise AssertionError("Expected ValueError")
+    result1 = service.understand(task)
+    result2 = service.understand(task)
 
-
-def test_understand_rejects_non_object_json() -> None:
-    service, _ = make_service("[]")
-
-    try:
-        service.understand("Fix scrolling")
-    except TypeError as exc:
-        assert str(exc) == (
-            "provider returned a task interpretation that is not an object"
-        )
-    else:
-        raise AssertionError("Expected TypeError")
-
-
-def test_understand_rejects_invalid_required_field() -> None:
-    service, _ = make_service(
-        '{"intent":123,'
-        '"target":null,'
-        '"concepts":[],"requested_action":null,'
-        '"constraints":[],"ambiguity":null}'
-    )
-
-    try:
-        service.understand("Fix scrolling")
-    except TypeError as exc:
-        assert str(exc) == ("task interpretation field 'intent' must be a string")
-    else:
-        raise AssertionError("Expected TypeError")
-
-
-def test_understand_rejects_missing_fields() -> None:
-    service, _ = make_service('{"intent":"bug_fix"}')
-
-    try:
-        service.understand("Fix scrolling")
-    except ValueError as exc:
-        assert str(exc) == (
-            "provider returned incomplete task interpretation: "
-            "ambiguity, concepts, constraints, requested_action, target"
-        )
-    else:
-        raise AssertionError("Expected ValueError")
-
-
-def test_understand_rejects_invalid_concepts() -> None:
-    service, _ = make_service(
-        '{"intent":"bug_fix",'
-        '"target":null,'
-        '"concepts":["scrolling",123],'
-        '"requested_action":"fix",'
-        '"constraints":[],"ambiguity":null}'
-    )
-
-    try:
-        service.understand("Fix scrolling")
-    except TypeError as exc:
-        assert str(exc) == (
-            "task interpretation field 'concepts' must contain only strings"
-        )
-    else:
-        raise AssertionError("Expected TypeError")
-
-
-def test_understand_rejects_empty_optional_string() -> None:
-    service, _ = make_service(
-        '{"intent":"bug_fix",'
-        '"target":"",'
-        '"concepts":[],"requested_action":"fix",'
-        '"constraints":[],"ambiguity":null}'
-    )
-
-    try:
-        service.understand("Fix scrolling")
-    except ValueError as exc:
-        assert str(exc) == ("task interpretation field 'target' must not be empty")
-    else:
-        raise AssertionError("Expected ValueError")
+    assert result1 == result2

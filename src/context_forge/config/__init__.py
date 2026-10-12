@@ -17,9 +17,9 @@ from context_forge.config.loading import (
     load_project_configuration,
 )
 from context_forge.config.project import (
+    ProjectAnalysisConfiguration,
     ProjectConfiguration,
-    ProjectGenerationConfiguration,
-    ProjectProviderConfiguration,
+    ProjectStorageConfiguration,
 )
 from context_forge.config.resolver import resolve_configuration
 from context_forge.config.validation import (
@@ -35,9 +35,9 @@ __all__ = [
     "ConfigurationDefaults",
     "ConfigurationLoadError",
     "ConfigurationValidationError",
+    "ProjectAnalysisConfiguration",
     "ProjectConfiguration",
-    "ProjectGenerationConfiguration",
-    "ProjectProviderConfiguration",
+    "ProjectStorageConfiguration",
     "global_config_directory",
     "global_config_path",
     "load_global_config",

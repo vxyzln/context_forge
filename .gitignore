@@ -40,6 +40,5 @@ data/
 tp*.py
 tp*.md
 tp*.txt
-
-# Local-only legacy documentation
 /docs/
+/tp_docs/

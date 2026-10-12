@@ -1,9 +1,9 @@
 from typing import Any
 
 from context_forge.config.project import (
+    ProjectAnalysisConfiguration,
     ProjectConfiguration,
-    ProjectGenerationConfiguration,
-    ProjectProviderConfiguration,
+    ProjectStorageConfiguration,
 )
 
 
@@ -16,24 +16,21 @@ def validate_project_config(
 ) -> ProjectConfiguration:
     _validate_top_level(data)
 
-    provider_data = _section(data, "provider")
-    generation_data = _section(data, "generation")
+    storage_data = _section(data, "storage")
+    analysis_data = _section(data, "analysis")
 
     return ProjectConfiguration(
-        provider=ProjectProviderConfiguration(
-            provider=_optional_string(provider_data, "provider"),
-            model=_optional_string(provider_data, "model"),
-            base_url=_optional_string(provider_data, "base_url"),
+        storage=ProjectStorageConfiguration(
+            database_path=_optional_string(storage_data, "database_path"),
         ),
-        generation=ProjectGenerationConfiguration(
-            temperature=_optional_float(generation_data, "temperature"),
-            max_tokens=_optional_int(generation_data, "max_tokens"),
+        analysis=ProjectAnalysisConfiguration(
+            max_context_units=_optional_int(analysis_data, "max_context_units"),
         ),
     )
 
 
 def _validate_top_level(data: dict[str, Any]) -> None:
-    allowed = {"provider", "generation"}
+    allowed = {"storage", "analysis"}
 
     unknown = set(data) - allowed
 
@@ -79,30 +76,6 @@ def _optional_string(
         )
 
     return value
-
-
-def _optional_float(
-    section: dict[str, Any],
-    name: str,
-) -> float | None:
-    value = section.get(name)
-
-    if value is None:
-        return None
-
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigurationValidationError(
-            f"Configuration value '{name}' must be a number"
-        )
-
-    result = float(value)
-
-    if not 0.0 <= result <= 2.0:
-        raise ConfigurationValidationError(
-            f"Configuration value '{name}' must be between 0.0 and 2.0"
-        )
-
-    return result
 
 
 def _optional_int(

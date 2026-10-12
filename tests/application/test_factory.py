@@ -1,114 +1,39 @@
 from context_forge.application import (
-    ContextGenerationService,
+    RepositoryContextService,
     build_context_engine,
-    build_generation_service,
+    build_context_service,
 )
-from context_forge.context import (
-    ContextSelectionService,
-    DefaultContextEngine,
-)
-from context_forge.provider import (
-    DeterministicProvider,
-    OllamaProvider,
-    OllamaRuntime,
-    ProviderConfig,
-)
+from context_forge.context import DefaultContextEngine
 
 
 def test_build_context_engine() -> None:
     engine = build_context_engine()
 
     assert isinstance(engine, DefaultContextEngine)
+    assert engine.max_context_units == 20
 
 
-def test_build_generation_service() -> None:
-    service = build_generation_service(
-        ProviderConfig(
-            provider="deterministic",
-            model="deterministic",
-        )
-    )
+def test_build_context_engine_custom_budget() -> None:
+    engine = build_context_engine(max_context_units=50)
 
-    assert isinstance(service, ContextGenerationService)
-    assert isinstance(service.provider, DeterministicProvider)
+    assert isinstance(engine, DefaultContextEngine)
+    assert engine.max_context_units == 50
+
+
+def test_build_context_service() -> None:
+    service = build_context_service()
+
+    assert isinstance(service, RepositoryContextService)
+    assert isinstance(service.engine, DefaultContextEngine)
     assert service.task_understanding is not None
     assert service.task_validator is not None
+    assert service.task_grounding is not None
+    assert service.task_repository_grounding is not None
 
 
-def test_build_generation_service_is_independent() -> None:
-    config = ProviderConfig(
-        provider="deterministic",
-        model="deterministic",
-    )
-
-    first = build_generation_service(config)
-    second = build_generation_service(config)
+def test_build_context_service_is_independent() -> None:
+    first = build_context_service()
+    second = build_context_service()
 
     assert first is not second
     assert first.engine is not second.engine
-    assert first.provider is not second.provider
-
-
-def test_build_generation_service_uses_configured_provider() -> None:
-    config = ProviderConfig(
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-    )
-
-    service = build_generation_service(config)
-
-    assert isinstance(service.provider, OllamaProvider)
-
-
-def test_build_context_engine_accepts_selection_service() -> None:
-    selection_service = ContextSelectionService(
-        provider=DeterministicProvider(),
-        config=ProviderConfig(
-            provider="deterministic",
-            model="deterministic-selection",
-        ),
-    )
-
-    engine = build_context_engine(
-        selection_service=selection_service,
-    )
-
-    assert isinstance(engine, DefaultContextEngine)
-    assert engine.selection_service is selection_service
-
-
-def test_build_generation_service_wires_selection_service() -> None:
-    config = ProviderConfig(
-        provider="deterministic",
-        model="deterministic",
-    )
-
-    service = build_generation_service(config)
-
-    assert isinstance(service.engine, DefaultContextEngine)
-    assert isinstance(service.engine.selection_service, ContextSelectionService)
-
-
-def test_build_generation_service_injects_ollama_runtime() -> None:
-    config = ProviderConfig(
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-        base_url="http://example.test:11434",
-    )
-
-    service = build_generation_service(config)
-
-    assert isinstance(service.ollama_runtime, OllamaRuntime)
-    assert service.ollama_runtime.base_url == "http://example.test:11434"
-    assert service.ollama_runtime.timeout == config.transport.timeout
-
-
-def test_build_generation_service_does_not_inject_ollama_runtime() -> None:
-    config = ProviderConfig(
-        provider="deterministic",
-        model="deterministic",
-    )
-
-    service = build_generation_service(config)
-
-    assert service.ollama_runtime is None

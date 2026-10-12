@@ -1,805 +1,133 @@
 from pathlib import Path
-from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 
-from context_forge.application import ContextGenerationService
-from context_forge.context import (
-    ContextPackage,
-    ContextPackageSerializer,
-)
+from context_forge.application.factory import build_context_service
+from context_forge.application.service import RepositoryContextService
+from context_forge.context.engine import ContextEngine
+from context_forge.context.models import ContextPackage, ContextUnit
 from context_forge.context.request import ContextRequest
+from context_forge.context.types import ContextUnitType
+from context_forge.models.enums import FileType
+from context_forge.models.file import File
 from context_forge.models.project import Project
-from context_forge.provider import (
-    ContextProvider,
-    DeterministicProvider,
-    GenerationRequest,
-    GenerationResponse,
-    OllamaRuntime,
-    OllamaRuntimeStatus,
-    ProviderConfig,
-)
 from context_forge.task import (
-    GroundedTask,
-    RepositoryGrounding,
     TaskInterpretation,
     TaskState,
     TaskValidation,
+    TaskValidator,
 )
 
 
-class StubContextEngine:
-    def __init__(self, package: ContextPackage) -> None:
-        self.package = package
-        self.calls: list[ContextRequest] = []
+class FakeEngine(ContextEngine):
+    def __init__(self) -> None:
+        self.requests: list[ContextRequest] = []
 
     def build(self, request: ContextRequest) -> ContextPackage:
-        self.calls.append(request)
-        return self.package
-
-
-class StubTaskRepositoryGrounding:
-    def __init__(self, grounding):
-        self.grounding = grounding
-        self.calls = []
-
-    def ground(self, project, task):
-        self.calls.append((project, task))
-        return self.grounding
-
-
-class StubProvider(ContextProvider):
-    def __init__(self, response: GenerationResponse) -> None:
-        self.response = response
-        self.requests: list[GenerationRequest] = []
-
-    def generate(self, request: GenerationRequest) -> GenerationResponse:
         self.requests.append(request)
-        return self.response
+        unit = ContextUnit(
+            entity_id=uuid4(),
+            unit_type=ContextUnitType.FILE,
+            relevance=1.0,
+        )
+        return ContextPackage(
+            task=request.task,
+            units=(unit,),
+        )
 
 
-def make_project() -> Project:
-    return Project(
+def test_repository_context_service_retrieves_context() -> None:
+    project = Project(
         name="demo",
-        root_path=Path("/tmp/context-forge-test"),
+        root_path=Path("/tmp/demo"),
+    )
+    engine = FakeEngine()
+    service = RepositoryContextService(engine=engine)
+
+    package = service.retrieve_context(project, "Explain authentication")
+
+    assert package.task == "Explain authentication"
+    assert len(package.units) == 1
+    assert len(engine.requests) == 1
+    assert engine.requests[0].task == "Explain authentication"
+    assert engine.requests[0].project is project
+
+
+def test_repository_context_service_rejects_empty_task() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/demo"),
+    )
+    service = RepositoryContextService(engine=FakeEngine())
+
+    with pytest.raises(ValueError, match="task must not be empty"):
+        service.retrieve_context(project, "   ")
+
+
+def test_repository_context_service_rejects_ambiguous_task() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/demo"),
     )
 
+    class AmbiguousValidator(TaskValidator):
+        def validate(self, interpretation: TaskInterpretation) -> TaskValidation:
+            return TaskValidation(
+                state=TaskState.AMBIGUOUS,
+                reasons=("Task is too vague",),
+            )
 
-def make_package() -> ContextPackage:
-    return ContextPackage(
-        task="authenticate user",
-        units=(),
+    service = RepositoryContextService(
+        engine=FakeEngine(),
+        task_validator=AmbiguousValidator(),
     )
 
+    with pytest.raises(ValueError, match="task validation failed: ambiguous"):
+        service.retrieve_context(project, "do something")
 
-def make_response() -> GenerationResponse:
-    return GenerationResponse(
-        content="Authentication is handled by auth.py.",
-        provider="test",
-        model="test-model",
+
+def test_repository_context_service_grounds_task_entities() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/demo"),
     )
-
-
-def test_service_builds_context_with_engine() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
+    auth_file = File(
+        project_id=project.id,
+        path=Path("auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
     )
+    project.add_file(auth_file)
 
-    config = ProviderConfig(model="test-model")
+    engine = FakeEngine()
+    service = RepositoryContextService(engine=engine)
 
-    service.generate(
-        project=project,
-        task="authenticate user",
-        config=config,
+    package = service.retrieve_context(project, "Inspect auth.py")
+
+    assert package.task == "Inspect auth.py"
+    assert len(engine.requests) == 1
+    request = engine.requests[0]
+    assert request.grounding is not None
+
+
+def test_build_context_service_end_to_end() -> None:
+    project = Project(
+        name="demo",
+        root_path=Path("/tmp/demo"),
     )
-
-    assert engine.calls == [
-        ContextRequest(
-            project=project,
-            task="authenticate user",
-        )
-    ]
-
-
-def test_service_serializes_context_package() -> None:
-    project = make_project()
-    package = ContextPackage(
-        task="authenticate user",
-        units=(),
+    main_file = File(
+        project_id=project.id,
+        path=Path("src/main.py"),
+        name="main.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
     )
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
+    project.add_file(main_file)
 
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-    )
+    service = build_context_service()
+    package = service.retrieve_context(project, "Inspect main.py")
 
-    config = ProviderConfig(model="test-model")
-
-    service.generate(
-        project=project,
-        task="authenticate user",
-        config=config,
-    )
-
-    assert len(provider.requests) == 1
-    assert provider.requests[0].context == ('{"task":"authenticate user","units":[]}')
-
-
-def test_service_builds_provider_request() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-    )
-
-    config = ProviderConfig(
-        model="test-model",
-        temperature=0.5,
-        max_tokens=256,
-    )
-
-    service.generate(
-        project=project,
-        task="authenticate user",
-        config=config,
-    )
-
-    assert len(provider.requests) == 1
-
-    request = provider.requests[0]
-
-    assert request.task == "authenticate user"
-    assert request.context == '{"task":"authenticate user","units":[]}'
-    assert request.config == config
-
-
-def test_service_returns_provider_response() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    response = make_response()
-    provider = StubProvider(response)
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-    )
-
-    result = service.generate(
-        project=project,
-        task="authenticate user",
-        config=ProviderConfig(model="test-model"),
-    )
-
-    assert result is response
-
-
-def test_service_preserves_provider_errors() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-
-    class FailingProvider(ContextProvider):
-        def generate(self, request: GenerationRequest) -> GenerationResponse:
-            raise RuntimeError("provider failed")
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=FailingProvider(),
-    )
-
-    try:
-        service.generate(
-            project=project,
-            task="authenticate user",
-            config=ProviderConfig(model="test-model"),
-        )
-    except RuntimeError as exc:
-        assert str(exc) == "provider failed"
-    else:
-        raise AssertionError("Expected provider error to propagate")
-
-
-def test_service_passes_config_without_modification() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-    )
-
-    config = ProviderConfig(
-        model="qwen2.5-coder:7b",
-        temperature=0.0,
-        max_tokens=128,
-    )
-
-    service.generate(
-        project=project,
-        task="Explain Context Forge",
-        config=config,
-    )
-
-    assert provider.requests[0].config is config
-
-
-def test_service_is_repeatable() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    response = make_response()
-    provider = StubProvider(response)
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-    )
-
-    config = ProviderConfig(model="test-model")
-
-    first = service.generate(
-        project=project,
-        task="authenticate user",
-        config=config,
-    )
-
-    second = service.generate(
-        project=project,
-        task="authenticate user",
-        config=config,
-    )
-
-    assert first is response
-    assert second is response
-    assert len(provider.requests) == 2
-    assert provider.requests[0] == provider.requests[1]
-
-
-def test_service_integrates_with_deterministic_provider() -> None:
-    project = make_project()
-
-    package = ContextPackage(
-        task="authenticate user",
-        units=(),
-    )
-
-    engine = StubContextEngine(package)
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=DeterministicProvider(),
-    )
-
-    response = service.generate(
-        project=project,
-        task="authenticate user",
-        config=ProviderConfig(model="deterministic-test"),
-    )
-
-    assert response.provider == "deterministic"
-    assert response.model == "deterministic-test"
-    assert response.content.startswith("Task: authenticate user")
-    assert "Context received:" in response.content
-
-
-class StubTaskUnderstanding:
-    def __init__(self, interpretation: TaskInterpretation) -> None:
-        self.interpretation = interpretation
-        self.tasks: list[str] = []
-
-    def understand(self, task: str) -> TaskInterpretation:
-        self.tasks.append(task)
-        return self.interpretation
-
-
-class StubTaskValidator:
-    def __init__(self, validation: TaskValidation) -> None:
-        self.validation = validation
-        self.interpretations: list[TaskInterpretation] = []
-
-    def validate(
-        self,
-        interpretation: TaskInterpretation,
-    ) -> TaskValidation:
-        self.interpretations.append(interpretation)
-        return self.validation
-
-
-class StubTaskGrounding:
-    def __init__(self, grounding: GroundedTask) -> None:
-        self.grounding = grounding
-        self.projects: list[Project] = []
-        self.interpretations: list[TaskInterpretation] = []
-
-    def ground(
-        self,
-        project: Project,
-        interpretation: TaskInterpretation,
-    ) -> GroundedTask:
-        self.projects.append(project)
-        self.interpretations.append(interpretation)
-        return self.grounding
-
-
-def make_task_interpretation() -> TaskInterpretation:
-    return TaskInterpretation(
-        task="authenticate user",
-        intent="feature",
-        target="authentication",
-        concepts=("authentication",),
-        requested_action="implement",
-        constraints=(),
-        ambiguity=None,
-    )
-
-
-def test_service_validates_task_before_building_context() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    interpretation = make_task_interpretation()
-    understanding = StubTaskUnderstanding(interpretation)
-    validator = StubTaskValidator(TaskValidation(state=TaskState.CLEAR))
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        task_understanding=understanding,
-        task_validator=validator,
-    )
-
-    service.generate(
-        project=project,
-        task="authenticate user",
-        config=ProviderConfig(model="test-model"),
-    )
-
-    assert understanding.tasks == ["authenticate user"]
-    assert validator.interpretations == [interpretation]
-
-
-def test_service_passes_repository_grounding_to_context_request() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    interpretation = make_task_interpretation()
-
-    grounded_task = GroundedTask(
-        interpretation=interpretation,
-    )
-
-    repository_grounding = RepositoryGrounding(
-        task=grounded_task,
-    )
-
-    understanding = StubTaskUnderstanding(interpretation)
-    validator = StubTaskValidator(
-        TaskValidation(state=TaskState.CLEAR),
-    )
-    task_grounding = StubTaskGrounding(grounded_task)
-    task_repository_grounding = StubTaskRepositoryGrounding(
-        repository_grounding,
-    )
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        task_understanding=understanding,
-        task_validator=validator,
-        task_grounding=task_grounding,
-        task_repository_grounding=task_repository_grounding,
-    )
-
-    service.generate(
-        project=project,
-        task="authenticate user",
-        config=ProviderConfig(model="test-model"),
-    )
-
-    assert task_grounding.projects == [project]
-    assert task_grounding.interpretations == [interpretation]
-    assert task_repository_grounding.calls == [(project, grounded_task)]
-    assert engine.calls == [
-        ContextRequest(
-            project=project,
-            task="authenticate user",
-            interpretation=interpretation,
-            grounding=repository_grounding,
-        )
-    ]
-
-
-def test_service_does_not_ground_invalid_task() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    interpretation = make_task_interpretation()
-    understanding = StubTaskUnderstanding(interpretation)
-    validator = StubTaskValidator(
-        TaskValidation(
-            state=TaskState.AMBIGUOUS,
-            reasons=("target is unclear",),
-        )
-    )
-    task_grounding = StubTaskGrounding(
-        GroundedTask(interpretation=interpretation),
-    )
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        task_understanding=understanding,
-        task_validator=validator,
-        task_grounding=task_grounding,
-    )
-
-    try:
-        service.generate(
-            project=project,
-            task="authenticate user",
-            config=ProviderConfig(model="test-model"),
-        )
-    except ValueError as exc:
-        assert str(exc) == "task validation failed: ambiguous"
-    else:
-        raise AssertionError("Expected ValueError")
-
-    assert task_grounding.projects == []
-    assert task_grounding.interpretations == []
-    assert engine.calls == []
-    assert provider.requests == []
-
-
-def test_service_rejects_ambiguous_task_before_context_generation() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    understanding = StubTaskUnderstanding(make_task_interpretation())
-    validator = StubTaskValidator(
-        TaskValidation(
-            state=TaskState.AMBIGUOUS,
-            reasons=("target is unclear",),
-        )
-    )
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        task_understanding=understanding,
-        task_validator=validator,
-    )
-
-    try:
-        service.generate(
-            project=project,
-            task="authenticate user",
-            config=ProviderConfig(model="test-model"),
-        )
-    except ValueError as exc:
-        assert str(exc) == "task validation failed: ambiguous"
-    else:
-        raise AssertionError("Expected ValueError")
-
-    assert engine.calls == []
-    assert provider.requests == []
-
-
-def test_service_rejects_insufficient_task_before_context_generation() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    understanding = StubTaskUnderstanding(make_task_interpretation())
-    validator = StubTaskValidator(
-        TaskValidation(
-            state=TaskState.INSUFFICIENT,
-            reasons=("task intent is missing",),
-        )
-    )
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        task_understanding=understanding,
-        task_validator=validator,
-    )
-
-    try:
-        service.generate(
-            project=project,
-            task="authenticate user",
-            config=ProviderConfig(model="test-model"),
-        )
-    except ValueError as exc:
-        assert str(exc) == "task validation failed: insufficient"
-    else:
-        raise AssertionError("Expected ValueError")
-
-    assert engine.calls == []
-    assert provider.requests == []
-
-
-def test_service_passes_task_interpretation_to_context_engine() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    interpretation = make_task_interpretation()
-    understanding = StubTaskUnderstanding(interpretation)
-    validator = StubTaskValidator(TaskValidation(state=TaskState.CLEAR))
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        task_understanding=understanding,
-        task_validator=validator,
-    )
-
-    service.generate(
-        project=project,
-        task="authenticate user",
-        config=ProviderConfig(model="test-model"),
-    )
-
-    assert engine.calls == [
-        ContextRequest(
-            project=project,
-            task="authenticate user",
-            interpretation=interpretation,
-        )
-    ]
-
-
-def test_service_builds_generation_prompt_before_provider() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-    )
-
-    service.generate(
-        project=project,
-        task="authenticate user",
-        config=ProviderConfig(model="test-model"),
-    )
-
-    assert provider.requests[0].prompt == (
-        "Use the following task and project context to answer "
-        "the user's request.\n\n"
-        "Task:\nauthenticate user\n\n"
-        'Context:\n{"task":"authenticate user","units":[]}'
-    )
-
-
-def test_service_does_not_repository_ground_invalid_task() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    interpretation = make_task_interpretation()
-    grounded_task = GroundedTask(
-        interpretation=interpretation,
-    )
-
-    understanding = StubTaskUnderstanding(interpretation)
-    validator = StubTaskValidator(
-        TaskValidation(
-            state=TaskState.AMBIGUOUS,
-            reasons=("target is unclear",),
-        )
-    )
-    task_grounding = StubTaskGrounding(grounded_task)
-    repository_grounding_service = StubTaskRepositoryGrounding(
-        RepositoryGrounding(task=grounded_task),
-    )
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        task_understanding=understanding,
-        task_validator=validator,
-        task_grounding=task_grounding,
-        task_repository_grounding=repository_grounding_service,
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="task validation failed: ambiguous",
-    ):
-        service.generate(
-            project=project,
-            task="authenticate user",
-            config=ProviderConfig(model="test-model"),
-        )
-
-    assert task_grounding.projects == []
-    assert task_grounding.interpretations == []
-    assert repository_grounding_service.calls == []
-    assert engine.calls == []
-    assert provider.requests == []
-
-
-def test_generation_service_rejects_unavailable_ollama() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    runtime = Mock(spec=OllamaRuntime)
-    runtime.check.return_value = OllamaRuntimeStatus(
-        available=False,
-        model_available=False,
-        base_url="http://localhost:11434",
-        model="qwen2.5-coder:7b",
-        reason="ollama_unavailable",
-    )
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        ollama_runtime=runtime,
-    )
-
-    config = ProviderConfig(
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-    )
-
-    with pytest.raises(
-        RuntimeError,
-        match="Ollama runtime is unavailable",
-    ):
-        service.generate(
-            project=project,
-            task="Explain the project",
-            config=config,
-        )
-
-    runtime.check.assert_called_once_with("qwen2.5-coder:7b")
-
-
-def test_generation_service_rejects_missing_ollama_model() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    runtime = Mock(spec=OllamaRuntime)
-    runtime.check.return_value = OllamaRuntimeStatus(
-        available=True,
-        model_available=False,
-        base_url="http://localhost:11434",
-        model="missing-model",
-        reason="model_unavailable",
-    )
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        ollama_runtime=runtime,
-    )
-
-    config = ProviderConfig(
-        provider="ollama",
-        model="missing-model",
-    )
-
-    with pytest.raises(
-        RuntimeError,
-        match="Ollama model 'missing-model' is not available",
-    ):
-        service.generate(
-            project=project,
-            task="Explain the project",
-            config=config,
-        )
-
-    runtime.check.assert_called_once_with("missing-model")
-
-
-def test_generation_service_skips_runtime_without_ollama_runtime() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-    )
-
-    config = ProviderConfig(
-        provider="ollama",
-        model="test-model",
-    )
-
-    service.generate(
-        project=project,
-        task="Explain the project",
-        config=config,
-    )
-
-
-def test_generation_service_accepts_ready_ollama_runtime() -> None:
-    project = make_project()
-    package = make_package()
-    engine = StubContextEngine(package)
-    provider = StubProvider(make_response())
-
-    runtime = Mock(spec=OllamaRuntime)
-    runtime.check.return_value = OllamaRuntimeStatus(
-        available=True,
-        model_available=True,
-        base_url="http://localhost:11434",
-        model="qwen2.5-coder:7b",
-        reason="ready",
-    )
-
-    service = ContextGenerationService(
-        engine=engine,
-        serializer=ContextPackageSerializer(),
-        provider=provider,
-        ollama_runtime=runtime,
-    )
-
-    config = ProviderConfig(
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-    )
-
-    service.generate(
-        project=project,
-        task="Explain the project",
-        config=config,
-    )
-
-    runtime.check.assert_called_once_with("qwen2.5-coder:7b")
+    assert package.task == "Inspect main.py"
+    assert isinstance(package, ContextPackage)

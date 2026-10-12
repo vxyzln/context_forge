@@ -1,4 +1,4 @@
-from context_forge.application.service import ContextGenerationService
+from context_forge.application.service import RepositoryContextService
 from context_forge.context import (
     CandidateGenerator,
     ContextAssembler,
@@ -6,9 +6,7 @@ from context_forge.context import (
     ContextCompressionPipeline,
     ContextEnrichmentPipeline,
     ContextPackageBuilder,
-    ContextPackageSerializer,
     ContextPriorityOrdering,
-    ContextSelectionService,
     ContextSelector,
     DefaultContextEngine,
     DeterministicContextCompressor,
@@ -20,8 +18,6 @@ from context_forge.context import (
     SymbolContextEnricher,
 )
 from context_forge.context.depth import ContextDepthSelector
-from context_forge.provider import ProviderConfig, ProviderFactory
-from context_forge.provider.runtime import OllamaRuntime
 from context_forge.task import (
     TaskGroundingService,
     TaskRepositoryGroundingService,
@@ -31,7 +27,7 @@ from context_forge.task import (
 
 
 def build_context_engine(
-    selection_service: ContextSelectionService | None = None,
+    max_context_units: int = 20,
 ) -> DefaultContextEngine:
     return DefaultContextEngine(
         candidate_generator=CandidateGenerator(),
@@ -56,42 +52,18 @@ def build_context_engine(
                 DeterministicPrioritizer(),
             ),
         ),
-        selection_service=selection_service,
+        max_context_units=max_context_units,
     )
 
 
-def build_generation_service(
-    generation_config: ProviderConfig,
-) -> ContextGenerationService:
-    task_understanding_config = ProviderConfig(
-        provider="deterministic",
-        model="deterministic-task",
-    )
-
-    generation_provider = ProviderFactory.create(generation_config)
-    selection_provider = ProviderFactory.create(generation_config)
-    selection_service = ContextSelectionService(
-        provider=selection_provider,
-        config=generation_config,
-    )
-
-    return ContextGenerationService(
-        engine=build_context_engine(selection_service=selection_service),
-        serializer=ContextPackageSerializer(),
-        provider=generation_provider,
-        task_understanding=TaskUnderstandingService(
-            provider=ProviderFactory.create(task_understanding_config),
-            config=task_understanding_config,
-        ),
+def build_context_service(
+    max_context_units: int = 20,
+) -> RepositoryContextService:
+    engine = build_context_engine(max_context_units=max_context_units)
+    return RepositoryContextService(
+        engine=engine,
+        task_understanding=TaskUnderstandingService(),
         task_validator=TaskValidator(),
         task_grounding=TaskGroundingService(),
         task_repository_grounding=TaskRepositoryGroundingService(),
-        ollama_runtime=(
-            OllamaRuntime(
-                base_url=generation_config.base_url,
-                timeout=generation_config.transport.timeout,
-            )
-            if generation_config.provider == "ollama"
-            else None
-        ),
     )

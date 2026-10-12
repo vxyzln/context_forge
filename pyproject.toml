@@ -4,12 +4,7 @@ version = "0.1.0"
 description = "Deterministic, local-first repository intelligence and agent memory for Python projects."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [
-    "fastapi",
-    "httpx>=0.28.1",
-    "ollama>=0.6.2",
-    "uvicorn",
-]
+dependencies = []
 
 [project.scripts]
 context-forge = "context_forge.main:main"

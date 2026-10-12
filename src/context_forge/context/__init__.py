@@ -37,16 +37,9 @@ from context_forge.context.retrieval import (
     RelationshipCandidateRetriever,
     RetrievalEvidence,
 )
-from context_forge.context.selection import ContextSelector
-from context_forge.context.selection_contract import (
-    ContextSelectionContract,
-    ContextSelectionDecision,
-    ContextSelectionRequest,
-    ContextSelectionResponse,
-)
-from context_forge.context.selection_service import (
+from context_forge.context.selection import (
     ContextSelectionResult,
-    ContextSelectionService,
+    ContextSelector,
     SelectedContextCandidate,
 )
 from context_forge.context.serialization import ContextPackageSerializer
@@ -73,12 +66,7 @@ __all__ = [
     "ContextPriority",
     "ContextPriorityOrdering",
     "ContextRequest",
-    "ContextSelectionContract",
-    "ContextSelectionDecision",
-    "ContextSelectionRequest",
-    "ContextSelectionResponse",
     "ContextSelectionResult",
-    "ContextSelectionService",
     "ContextSelector",
     "ContextSignal",
     "ContextUnit",

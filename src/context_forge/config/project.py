@@ -1,20 +1,21 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
-class ProjectProviderConfiguration:
-    provider: str | None = None
-    model: str | None = None
-    base_url: str | None = None
+class ProjectStorageConfiguration:
+    database_path: str | None = None
 
 
 @dataclass(frozen=True)
-class ProjectGenerationConfiguration:
-    temperature: float | None = None
-    max_tokens: int | None = None
+class ProjectAnalysisConfiguration:
+    max_context_units: int | None = None
 
 
 @dataclass(frozen=True)
 class ProjectConfiguration:
-    provider: ProjectProviderConfiguration = ProjectProviderConfiguration()
-    generation: ProjectGenerationConfiguration = ProjectGenerationConfiguration()
+    storage: ProjectStorageConfiguration = field(
+        default_factory=ProjectStorageConfiguration
+    )
+    analysis: ProjectAnalysisConfiguration = field(
+        default_factory=ProjectAnalysisConfiguration
+    )

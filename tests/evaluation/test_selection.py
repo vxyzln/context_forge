@@ -2,7 +2,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from context_forge.context.candidate import ContextCandidate
-from context_forge.context.selection_service import (
+from context_forge.context.selection import (
     ContextSelectionResult,
     SelectedContextCandidate,
 )

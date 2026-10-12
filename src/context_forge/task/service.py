@@ -1,167 +1,101 @@
-import json
-
-from context_forge.provider import (
-    ContextProvider,
-    GenerationRequest,
-    ProviderConfig,
-)
+import re
 
 from .models import TaskInterpretation
 
 
 class TaskUnderstandingService:
-    """Interpret a natural-language task using a context provider."""
+    """Deterministically interpret a natural-language development task."""
 
-    def __init__(
-        self,
-        provider: ContextProvider,
-        config: ProviderConfig,
-    ) -> None:
-        self._provider = provider
-        self._config = config
+    _ACTION_WORDS = frozenset(
+        {
+            "add",
+            "analyze",
+            "build",
+            "check",
+            "clean",
+            "create",
+            "debug",
+            "delete",
+            "describe",
+            "explain",
+            "find",
+            "fix",
+            "generate",
+            "get",
+            "implement",
+            "inspect",
+            "list",
+            "locate",
+            "modify",
+            "refactor",
+            "remove",
+            "retrieve",
+            "search",
+            "show",
+            "test",
+            "trace",
+            "update",
+            "validate",
+            "verify",
+        }
+    )
+
+    _WORD_PATTERN = re.compile(r"[A-Za-z0-9_./\\-]+")
+
+    def __init__(self) -> None:
+        pass
 
     def understand(self, task: str) -> TaskInterpretation:
         if not task.strip():
             raise ValueError("task must not be empty")
 
-        prompt = self._build_prompt(task)
+        normalized = task.strip()
+        tokens = self._WORD_PATTERN.findall(normalized)
 
-        request = GenerationRequest(
-            task=task,
-            context="",
-            prompt=prompt,
-            config=self._config,
-        )
+        requested_action: str | None = None
+        target: str | None = None
+        concepts: list[str] = []
 
-        response = self._provider.generate(request)
+        for token in tokens:
+            clean = token.strip()
+            if not clean:
+                continue
 
-        return self._parse_response(
-            task=task,
-            content=response.content,
-        )
+            lower = clean.lower()
+            if requested_action is None and lower in self._ACTION_WORDS:
+                requested_action = lower
+            elif target is None and (
+                "/" in clean
+                or "." in clean
+                or "_" in clean
+                or any(c.isupper() for c in clean[1:])
+                or (
+                    clean.isidentifier()
+                    and clean[0].isupper()
+                    and lower
+                    not in {
+                        "class",
+                        "function",
+                        "method",
+                        "module",
+                        "file",
+                        "error",
+                        "test",
+                        "tests",
+                    }
+                )
+            ):
+                target = clean
 
-    @staticmethod
-    def _build_prompt(task: str) -> str:
-        return (
-            "Interpret the following software-development task. "
-            "Return ONLY valid JSON with exactly these fields: "
-            "intent, target, concepts, requested_action, constraints, "
-            "ambiguity. "
-            "intent must be a string. "
-            "target must be a string or null. "
-            "concepts must be an array of strings. "
-            "requested_action must be a string or null. "
-            "constraints must be an array of strings. "
-            "ambiguity must be a string or null. "
-            "Do not invent repository facts.\n\n"
-            f"Task:\n{task}"
-        )
-
-    @staticmethod
-    def _parse_response(
-        task: str,
-        content: str,
-    ) -> TaskInterpretation:
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                "provider returned invalid task interpretation JSON"
-            ) from exc
-
-        if not isinstance(data, dict):
-            raise TypeError(
-                "provider returned a task interpretation that is not an object"
-            )
-
-        expected_fields = {
-            "intent",
-            "target",
-            "concepts",
-            "requested_action",
-            "constraints",
-            "ambiguity",
-        }
-
-        missing_fields = expected_fields - data.keys()
-        if missing_fields:
-            raise ValueError(
-                "provider returned incomplete task interpretation: "
-                + ", ".join(sorted(missing_fields))
-            )
+            if clean not in concepts:
+                concepts.append(clean)
 
         return TaskInterpretation(
-            task=task,
-            intent=TaskUnderstandingService._require_string(data, "intent"),
-            target=TaskUnderstandingService._optional_string(data, "target"),
-            concepts=TaskUnderstandingService._string_tuple(data, "concepts"),
-            requested_action=TaskUnderstandingService._optional_string(
-                data,
-                "requested_action",
-            ),
-            constraints=TaskUnderstandingService._string_tuple(
-                data,
-                "constraints",
-            ),
-            ambiguity=TaskUnderstandingService._optional_string(
-                data,
-                "ambiguity",
-            ),
+            task=normalized,
+            intent=normalized,
+            target=target,
+            concepts=tuple(concepts),
+            requested_action=requested_action,
+            constraints=(),
+            ambiguity=None,
         )
-
-    @staticmethod
-    def _require_string(
-        data: dict[str, object],
-        field: str,
-    ) -> str:
-        value = data.get(field)
-
-        if not isinstance(value, str):
-            raise TypeError(f"task interpretation field '{field}' must be a string")
-
-        if not value.strip():
-            raise ValueError(f"task interpretation field '{field}' must not be empty")
-
-        return value
-
-    @staticmethod
-    def _optional_string(
-        data: dict[str, object],
-        field: str,
-    ) -> str | None:
-        value = data.get(field)
-
-        if value is None:
-            return None
-
-        if not isinstance(value, str):
-            raise TypeError(
-                f"task interpretation field '{field}' must be a string or null"
-            )
-
-        if not value.strip():
-            raise ValueError(f"task interpretation field '{field}' must not be empty")
-
-        return value
-
-    @staticmethod
-    def _string_tuple(
-        data: dict[str, object],
-        field: str,
-    ) -> tuple[str, ...]:
-        value = data.get(field, [])
-
-        if not isinstance(value, list):
-            raise TypeError(f"task interpretation field '{field}' must be an array")
-
-        if not all(isinstance(item, str) for item in value):
-            raise TypeError(
-                f"task interpretation field '{field}' must contain only strings"
-            )
-
-        if any(not item.strip() for item in value):
-            raise ValueError(
-                f"task interpretation field '{field}' must contain non-empty strings"
-            )
-
-        return tuple(value)

@@ -4,9 +4,9 @@ import pytest
 
 from context_forge.config import (
     ConfigurationValidationError,
+    ProjectAnalysisConfiguration,
     ProjectConfiguration,
-    ProjectGenerationConfiguration,
-    ProjectProviderConfiguration,
+    ProjectStorageConfiguration,
     load_global_configuration,
     load_project_configuration,
 )
@@ -23,14 +23,11 @@ def test_load_project_configuration_returns_typed_configuration(
 ) -> None:
     (tmp_path / ".contextforge.toml").write_text(
         """
-[provider]
-provider = "ollama"
-model = "qwen2.5-coder:7b"
-base_url = "http://localhost:11434"
+[storage]
+database_path = ".context_forge.db"
 
-[generation]
-temperature = 0.2
-max_tokens = 2048
+[analysis]
+max_context_units = 50
 """,
         encoding="utf-8",
     )
@@ -38,14 +35,11 @@ max_tokens = 2048
     result = load_project_configuration(tmp_path)
 
     assert result == ProjectConfiguration(
-        provider=ProjectProviderConfiguration(
-            provider="ollama",
-            model="qwen2.5-coder:7b",
-            base_url="http://localhost:11434",
+        storage=ProjectStorageConfiguration(
+            database_path=".context_forge.db",
         ),
-        generation=ProjectGenerationConfiguration(
-            temperature=0.2,
-            max_tokens=2048,
+        analysis=ProjectAnalysisConfiguration(
+            max_context_units=50,
         ),
     )
 
@@ -55,15 +49,15 @@ def test_load_project_configuration_validates_loaded_values(
 ) -> None:
     (tmp_path / ".contextforge.toml").write_text(
         """
-[generation]
-temperature = 3.0
+[analysis]
+max_context_units = -5
 """,
         encoding="utf-8",
     )
 
     with pytest.raises(
         ConfigurationValidationError,
-        match="Configuration value 'temperature' must be between 0.0 and 2.0",
+        match="Configuration value 'max_context_units' must be positive",
     ):
         load_project_configuration(tmp_path)
 
@@ -89,11 +83,11 @@ def test_load_global_configuration_returns_typed_configuration(
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
-[provider]
-model = "qwen2.5-coder:7b"
+[storage]
+database_path = "global.db"
 
-[generation]
-temperature = 0.5
+[analysis]
+max_context_units = 25
 """,
         encoding="utf-8",
     )
@@ -106,11 +100,11 @@ temperature = 0.5
     result = load_global_configuration()
 
     assert result == ProjectConfiguration(
-        provider=ProjectProviderConfiguration(
-            model="qwen2.5-coder:7b",
+        storage=ProjectStorageConfiguration(
+            database_path="global.db",
         ),
-        generation=ProjectGenerationConfiguration(
-            temperature=0.5,
+        analysis=ProjectAnalysisConfiguration(
+            max_context_units=25,
         ),
     )
 
@@ -122,8 +116,8 @@ def test_load_global_configuration_validates_loaded_values(
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
-[provider]
-model = ""
+[analysis]
+max_context_units = 0
 """,
         encoding="utf-8",
     )
@@ -135,6 +129,6 @@ model = ""
 
     with pytest.raises(
         ConfigurationValidationError,
-        match="Configuration value 'model' cannot be empty",
+        match="Configuration value 'max_context_units' must be positive",
     ):
         load_global_configuration()

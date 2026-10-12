@@ -12,7 +12,6 @@ from context_forge.context.ranking import DeterministicRanker
 from context_forge.context.request import ContextRequest
 from context_forge.context.retrieval import RelationshipCandidateRetriever
 from context_forge.context.selection import ContextSelector
-from context_forge.context.selection_service import ContextSelectionService
 
 
 class ContextEngine(ABC):
@@ -36,7 +35,6 @@ class DefaultContextEngine(ContextEngine):
         assembly: ContextAssembler,
         max_context_units: int = 20,
         relationship_retriever: RelationshipCandidateRetriever | None = None,
-        selection_service: ContextSelectionService | None = None,
     ) -> None:
         self.candidate_generator = candidate_generator
         self.ranker = ranker
@@ -51,7 +49,6 @@ class DefaultContextEngine(ContextEngine):
         self.relationship_retriever = (
             relationship_retriever or RelationshipCandidateRetriever()
         )
-        self.selection_service = selection_service
 
     def build(self, request: ContextRequest) -> ContextPackage:
         if not request.task.strip():
@@ -76,38 +73,6 @@ class DefaultContextEngine(ContextEngine):
             max_depth=depth_decision.depth,
         )
 
-        selection_fallback = False
-
-        if self.selection_service is not None:
-            try:
-                selection_result = self.selection_service.select(
-                    request.task,
-                    expanded_candidates,
-                )
-            except (RuntimeError, ValueError, TypeError):
-                selection_result = None
-                selection_fallback = True
-
-            if selection_result is not None:
-                selected_entity_ids = {
-                    item.candidate.entity_id for item in selection_result.candidates
-                }
-
-                expanded_candidates = [
-                    candidate
-                    for candidate in expanded_candidates
-                    if candidate.entity_id in selected_entity_ids
-                ]
-
-                selection_confidence = {
-                    item.candidate.entity_id: item.confidence
-                    for item in selection_result.candidates
-                }
-            else:
-                selection_confidence = {}
-        else:
-            selection_confidence = {}
-
         expanded = [
             ContextExpansion(candidate=candidate) for candidate in expanded_candidates
         ]
@@ -123,8 +88,6 @@ class DefaultContextEngine(ContextEngine):
             expanded,
             selected_signals,
             retrieval_evidence,
-            selection_confidence,
-            selection_fallback,
         )
 
         enriched_units = self.enrichment_pipeline.enrich(

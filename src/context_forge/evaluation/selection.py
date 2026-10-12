@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from context_forge.context.candidate import ContextCandidate
-from context_forge.context.selection_service import (
+from context_forge.context.selection import (
     ContextSelectionResult,
 )
 from context_forge.evaluation.ground_truth import ExpectedEntity

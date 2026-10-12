@@ -52,50 +52,41 @@ def get_logger() -> logging.Logger:
     return logger
 
 
-def log_generation_started(
+def log_analysis_started(
     *,
     project_path: Path,
-    provider: str,
-    model: str,
 ) -> None:
     get_logger().info(
-        "generation_started project=%s provider=%s model=%s",
+        "analysis_started project=%s",
         project_path,
-        provider,
-        model,
     )
 
 
-def log_generation_completed(
+def log_analysis_completed(
     *,
     project_path: Path,
-    provider: str,
-    model: str,
     duration_seconds: float,
+    files_count: int,
+    symbols_count: int,
 ) -> None:
     get_logger().info(
-        "generation_completed project=%s provider=%s model=%s duration=%.3f",
+        "analysis_completed project=%s duration=%.3f files=%d symbols=%d",
         project_path,
-        provider,
-        model,
         duration_seconds,
+        files_count,
+        symbols_count,
     )
 
 
-def log_generation_failed(
+def log_analysis_failed(
     *,
     project_path: Path,
-    provider: str | None,
-    model: str | None,
     duration_seconds: float,
     error: Exception,
 ) -> None:
     get_logger().error(
-        "generation_failed project=%s provider=%s model=%s "
-        "duration=%.3f error_type=%s error=%s",
+        "analysis_failed project=%s duration=%.3f error_type=%s error=%s",
         project_path,
-        provider,
-        model,
         duration_seconds,
         type(error).__name__,
         error,

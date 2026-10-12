@@ -1,196 +1,45 @@
-import argparse
+import json
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
-from context_forge import main as main_module
-from context_forge.config import (
-    ProjectConfiguration,
-    ProjectGenerationConfiguration,
-    ProjectProviderConfiguration,
-)
+from context_forge.context.models import ContextPackage, ContextUnit
 from context_forge.main import (
-    build_provider_config,
-    load_generation_project,
+    load_fresh_project,
     load_project_analysis,
     main,
     parse_args,
     resolve_project_path,
+    run_cache,
+    run_diagnostics,
+    run_inspect,
     run_status,
 )
-from context_forge.provider import (
-    GenerationResponse,
-    OllamaRuntimeStatus,
-    ProviderConfig,
-)
 
 
-def test_main_reports_provider_error_without_traceback(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     with (
-        patch.object(sys, "argv", ["context-forge", "."]),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-        patch("builtins.input", return_value="Fix scrolling"),
+        patch.object(sys, "argv", ["context-forge"]),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
     ):
-        build_service.side_effect = RuntimeError(
-            "Ollama provider request timed out after 60 seconds"
-        )
-
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "Error: Ollama provider request timed out after 60 seconds\n"
-
-
-def test_main_prints_generation_response(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    response = type(
-        "Response",
-        (),
-        {"content": "The scrolling behaviour is controlled by scroll.js."},
-    )()
-
-    with (
-        patch.object(sys, "argv", ["context-forge", "."]),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-        patch("builtins.input", return_value="Fix scrolling"),
-    ):
-        build_service.return_value.generate.return_value = response
-
         main()
 
     captured = capsys.readouterr()
 
-    assert captured.out == "\nThe scrolling behaviour is controlled by scroll.js.\n"
+    assert "usage: context-forge" in captured.out
+    assert "analyze" in captured.out
+    assert "context" in captured.out
+    assert "status" in captured.out
+    assert "cache" in captured.out
+    assert "inspect" in captured.out
+    assert "diagnostics" in captured.out
+    assert "generate" not in captured.out
+    assert "runtime" not in captured.out
+    assert "--provider" not in captured.out
     assert captured.err == ""
-
-
-def test_main_uses_default_provider_configuration() -> None:
-    expected_config = ProviderConfig(
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-        temperature=0.0,
-        max_tokens=None,
-        base_url="http://localhost:11434",
-    )
-
-    with (
-        patch.object(sys, "argv", ["context-forge", "."]),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-        patch("builtins.input", return_value="Fix scrolling"),
-    ):
-        build_service.return_value.generate.return_value = type(
-            "Response",
-            (),
-            {"content": "Done."},
-        )()
-
-        main()
-
-    build_service.assert_called_once_with(expected_config)
-
-    build_service.return_value.generate.assert_called_once()
-
-    call = build_service.return_value.generate.call_args
-
-    assert call.kwargs["task"] == "Fix scrolling"
-    assert call.kwargs["config"] == expected_config
-
-
-def test_main_uses_custom_provider_configuration() -> None:
-    expected_config = ProviderConfig(
-        provider="deterministic",
-        model="custom-model",
-        temperature=0.7,
-        max_tokens=512,
-        base_url="http://example.test:11434",
-    )
-
-    argv = [
-        "context-forge",
-        ".",
-        "--provider",
-        "deterministic",
-        "--model",
-        "custom-model",
-        "--temperature",
-        "0.7",
-        "--max-tokens",
-        "512",
-        "--base-url",
-        "http://example.test:11434",
-    ]
-
-    with (
-        patch.object(sys, "argv", argv),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-        patch("builtins.input", return_value="Fix scrolling"),
-    ):
-        build_service.return_value.generate.return_value = type(
-            "Response",
-            (),
-            {"content": "Done."},
-        )()
-
-        main()
-
-    build_service.assert_called_once_with(expected_config)
-
-    build_service.return_value.generate.assert_called_once()
-
-    call = build_service.return_value.generate.call_args
-
-    assert call.kwargs["task"] == "Fix scrolling"
-    assert call.kwargs["config"] == expected_config
-
-
-def test_main_passes_same_configuration_to_service_and_generation() -> None:
-    with (
-        patch.object(sys, "argv", ["context-forge", "."]),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-        patch("builtins.input", return_value="Fix scrolling"),
-    ):
-        build_service.return_value.generate.return_value = type(
-            "Response",
-            (),
-            {"content": "Done."},
-        )()
-
-        main()
-
-    service_config = build_service.call_args.args[0]
-    generation_config = build_service.return_value.generate.call_args.kwargs["config"]
-
-    assert generation_config is service_config
+    analyzer.assert_not_called()
 
 
 def test_resolve_project_path_returns_resolved_directory(tmp_path: Path) -> None:
@@ -238,7 +87,7 @@ def test_main_reports_missing_project_path_without_traceback(
         patch.object(
             sys,
             "argv",
-            ["context-forge", str(missing_path)],
+            ["context-forge", "status", str(missing_path)],
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -247,10 +96,10 @@ def test_main_reports_missing_project_path_without_traceback(
     assert exc_info.value.code == 1
 
     captured = capsys.readouterr()
-
     assert captured.out == ""
-    assert captured.err == (
-        f"Error: Project path does not exist: {missing_path.resolve()}\n"
+    assert (
+        captured.err
+        == f"Error: Project path does not exist: {missing_path.resolve()}\n"
     )
 
 
@@ -265,7 +114,7 @@ def test_main_reports_file_project_path_without_traceback(
         patch.object(
             sys,
             "argv",
-            ["context-forge", str(project_file)],
+            ["context-forge", "status", str(project_file)],
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -274,652 +123,47 @@ def test_main_reports_file_project_path_without_traceback(
     assert exc_info.value.code == 1
 
     captured = capsys.readouterr()
-
     assert captured.out == ""
-    assert captured.err == (
-        f"Error: Project path is not a directory: {project_file.resolve()}\n"
+    assert (
+        captured.err
+        == f"Error: Project path is not a directory: {project_file.resolve()}\n"
     )
 
 
-def test_build_provider_config_uses_built_in_defaults() -> None:
-    args = argparse.Namespace(
-        provider=None,
-        model=None,
-        temperature=None,
-        max_tokens=None,
-        base_url=None,
+def test_parse_args_subcommands():
+    args = parse_args(["analyze", "/tmp/project"])
+    assert args.command == "analyze"
+    assert args.path == Path("/tmp/project")
+
+    args = parse_args(["status", "/tmp/project"])
+    assert args.command == "status"
+    assert args.path == Path("/tmp/project")
+
+    args = parse_args(["cache", "/tmp/project"])
+    assert args.command == "cache"
+    assert args.path == Path("/tmp/project")
+
+    args = parse_args(["inspect", "/tmp/project"])
+    assert args.command == "inspect"
+    assert args.path == Path("/tmp/project")
+
+    args = parse_args(["diagnostics", "/tmp/project"])
+    assert args.command == "diagnostics"
+    assert args.path == Path("/tmp/project")
+
+    args = parse_args(
+        ["context", "/tmp/project", "--task", "Fix bugs", "--output", "out.json"]
     )
-
-    config = build_provider_config(args, Path.cwd())
-
-    assert config == ProviderConfig(
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-        temperature=0.0,
-        max_tokens=None,
-        base_url="http://localhost:11434",
-    )
-
-
-def test_build_provider_config_uses_project_over_global(
-    tmp_path: Path,
-) -> None:
-    project_config = ProjectConfiguration(
-        provider=ProjectProviderConfiguration(
-            model="project-model",
-        ),
-        generation=ProjectGenerationConfiguration(
-            temperature=0.2,
-        ),
-    )
-
-    global_config = ProjectConfiguration(
-        provider=ProjectProviderConfiguration(
-            provider="deterministic",
-            model="global-model",
-            base_url="http://global",
-        ),
-        generation=ProjectGenerationConfiguration(
-            temperature=0.7,
-            max_tokens=1024,
-        ),
-    )
-
-    args = argparse.Namespace(
-        provider=None,
-        model=None,
-        temperature=None,
-        max_tokens=None,
-        base_url=None,
-    )
-
-    with (
-        patch(
-            "context_forge.main.load_global_configuration",
-            return_value=global_config,
-        ),
-        patch(
-            "context_forge.main.load_project_configuration",
-            return_value=project_config,
-        ),
-    ):
-        config = build_provider_config(args, tmp_path)
-
-    assert config == ProviderConfig(
-        provider="deterministic",
-        model="project-model",
-        temperature=0.2,
-        max_tokens=1024,
-        base_url="http://global",
-    )
-
-
-def test_build_provider_config_cli_overrides_project_and_global(
-    tmp_path: Path,
-) -> None:
-    project_config = ProjectConfiguration(
-        provider=ProjectProviderConfiguration(
-            provider="ollama",
-            model="project-model",
-            base_url="http://project",
-        ),
-        generation=ProjectGenerationConfiguration(
-            temperature=0.2,
-            max_tokens=512,
-        ),
-    )
-
-    global_config = ProjectConfiguration(
-        provider=ProjectProviderConfiguration(
-            provider="deterministic",
-            model="global-model",
-            base_url="http://global",
-        ),
-        generation=ProjectGenerationConfiguration(
-            temperature=0.7,
-            max_tokens=1024,
-        ),
-    )
-
-    args = argparse.Namespace(
-        provider="deterministic",
-        model="cli-model",
-        temperature=1.0,
-        max_tokens=2048,
-        base_url="http://cli",
-    )
-
-    with (
-        patch(
-            "context_forge.main.load_global_configuration",
-            return_value=global_config,
-        ),
-        patch(
-            "context_forge.main.load_project_configuration",
-            return_value=project_config,
-        ),
-    ):
-        config = build_provider_config(args, tmp_path)
-
-    assert config == ProviderConfig(
-        provider="deterministic",
-        model="cli-model",
-        temperature=1.0,
-        max_tokens=2048,
-        base_url="http://cli",
-    )
-
-
-def test_build_provider_config_resolves_complete_configuration_stack(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    global_config_path = tmp_path / "global.toml"
-    global_config_path.write_text(
-        """
-[provider]
-provider = "deterministic"
-model = "global-model"
-base_url = "http://global"
-
-[generation]
-temperature = 0.7
-max_tokens = 1024
-""",
-        encoding="utf-8",
-    )
-
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-
-    (project_root / ".contextforge.toml").write_text(
-        """
-[provider]
-model = "project-model"
-
-[generation]
-max_tokens = 2048
-""",
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(
-        "context_forge.config.loader.global_config_path",
-        lambda: global_config_path,
-    )
-
-    args = argparse.Namespace(
-        provider=None,
-        model=None,
-        temperature=None,
-        max_tokens=None,
-        base_url=None,
-    )
-
-    result = build_provider_config(args, project_root)
-
-    assert result == ProviderConfig(
-        provider="deterministic",
-        model="project-model",
-        temperature=0.7,
-        max_tokens=2048,
-        base_url="http://global",
-    )
-
-
-def test_build_provider_config_cli_values_override_all_configuration_layers(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    global_config_path = tmp_path / "global.toml"
-    global_config_path.write_text(
-        """
-[provider]
-provider = "deterministic"
-model = "global-model"
-base_url = "http://global"
-
-[generation]
-temperature = 0.3
-max_tokens = 512
-""",
-        encoding="utf-8",
-    )
-
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-
-    (project_root / ".contextforge.toml").write_text(
-        """
-[provider]
-model = "project-model"
-base_url = "http://project"
-
-[generation]
-temperature = 0.7
-max_tokens = 1024
-""",
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(
-        "context_forge.config.loader.global_config_path",
-        lambda: global_config_path,
-    )
-
-    args = argparse.Namespace(
-        provider="ollama",
-        model="cli-model",
-        temperature=1.2,
-        max_tokens=4096,
-        base_url="http://cli",
-    )
-
-    result = build_provider_config(args, project_root)
-
-    assert result == ProviderConfig(
-        provider="ollama",
-        model="cli-model",
-        temperature=1.2,
-        max_tokens=4096,
-        base_url="http://cli",
-    )
-
-
-def test_main_logs_generation_lifecycle(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-
-    response = type(
-        "Response",
-        (),
-        {"content": "Done."},
-    )()
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", str(project)],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch(
-            "context_forge.main.build_generation_service",
-        ) as build_service,
-        patch(
-            "context_forge.main.log_generation_started",
-        ) as log_started,
-        patch(
-            "context_forge.main.log_generation_completed",
-        ) as log_completed,
-        patch("builtins.input", return_value="Fix scrolling"),
-    ):
-        build_service.return_value.generate.return_value = response
-
-        main()
-
-    log_started.assert_called_once_with(
-        project_path=project.resolve(),
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-    )
-
-    log_completed.assert_called_once()
-
-    completed_call = log_completed.call_args.kwargs
-
-    assert completed_call["project_path"] == project.resolve()
-    assert completed_call["provider"] == "ollama"
-    assert completed_call["model"] == "qwen2.5-coder:7b"
-    assert completed_call["duration_seconds"] >= 0
-
-
-def test_main_logs_generation_failure_without_task(
-    tmp_path: Path,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-
-    error = RuntimeError("Ollama provider request timed out")
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", str(project)],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch(
-            "context_forge.main.build_generation_service",
-        ) as build_service,
-        patch(
-            "context_forge.main.log_generation_started",
-        ),
-        patch(
-            "context_forge.main.log_generation_completed",
-        ) as log_completed,
-        patch(
-            "context_forge.main.log_generation_failed",
-        ) as log_failed,
-        patch("builtins.input", return_value="Fix scrolling"),
-    ):
-        build_service.side_effect = error
-
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-
-    assert exc_info.value.code == 1
-
-    log_completed.assert_not_called()
-    log_failed.assert_called_once()
-
-    failed_call = log_failed.call_args.kwargs
-
-    assert failed_call["project_path"] == project.resolve()
-    assert failed_call["provider"] == "ollama"
-    assert failed_call["model"] == "qwen2.5-coder:7b"
-    assert failed_call["duration_seconds"] >= 0
-    assert failed_call["error"] is error
-
-    # The user's task must never be passed to the logger.
-    assert "Fix scrolling" not in str(log_failed.call_args)
-
-
-def test_main_without_project_path_prints_help_without_analyzing(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with (
-        patch.object(sys, "argv", ["context-forge"]),
-        patch("context_forge.main.ProjectAnalyzer") as analyzer,
-        patch("builtins.input") as input_mock,
-        patch("context_forge.main.build_generation_service") as build_service,
-    ):
-        main()
-
-    captured = capsys.readouterr()
-
-    assert "usage: context-forge" in captured.out
-    assert "Generate context-forge responses for software projects." in captured.out
-    assert captured.err == ""
-
-    analyzer.assert_not_called()
-    input_mock.assert_not_called()
-    build_service.assert_not_called()
-
-
-def test_main_runs_complete_python_project_workflow(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    source = """
-def authenticate(username, password):
-    return username == "admin" and password == "secret"
-"""
-
-    source_file = tmp_path / "auth.py"
-    source_file.write_text(source, encoding="utf-8")
-
-    argv = [
-        "context-forge",
-        str(tmp_path),
-        "--provider",
-        "deterministic",
-        "--model",
-        "deterministic-test",
-    ]
-
-    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
-        main()
-
-    with (
-        patch.object(sys, "argv", argv),
-        patch("builtins.input", return_value="Explain the authenticate function"),
-    ):
-        main()
-
-    captured = capsys.readouterr()
-
-    assert captured.err == ""
-    assert captured.out
-    assert "Explain the authenticate function" in captured.out
-    assert "Context received:" in captured.out
-
-
-def test_main_reports_generation_provider_failure_without_traceback(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    error = RuntimeError("Ollama provider request timed out after 60 seconds")
-
-    with (
-        patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.log_generation_started"),
-        patch("context_forge.main.log_generation_completed") as log_completed,
-        patch("context_forge.main.log_generation_failed") as log_failed,
-        patch("context_forge.main.build_generation_service") as build_service,
-        patch("builtins.input", return_value="Fix scrolling"),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        build_service.return_value.generate.side_effect = error
-        main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == (
-        "Error: Ollama provider request timed out after 60 seconds\n"
-    )
-
-    log_completed.assert_not_called()
-    log_failed.assert_called_once()
-
-    failed_call = log_failed.call_args.kwargs
-
-    assert failed_call["project_path"] == tmp_path.resolve()
-    assert failed_call["provider"] == "ollama"
-    assert failed_call["model"] == "qwen2.5-coder:7b"
-    assert failed_call["duration_seconds"] >= 0
-    assert failed_call["error"] is error
-    assert "Fix scrolling" not in str(log_failed.call_args)
-
-
-def test_main_handles_keyboard_interrupt_during_task_input(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    argv = [
-        "context-forge",
-        str(tmp_path),
-        "--provider",
-        "deterministic",
-        "--model",
-        "deterministic-test",
-    ]
-
-    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
-        main()
-
-    capsys.readouterr()
-
-    with (
-        patch.object(sys, "argv", argv),
-        patch("builtins.input", side_effect=KeyboardInterrupt),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    captured = capsys.readouterr()
-
-    assert exc_info.value.code == 130
-    assert captured.out == ""
-    assert "Traceback" not in captured.err
-
-
-def test_main_handles_eof_during_task_input(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    argv = [
-        "context-forge",
-        str(tmp_path),
-        "--provider",
-        "deterministic",
-        "--model",
-        "deterministic-test",
-    ]
-
-    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
-        main()
-
-    capsys.readouterr()
-
-    with (
-        patch.object(sys, "argv", argv),
-        patch("builtins.input", side_effect=EOFError),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    captured = capsys.readouterr()
-
-    assert exc_info.value.code == 1
-    assert captured.out == ""
-    assert "Error: Task input ended unexpectedly" in captured.err
-    assert "Traceback" not in captured.err
-
-
-def test_main_reports_persisted_analysis_failure_without_traceback(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    error = ValueError("No persisted analysis found; run 'context-forge analyze' first")
-
-    with (
-        patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
-        patch(
-            "context_forge.main.load_generation_project",
-            side_effect=error,
-        ),
-        patch("builtins.input") as input_mock,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    assert exc_info.value.code == 1
-    input_mock.assert_not_called()
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == (
-        "Error: No persisted analysis found; run 'context-forge analyze' first\n"
-    )
-
-
-def test_main_reports_configuration_failure_without_generation_failure_log(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    error = ValueError("invalid provider configuration")
-
-    with (
-        patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_provider_config", side_effect=error),
-        patch("context_forge.main.log_generation_failed") as log_failed,
-        patch("builtins.input", return_value="Fix scrolling"),
-        patch("context_forge.main.build_generation_service") as build_service,
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "Error: invalid provider configuration\n"
-
-    build_service.assert_not_called()
-    log_failed.assert_not_called()
-
-
-def test_main_reports_unsupported_provider_without_traceback(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    argv = [
-        "context-forge",
-        str(tmp_path),
-        "--provider",
-        "unknown",
-    ]
-
-    with (
-        patch.object(sys, "argv", argv),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-        patch("context_forge.main.log_generation_failed") as log_failed,
-        patch("builtins.input", return_value="Fix scrolling"),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "Error: Unsupported provider: unknown\n"
-
-    build_service.assert_not_called()
-    log_failed.assert_not_called()
-
-
-@pytest.mark.parametrize("task", ("", "   \t  "))
-def test_main_rejects_empty_task(
-    task: str,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with (
-        patch.object(sys, "argv", ["context-forge", str(tmp_path)]),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("builtins.input", return_value=task),
-        patch("context_forge.main.build_generation_service"),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "Error: Task cannot be empty\n"
+    assert args.command == "context"
+    assert args.path == Path("/tmp/project")
+    assert args.task == "Fix bugs"
+    assert args.output == Path("out.json")
+
+
+def test_parse_args_bare_path_defaults_to_status():
+    args = parse_args(["/tmp/project"])
+    assert args.command == "status"
+    assert args.path == Path("/tmp/project")
 
 
 def test_analyze_command_prints_repository_summary(
@@ -938,17 +182,14 @@ def test_analyze_command_prints_repository_summary(
     )()
 
     with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", "analyze", "."],
-        ),
+        patch.object(sys, "argv", ["context-forge", "analyze", "."]),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch("context_forge.operational_logging.log_analysis_started") as log_started,
         patch(
-            "context_forge.main.ProjectAnalyzer",
-        ) as analyzer,
+            "context_forge.operational_logging.log_analysis_completed"
+        ) as log_completed,
     ):
         analyzer.return_value.analyze.return_value = project
-
         main()
 
     captured = capsys.readouterr()
@@ -961,434 +202,105 @@ def test_analyze_command_prints_repository_summary(
         "Status: analyzed\n"
     )
     assert captured.err == ""
+    log_started.assert_called_once()
+    log_completed.assert_called_once()
 
 
-def test_legacy_path_invocation_uses_generate_command() -> None:
-    with patch.object(
-        sys,
-        "argv",
-        ["context-forge", "."],
-    ):
-        args = __import__("context_forge.main", fromlist=["parse_args"]).parse_args()
-
-    assert args.command == "generate"
-    assert args.path == Path(".")
-
-
-def test_explicit_generate_command_parses_provider_options() -> None:
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "context-forge",
-            "generate",
-            ".",
-            "--provider",
-            "deterministic",
-            "--model",
-            "test-model",
-        ],
-    ):
-        args = __import__("context_forge.main", fromlist=["parse_args"]).parse_args()
-
-    assert args.command == "generate"
-    assert args.path == Path(".")
-    assert args.provider == "deterministic"
-    assert args.model == "test-model"
-
-
-def test_generate_command_uses_explicit_task(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    response = type(
-        "Response",
-        (),
-        {"content": "Done."},
-    )()
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "Explain authentication",
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-    ):
-        build_service.return_value.generate.return_value = response
-
-        main()
-
-    call = build_service.return_value.generate.call_args
-
-    assert call.kwargs["task"] == "Explain authentication"
-
-    captured = capsys.readouterr()
-
-    assert captured.out == "\nDone.\n"
-    assert captured.err == ""
-
-
-def test_generate_command_strips_explicit_task() -> None:
-    response = type(
-        "Response",
-        (),
-        {"content": "Done."},
-    )()
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "  Explain authentication  ",
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-    ):
-        build_service.return_value.generate.return_value = response
-
-        main()
-
-    call = build_service.return_value.generate.call_args
-
-    assert call.kwargs["task"] == "Explain authentication"
-
-
-def test_generate_command_rejects_empty_explicit_task(
+def test_analyze_command_reports_failure(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "   ",
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "Error: Task cannot be empty\n"
-
-
-def test_generate_command_reads_interactive_task(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    response = type(
-        "Response",
-        (),
-        {"content": "Done."},
-    )()
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", "generate", "."],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-        patch("builtins.input", return_value="  Explain authentication  "),
-    ):
-        build_service.return_value.generate.return_value = response
-
-        main()
-
-    call = build_service.return_value.generate.call_args
-
-    assert call.kwargs["task"] == "Explain authentication"
-
-    captured = capsys.readouterr()
-
-    assert captured.out == "\nDone.\n"
-    assert captured.err == ""
-
-
-def test_generate_command_rejects_empty_interactive_task(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", "generate", "."],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("builtins.input", return_value="   "),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "Error: Task cannot be empty\n"
-
-
-def test_generate_command_handles_eof(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", "generate", "."],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch(
-            "builtins.input",
-            side_effect=EOFError,
-        ),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "Error: Task input ended unexpectedly\n"
-
-
-def test_generate_command_handles_keyboard_interrupt(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", "generate", "."],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch(
-            "builtins.input",
-            side_effect=KeyboardInterrupt,
-        ),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        main()
-
-    assert exc_info.value.code == 130
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "\n"
-
-
-def test_explicit_generate_command_parses_task() -> None:
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "context-forge",
-            "generate",
-            ".",
-            "--task",
-            "Explain the repository",
-        ],
-    ):
-        args = parse_args()
-
-    assert args.command == "generate"
-    assert args.path == Path(".")
-    assert args.task == "Explain the repository"
-
-
-def test_analyze_command_reports_analysis_failure(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", "analyze", "."],
-        ),
+        patch.object(sys, "argv", ["context-forge", "analyze", "."]),
         patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch("context_forge.operational_logging.log_analysis_failed") as log_failed,
+        pytest.raises(SystemExit) as exc_info,
     ):
-        analyzer.return_value.analyze.side_effect = RuntimeError("analysis failed")
-
-        with pytest.raises(SystemExit) as exc_info:
-            main()
+        analyzer.return_value.analyze.side_effect = RuntimeError("AST parse error")
+        main()
 
     assert exc_info.value.code == 1
-
     captured = capsys.readouterr()
-
     assert captured.out == ""
-    assert captured.err == "Error: analysis failed\n"
+    assert captured.err == "Error: AST parse error\n"
+    log_failed.assert_called_once()
 
 
-def test_generate_command_reports_generation_failure(
-    capsys: pytest.CaptureFixture[str],
+def test_run_status_does_not_analyze(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "Explain authentication",
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch("context_forge.main.build_generation_service") as build_service,
-    ):
-        build_service.return_value.generate.side_effect = RuntimeError(
-            "generation failed"
-        )
-
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "Error: generation failed\n"
-
-
-def test_parse_args_status_command(monkeypatch):
-    monkeypatch.setattr(
-        "sys.argv",
-        ["context-forge", "status", "/tmp/project"],
-    )
-
-    args = parse_args()
-
-    assert args.command == "status"
-    assert args.path == Path("/tmp/project")
-
-
-def test_parse_args_cache_command(monkeypatch):
-    monkeypatch.setattr(
-        "sys.argv",
-        ["context-forge", "cache", "/tmp/project"],
-    )
-
-    args = parse_args()
-
-    assert args.command == "cache"
-    assert args.path == Path("/tmp/project")
-
-
-def test_parse_args_inspect_command(monkeypatch):
-    monkeypatch.setattr(
-        "sys.argv",
-        ["context-forge", "inspect", "/tmp/project"],
-    )
-
-    args = parse_args()
-
-    assert args.command == "inspect"
-    assert args.path == Path("/tmp/project")
-
-
-def test_parse_args_diagnostics_command(monkeypatch):
-    monkeypatch.setattr(
-        "sys.argv",
-        ["context-forge", "diagnostics", "/tmp/project"],
-    )
-
-    args = parse_args()
-
-    assert args.command == "diagnostics"
-    assert args.path == Path("/tmp/project")
-
-
-def test_parse_args_legacy_repository_path_still_means_generate(monkeypatch):
-    monkeypatch.setattr(
-        "sys.argv",
-        ["context-forge", "/tmp/project"],
-    )
-
-    args = parse_args()
-
-    assert args.command == "generate"
-    assert args.path == Path("/tmp/project")
-
-
-def test_run_status_does_not_analyze(monkeypatch, tmp_path):
     def fail_if_called(*args, **kwargs):
         raise AssertionError("status must not analyze the repository")
 
-    monkeypatch.setattr(
-        "context_forge.main.ProjectAnalyzer.analyze",
-        fail_if_called,
-    )
+    with patch("context_forge.main.ProjectAnalyzer.analyze", fail_if_called):
+
+        class FakeFreshness:
+            is_fresh = True
+
+        class FakeRepository:
+            def check_cache_freshness(self, repository_key, fingerprints):
+                return FakeFreshness()
+
+        project = type(
+            "Project",
+            (),
+            {
+                "root_path": tmp_path,
+                "name": "sample-repo",
+                "analysis_status": "analyzed",
+                "project_type": "python",
+                "files": [1],
+                "symbols": [1, 2],
+                "relationships": [],
+                "errors": [],
+            },
+        )()
+
+        metadata = type(
+            "Metadata",
+            (),
+            {
+                "cache_schema_version": 1,
+                "analyzer_version": "0.1.0",
+            },
+        )()
+
+        with (
+            patch(
+                "context_forge.main.load_project_analysis",
+                return_value=(FakeRepository(), "key", project, metadata),
+            ),
+            patch("context_forge.main.current_fingerprints", return_value={}),
+        ):
+            run_status(tmp_path)
+
+        captured = capsys.readouterr()
+        assert "Repository: " in captured.out
+        assert "Project: sample-repo" in captured.out
+        assert "Cache status: fresh" in captured.out
+
+
+def test_run_cache_summary(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    class Changes:
+        added = ("file_a.py",)
+        modified = ("file_b.py",)
+        deleted = ("file_c.py",)
+
+    class StaleFreshness:
+        is_fresh = False
+        reason = "Files were modified"
+        changes = Changes()
 
     class FakeRepository:
-        def check_cache_freshness(
-            self,
-            repository_key,
-            fingerprints,
-        ):
-            class Freshness:
-                is_fresh = True
-
-            return Freshness()
+        def check_cache_freshness(self, repository_key, fingerprints):
+            return StaleFreshness()
 
     project = type(
         "Project",
         (),
         {
             "root_path": tmp_path,
-            "name": "test-project",
-            "analysis_status": "complete",
+            "name": "sample-repo",
+            "analysis_status": "analyzed",
             "project_type": "python",
             "files": [],
             "symbols": [],
@@ -1406,372 +318,208 @@ def test_run_status_does_not_analyze(monkeypatch, tmp_path):
         },
     )()
 
-    monkeypatch.setattr(
-        "context_forge.main.load_project_analysis",
-        lambda root_path: (
-            FakeRepository(),
-            "/tmp/project",
-            project,
-            metadata,
+    with (
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(FakeRepository(), "sample-key", project, metadata),
         ),
-    )
-
-    monkeypatch.setattr(
-        "context_forge.main.current_fingerprints",
-        lambda project: {},
-    )
-
-    run_status(tmp_path)
-
-
-def test_load_project_analysis_requires_persisted_analysis(
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        "context_forge.main.ProjectRepository.load_analysis",
-        lambda self, repository_key: None,
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="No persisted analysis found; run 'context-forge analyze' first",
+        patch(
+            "context_forge.main.current_fingerprints",
+            return_value={"file_b.py": "hash"},
+        ),
     ):
-        load_project_analysis(tmp_path)
+        run_cache(tmp_path)
+
+    captured = capsys.readouterr()
+    assert "Repository: sample-key" in captured.out
+    assert "Cache status: stale" in captured.out
+    assert "Added paths: 1" in captured.out
+    assert "Modified paths: 1" in captured.out
+    assert "Deleted paths: 1" in captured.out
+    assert "  file_a.py" in captured.out
+    assert "  file_b.py" in captured.out
+    assert "  file_c.py" in captured.out
 
 
-def test_load_project_analysis_does_not_analyze(
-    tmp_path,
-    monkeypatch,
-):
-    def fail_if_called(*args, **kwargs):
-        raise AssertionError("loading persisted analysis must not analyze")
+def test_run_inspect_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    file_obj = type("File", (), {"path": "auth/login.py"})()
+    symbol_obj = type(
+        "Symbol",
+        (),
+        {
+            "file_id": 1,
+            "start_line": 10,
+            "end_line": 20,
+            "name": "login",
+            "qualified_name": "auth.login",
+            "kind": "function",
+        },
+    )()
+    rel_type = type("RelType", (), {"value": "imports"})()
+    rel_obj = type(
+        "Rel",
+        (),
+        {
+            "relationship_type": rel_type,
+            "source_id": "auth.login",
+            "target_id": "hashlib",
+        },
+    )()
 
-    monkeypatch.setattr(
-        "context_forge.main.ProjectAnalyzer.analyze",
-        fail_if_called,
-    )
-
-    monkeypatch.setattr(
-        "context_forge.main.ProjectRepository.load_analysis",
-        lambda self, repository_key: None,
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="No persisted analysis found",
-    ):
-        load_project_analysis(tmp_path)
-
-
-def test_load_generation_project_accepts_fresh_analysis(
-    tmp_path,
-    monkeypatch,
-):
     project = type(
         "Project",
         (),
         {
             "root_path": tmp_path,
-            "name": "test-project",
-            "analysis_status": "analyzed",
-            "files": [],
+            "files": [file_obj],
+            "symbols": [symbol_obj],
+            "relationships": [rel_obj],
         },
     )()
 
-    metadata = type(
-        "Metadata",
+    with patch(
+        "context_forge.main.load_project_analysis",
+        return_value=(None, "key", project, None),
+    ):
+        run_inspect(tmp_path)
+
+    captured = capsys.readouterr()
+    assert "Files:" in captured.out
+    assert "  auth/login.py" in captured.out
+    assert "Symbols:" in captured.out
+    assert "  auth.login [function] lines 10-20" in captured.out
+    assert "Relationships:" in captured.out
+    assert "  imports: auth.login -> hashlib" in captured.out
+
+
+def test_run_diagnostics_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    error_obj = type(
+        "Error",
         (),
         {
-            "cache_schema_version": 1,
-            "analyzer_version": "0.1.0",
+            "severity": "error",
+            "message": "Syntax error at token",
+            "path": "broken.py",
+            "line": 15,
         },
     )()
 
-    class Freshness:
-        is_fresh = True
-
-    class FakeRepository:
-        def check_cache_freshness(
-            self,
-            repository_key,
-            fingerprints,
-        ):
-            assert repository_key == "test-repository"
-            assert fingerprints == {}
-            return Freshness()
-
-    monkeypatch.setattr(
-        "context_forge.main.load_project_analysis",
-        lambda root_path: (
-            FakeRepository(),
-            "test-repository",
-            project,
-            metadata,
-        ),
-    )
-
-    monkeypatch.setattr(
-        "context_forge.main.current_fingerprints",
-        lambda project: {},
-    )
-
-    loaded_project, loaded_metadata = load_generation_project(tmp_path)
-
-    assert loaded_project is project
-    assert loaded_metadata is metadata
-
-
-def test_load_generation_project_rejects_stale_analysis(
-    tmp_path,
-    monkeypatch,
-):
     project = type(
         "Project",
         (),
         {
             "root_path": tmp_path,
-            "name": "test-project",
-            "analysis_status": "analyzed",
-            "files": [],
+            "errors": [error_obj],
         },
     )()
 
-    metadata = type(
-        "Metadata",
-        (),
-        {
-            "cache_schema_version": 1,
-            "analyzer_version": "0.1.0",
-        },
-    )()
+    with patch(
+        "context_forge.main.load_project_analysis",
+        return_value=(None, "key", project, None),
+    ):
+        run_diagnostics(tmp_path)
+
+    captured = capsys.readouterr()
+    assert "[error] Syntax error at token" in captured.out
+    assert "  Path: broken.py" in captured.out
+    assert "  Line: 15" in captured.out
+
+
+def test_load_project_analysis_requires_persisted_analysis(tmp_path: Path) -> None:
+    with (
+        patch(
+            "context_forge.main.ProjectRepository.load_analysis",
+            return_value=None,
+        ),
+        pytest.raises(
+            ValueError,
+            match="No persisted analysis found; run 'context-forge analyze' first",
+        ),
+    ):
+        load_project_analysis(tmp_path)
+
+
+def test_load_fresh_project_rejects_stale_analysis(tmp_path: Path) -> None:
+    project = type("Project", (), {"root_path": tmp_path, "files": []})()
+    metadata = type("Metadata", (), {})()
 
     class StaleFreshness:
         is_fresh = False
 
     class FakeRepository:
-        def check_cache_freshness(
-            self,
-            repository_key,
-            fingerprints,
-        ):
+        def check_cache_freshness(self, repository_key, fingerprints):
             return StaleFreshness()
 
-    monkeypatch.setattr(
-        "context_forge.main.load_project_analysis",
-        lambda root_path: (
-            FakeRepository(),
-            "test-repository",
-            project,
-            metadata,
+    with (
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(FakeRepository(), "key", project, metadata),
         ),
-    )
-
-    monkeypatch.setattr(
-        "context_forge.main.current_fingerprints",
-        lambda project: {},
-    )
-
-    with pytest.raises(
-        ValueError,
-        match=(
-            r"Repository analysis is stale; run "
-            r"'context-forge analyze .*' first"
+        patch("context_forge.main.current_fingerprints", return_value={}),
+        pytest.raises(
+            ValueError,
+            match=r"Repository analysis is stale; run 'context-forge analyze .*' first",
         ),
     ):
-        load_generation_project(tmp_path)
+        load_fresh_project(tmp_path)
 
 
-def test_parse_args_runtime_command(monkeypatch) -> None:
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "context-forge",
-            "runtime",
-            "/tmp/project",
-            "--model",
-            "test-model",
-            "--base-url",
-            "http://example.test:11434",
-        ],
-    )
-
-    args = parse_args()
-
-    assert args.command == "runtime"
-    assert args.path == Path("/tmp/project")
-    assert args.model == "test-model"
-    assert args.base_url == "http://example.test:11434"
-
-
-def test_main_runtime_reports_ready(
+def test_context_command_with_explicit_task(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    status = OllamaRuntimeStatus(
-        available=True,
-        model_available=True,
-        base_url="http://localhost:11434",
-        model="qwen2.5-coder:7b",
-        reason="ready",
+    import uuid
+
+    from context_forge.context.types import ContextUnitType
+
+    unit_id = uuid.uuid4()
+    package = ContextPackage(
+        task="Authenticate users",
+        units=(
+            ContextUnit(
+                entity_id=unit_id,
+                unit_type=ContextUnitType.FILE,
+                relevance=1.0,
+                content="def auth(): pass",
+            ),
+        ),
     )
 
     with (
         patch.object(
             sys,
             "argv",
-            ["context-forge", "runtime", str(tmp_path)],
+            ["context-forge", "context", str(tmp_path), "--task", "Authenticate users"],
         ),
-        patch("context_forge.main.OllamaRuntime") as runtime_class,
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
+        ),
+        patch("context_forge.application.build_context_service") as build_service,
     ):
-        runtime_class.return_value.check.return_value = status
-
+        build_service.return_value.retrieve_context.return_value = package
         main()
 
     captured = capsys.readouterr()
-
-    assert captured.out == (
-        "Ollama runtime: available\n"
-        "Base URL: http://localhost:11434\n"
-        "Model: qwen2.5-coder:7b\n"
-        "Model status: available\n"
-        "Ready: yes\n"
-        "Reason: ready\n"
-    )
     assert captured.err == ""
+    parsed = json.loads(captured.out)
+    assert parsed["task"] == "Authenticate users"
+    assert parsed["units"][0]["entity_id"] == str(unit_id)
+    assert parsed["units"][0]["unit_type"] == "file"
 
-    runtime_class.assert_called_once()
-    runtime_class.return_value.check.assert_called_once_with(
-        "qwen2.5-coder:7b",
-    )
 
-
-def test_main_runtime_reports_missing_model(
+def test_context_command_writes_output_file(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    status = OllamaRuntimeStatus(
-        available=True,
-        model_available=False,
-        base_url="http://localhost:11434",
-        model="missing-model",
-        reason="model_unavailable",
+    package = ContextPackage(
+        task="Explain auth",
+        units=(),
     )
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", "runtime", str(tmp_path)],
-        ),
-        patch("context_forge.main.OllamaRuntime") as runtime_class,
-    ):
-        runtime_class.return_value.check.return_value = status
-
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert "Ollama runtime: available\n" in captured.out
-    assert "Model: missing-model\n" in captured.out
-    assert "Model status: unavailable\n" in captured.out
-    assert "Ready: no\n" in captured.out
-    assert "Reason: model_unavailable\n" in captured.out
-    assert captured.err == ("Error: Ollama runtime check failed: model_unavailable\n")
-
-
-def test_main_runtime_reports_unavailable_runtime(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    status = OllamaRuntimeStatus(
-        available=False,
-        model_available=False,
-        base_url="http://localhost:11434",
-        model="qwen2.5-coder:7b",
-        reason="ollama_unavailable",
-    )
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            ["context-forge", "runtime", str(tmp_path)],
-        ),
-        patch("context_forge.main.OllamaRuntime") as runtime_class,
-    ):
-        runtime_class.return_value.check.return_value = status
-
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert "Ollama runtime: unavailable\n" in captured.out
-    assert "Ready: no\n" in captured.out
-    assert "Reason: ollama_unavailable\n" in captured.out
-    assert captured.err == ("Error: Ollama runtime check failed: ollama_unavailable\n")
-
-
-def test_main_runtime_uses_explicit_model_and_base_url(
-    tmp_path: Path,
-) -> None:
-    argv = [
-        "context-forge",
-        "runtime",
-        str(tmp_path),
-        "--model",
-        "custom-model",
-        "--base-url",
-        "http://example.test:11434",
-    ]
-
-    status = OllamaRuntimeStatus(
-        available=True,
-        model_available=True,
-        base_url="http://example.test:11434",
-        model="custom-model",
-        reason="ready",
-    )
-
-    with (
-        patch.object(sys, "argv", argv),
-        patch("context_forge.main.OllamaRuntime") as runtime_class,
-    ):
-        runtime_class.return_value.check.return_value = status
-
-        main()
-
-    runtime_class.assert_called_once_with(
-        base_url="http://example.test:11434",
-        timeout=60.0,
-    )
-    runtime_class.return_value.check.assert_called_once_with(
-        "custom-model",
-    )
-
-
-def test_generate_uses_persisted_analysis_instead_of_analyzer(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    response = type(
-        "Response",
-        (),
-        {"content": "Done."},
-    )()
-
-    project = object()
-    metadata = object()
-
-    load_generation_project = Mock(
-        return_value=(project, metadata),
-    )
+    output_file = tmp_path / "context.json"
 
     with (
         patch.object(
@@ -1779,510 +527,111 @@ def test_generate_uses_persisted_analysis_instead_of_analyzer(
             "argv",
             [
                 "context-forge",
-                "generate",
-                ".",
+                "context",
+                str(tmp_path),
                 "--task",
-                "Explain authentication",
-                "--provider",
-                "deterministic",
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            load_generation_project,
-        ),
-        patch(
-            "context_forge.main.ProjectAnalyzer",
-        ) as analyzer,
-        patch(
-            "context_forge.main.build_generation_service",
-        ) as build_service,
-    ):
-        build_service.return_value.generate.return_value = response
-
-        main()
-
-    load_generation_project.assert_called_once_with(Path.cwd())
-    analyzer.return_value.analyze.assert_not_called()
-
-    captured = capsys.readouterr()
-
-    assert captured.out == "\nDone.\n"
-    assert captured.err == ""
-
-
-def test_print_generation_response_prints_content(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    response = GenerationResponse(
-        content="Generated answer.",
-        provider="deterministic",
-        model="deterministic",
-    )
-
-    main_module.print_generation_response(response)
-
-    captured = capsys.readouterr()
-
-    assert captured.out == "\nGenerated answer.\n"
-    assert captured.err == ""
-
-
-def test_print_generation_response_rejects_non_string_content() -> None:
-    response = type(
-        "Response",
-        (),
-        {"content": None},
-    )()
-
-    with pytest.raises(TypeError, match="Generation response content must be a string"):
-        main_module.print_generation_response(response)
-
-
-def test_generate_provider_failure_is_reported_on_stderr(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    response_error = RuntimeError("generation failed")
-
-    project = object()
-    metadata = object()
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "Explain authentication",
-                "--provider",
-                "deterministic",
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(project, metadata),
-        ),
-        patch(
-            "context_forge.main.build_generation_service",
-        ) as build_service,
-    ):
-        build_service.return_value.generate.side_effect = response_error
-
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-
-    assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err == "Error: generation failed\n"
-
-
-def test_generate_writes_response_only_to_stdout(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    response = type(
-        "Response",
-        (),
-        {"content": "Generated answer."},
-    )()
-
-    project = object()
-    metadata = object()
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "Explain authentication",
-                "--provider",
-                "deterministic",
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(project, metadata),
-        ),
-        patch(
-            "context_forge.main.build_generation_service",
-        ) as build_service,
-    ):
-        build_service.return_value.generate.return_value = response
-
-        main()
-
-    captured = capsys.readouterr()
-
-    assert captured.out == "\nGenerated answer.\n"
-    assert captured.err == ""
-
-
-def test_generate_passes_persisted_project_to_generation_service(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    persisted_project = object()
-    metadata = object()
-
-    response = type(
-        "Response",
-        (),
-        {"content": "Generated answer."},
-    )()
-
-    load_generation_project = Mock(
-        return_value=(persisted_project, metadata),
-    )
-
-    build_service = Mock()
-    build_service.return_value.generate.return_value = response
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "Explain authentication",
-                "--provider",
-                "deterministic",
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            load_generation_project,
-        ),
-        patch(
-            "context_forge.main.build_generation_service",
-            build_service,
-        ),
-    ):
-        main()
-
-    generate_call = build_service.return_value.generate.call_args
-
-    assert generate_call.kwargs["project"] is persisted_project
-
-    captured = capsys.readouterr()
-
-    assert captured.out == "\nGenerated answer.\n"
-    assert captured.err == ""
-
-
-def test_generate_workflow_uses_persisted_project_and_returns_response(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    persisted_project = object()
-    metadata = object()
-
-    response = type(
-        "Response",
-        (),
-        {"content": "Authentication uses token validation."},
-    )()
-
-    service = Mock()
-    service.generate.return_value = response
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "Explain authentication",
-                "--provider",
-                "deterministic",
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(persisted_project, metadata),
-        ),
-        patch(
-            "context_forge.main.build_generation_service",
-            return_value=service,
-        ),
-    ):
-        main()
-
-    service.generate.assert_called_once()
-
-    call = service.generate.call_args
-
-    assert call.kwargs["project"] is persisted_project
-    assert call.kwargs["task"] == "Explain authentication"
-
-    captured = capsys.readouterr()
-
-    assert captured.out == ("\nAuthentication uses token validation.\n")
-    assert captured.err == ""
-
-
-def test_print_generation_response_does_not_print_response_metadata(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    response = GenerationResponse(
-        content="Generated answer",
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-    )
-
-    main_module.print_generation_response(response)
-
-    captured = capsys.readouterr()
-
-    assert captured.out == "\nGenerated answer\n"
-    assert captured.err == ""
-    assert "ollama" not in captured.out
-    assert "qwen2.5-coder:7b" not in captured.out
-
-
-def test_generate_writes_response_to_output_file(
-    tmp_path: Path,
-) -> None:
-    output_path = tmp_path / "answer.md"
-
-    response = type(
-        "Response",
-        (),
-        {"content": "Generated answer."},
-    )()
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "Explain authentication",
-                "--provider",
-                "deterministic",
+                "Explain auth",
                 "--output",
-                str(output_path),
+                str(output_file),
             ],
         ),
         patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
         ),
-        patch(
-            "context_forge.main.build_generation_service",
-        ) as build_service,
+        patch("context_forge.application.build_context_service") as build_service,
     ):
-        build_service.return_value.generate.return_value = response
-
-        main()
-    build_service.return_value.generate.assert_called_once()
-    assert output_path.read_text(encoding="utf-8") == ("Generated answer.\n")
-
-    assert output_path.read_text(encoding="utf-8") == ("Generated answer.\n")
-
-
-def test_generate_output_file_mode_does_not_print_response(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    output_path = tmp_path / "answer.md"
-
-    response = type(
-        "Response",
-        (),
-        {"content": "Generated answer."},
-    )()
-
-    with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "Explain authentication",
-                "--provider",
-                "deterministic",
-                "--output",
-                str(output_path),
-            ],
-        ),
-        patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
-        ),
-        patch(
-            "context_forge.main.build_generation_service",
-        ) as build_service,
-    ):
-        build_service.return_value.generate.return_value = response
-
+        build_service.return_value.retrieve_context.return_value = package
         main()
 
     captured = capsys.readouterr()
-
     assert captured.out == ""
     assert captured.err == ""
+    assert output_file.exists()
+    content = json.loads(output_file.read_text(encoding="utf-8"))
+    assert content["task"] == "Explain auth"
 
 
-def test_write_generation_response_rejects_non_string_content(
+def test_context_command_interactive_input(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    output_path = tmp_path / "answer.md"
+    package = ContextPackage(
+        task="Fix scrolling",
+        units=(),
+    )
 
-    response = type(
-        "Response",
-        (),
-        {"content": None},
-    )()
-
-    with pytest.raises(
-        TypeError,
-        match="Generation response content must be a string",
+    with (
+        patch.object(sys, "argv", ["context-forge", "context", str(tmp_path)]),
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
+        ),
+        patch("builtins.input", return_value="Fix scrolling"),
+        patch("context_forge.application.build_context_service") as build_service,
     ):
-        main_module.write_generation_response(
-            response,
-            output_path,
-        )
+        build_service.return_value.retrieve_context.return_value = package
+        main()
 
-    assert not output_path.exists()
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    parsed = json.loads(captured.out)
+    assert parsed["task"] == "Fix scrolling"
 
 
-def test_generate_help_describes_generation_options(
+def test_context_command_rejects_empty_task(
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with (
         patch.object(
             sys,
             "argv",
-            ["context-forge", "generate", "--help"],
+            ["context-forge", "context", str(tmp_path), "--task", "   "],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
         main()
 
-    assert exc_info.value.code == 0
-
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
-
-    assert "--provider PROVIDER" in captured.out
-    assert "--model MODEL" in captured.out
-    assert "--temperature TEMPERATURE" in captured.out
-    assert "--max-tokens MAX_TOKENS" in captured.out
-    assert "--base-url BASE_URL" in captured.out
-    assert "--task TASK" in captured.out
-    assert "--output OUTPUT" in captured.out
-
-    assert "Generation provider." not in captured.out
-    assert "Generation model." not in captured.out
-    assert "Generation temperature." not in captured.out
-    assert "Maximum output tokens." not in captured.out
-    assert "Provider runtime URL." not in captured.out
-    assert "Generation task." not in captured.out
-    assert "Write response to a file instead of stdout." not in captured.out
+    assert captured.err == "Error: Task cannot be empty\n"
 
 
-def test_write_generation_response_preserves_generated_content(
-    tmp_path: Path,
-) -> None:
-    output_path = tmp_path / "answer.md"
-    response = GenerationResponse(
-        content="# Authentication\n\nUse token validation.",
-        provider="deterministic",
-        model="deterministic",
-    )
-
-    main_module.write_generation_response(
-        response,
-        output_path,
-    )
-
-    assert output_path.read_text(encoding="utf-8") == (
-        "# Authentication\n\nUse token validation.\n"
-    )
-
-
-def test_write_generation_response_converts_os_error(
-    tmp_path: Path,
-) -> None:
-    output_path = tmp_path / "missing" / "answer.md"
-    response = GenerationResponse(
-        content="Generated answer.",
-        provider="deterministic",
-        model="deterministic",
-    )
-
-    with pytest.raises(
-        ValueError,
-        match=r"Could not write generation output to .*answer\.md:",
-    ):
-        main_module.write_generation_response(
-            response,
-            output_path,
-        )
-
-
-def test_generate_reports_output_write_failure(
+def test_context_command_handles_keyboard_interrupt(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    response = type(
-        "Response",
-        (),
-        {"content": "Generated answer."},
-    )()
-
-    output_path = tmp_path / "missing" / "answer.md"
-
     with (
-        patch.object(
-            sys,
-            "argv",
-            [
-                "context-forge",
-                "generate",
-                ".",
-                "--task",
-                "Explain authentication",
-                "--provider",
-                "deterministic",
-                "--output",
-                str(output_path),
-            ],
-        ),
+        patch.object(sys, "argv", ["context-forge", "context", str(tmp_path)]),
         patch(
-            "context_forge.main.load_generation_project",
-            return_value=(object(), object()),
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
         ),
-        patch(
-            "context_forge.main.build_generation_service",
-        ) as build_service,
+        patch("builtins.input", side_effect=KeyboardInterrupt),
+        pytest.raises(SystemExit) as exc_info,
     ):
-        build_service.return_value.generate.return_value = response
+        main()
 
-        with pytest.raises(SystemExit) as exc_info:
-            main()
+    assert exc_info.value.code == 130
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_context_command_handles_eof(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(sys, "argv", ["context-forge", "context", str(tmp_path)]),
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
+        ),
+        patch("builtins.input", side_effect=EOFError),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
 
     assert exc_info.value.code == 1
-
     captured = capsys.readouterr()
-
-    assert captured.out == ""
-    assert captured.err.startswith("Error: Could not write generation output to ")
+    assert captured.err == "Error: Task input ended unexpectedly\n"

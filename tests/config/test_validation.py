@@ -2,9 +2,9 @@ import pytest
 
 from context_forge.config import (
     ConfigurationValidationError,
+    ProjectAnalysisConfiguration,
     ProjectConfiguration,
-    ProjectGenerationConfiguration,
-    ProjectProviderConfiguration,
+    ProjectStorageConfiguration,
     validate_project_config,
 )
 
@@ -15,138 +15,90 @@ def test_validate_project_config_uses_empty_sections_when_missing() -> None:
     assert result == ProjectConfiguration()
 
 
-def test_validate_project_config_reads_provider_configuration() -> None:
+def test_validate_project_config_reads_storage_configuration() -> None:
     result = validate_project_config(
         {
-            "provider": {
-                "provider": "ollama",
-                "model": "qwen2.5-coder:7b",
-                "base_url": "http://localhost:11434",
+            "storage": {
+                "database_path": "custom.db",
             }
         }
     )
 
-    assert result.provider == ProjectProviderConfiguration(
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-        base_url="http://localhost:11434",
+    assert result.storage == ProjectStorageConfiguration(
+        database_path="custom.db",
     )
 
 
-def test_validate_project_config_reads_generation_configuration() -> None:
+def test_validate_project_config_reads_analysis_configuration() -> None:
     result = validate_project_config(
         {
-            "generation": {
-                "temperature": 0.2,
-                "max_tokens": 2048,
+            "analysis": {
+                "max_context_units": 35,
             }
         }
     )
 
-    assert result.generation == ProjectGenerationConfiguration(
-        temperature=0.2,
-        max_tokens=2048,
+    assert result.analysis == ProjectAnalysisConfiguration(
+        max_context_units=35,
     )
 
 
 def test_validate_project_config_preserves_partial_configuration() -> None:
     result = validate_project_config(
         {
-            "provider": {
-                "model": "qwen2.5-coder:7b",
-            },
-            "generation": {
-                "temperature": 0.2,
+            "storage": {
+                "database_path": "db.sqlite",
             },
         }
     )
 
-    assert result.provider.model == "qwen2.5-coder:7b"
-    assert result.provider.provider is None
-    assert result.provider.base_url is None
-    assert result.generation.temperature == 0.2
-    assert result.generation.max_tokens is None
+    assert result.storage.database_path == "db.sqlite"
+    assert result.analysis.max_context_units is None
 
 
-@pytest.mark.parametrize(
-    "data",
-    (
-        {"unknown": {}},
-        {"provider": {}, "unknown": {}},
-    ),
-)
-def test_validate_project_config_rejects_unknown_sections(
-    data: dict[str, object],
-) -> None:
+def test_validate_project_config_rejects_unknown_top_level_section() -> None:
     with pytest.raises(
         ConfigurationValidationError,
-        match="Unknown configuration section",
+        match="Unknown configuration section: extra",
     ):
-        validate_project_config(data)
+        validate_project_config({"extra": {}})
 
 
-@pytest.mark.parametrize(
-    "value",
-    (123, True, [], {}),
-)
-def test_validate_project_config_validates_provider_name(
-    value: object,
-) -> None:
+def test_validate_project_config_rejects_non_table_section() -> None:
     with pytest.raises(
         ConfigurationValidationError,
-        match="Configuration value 'provider' must be a string",
+        match="Configuration section 'storage' must be a table",
     ):
-        validate_project_config({"provider": {"provider": value}})
+        validate_project_config({"storage": "invalid"})
 
 
-def test_validate_project_config_rejects_empty_model() -> None:
+def test_validate_project_config_rejects_empty_database_path() -> None:
     with pytest.raises(
         ConfigurationValidationError,
-        match="Configuration value 'model' cannot be empty",
+        match="Configuration value 'database_path' cannot be empty",
     ):
-        validate_project_config({"provider": {"model": "   "}})
+        validate_project_config({"storage": {"database_path": "   "}})
 
 
-@pytest.mark.parametrize(
-    "value",
-    (-0.1, 2.1, "0.5", True),
-)
-def test_validate_project_config_validates_temperature(
-    value: object,
-) -> None:
+def test_validate_project_config_rejects_non_string_database_path() -> None:
     with pytest.raises(
         ConfigurationValidationError,
+        match="Configuration value 'database_path' must be a string",
     ):
-        validate_project_config({"generation": {"temperature": value}})
+        validate_project_config({"storage": {"database_path": 123}})
 
 
-@pytest.mark.parametrize(
-    "value",
-    (0, -1, 1.5, "512", True),
-)
-def test_validate_project_config_validates_max_tokens(
-    value: object,
-) -> None:
+def test_validate_project_config_rejects_non_int_max_context_units() -> None:
     with pytest.raises(
         ConfigurationValidationError,
+        match="Configuration value 'max_context_units' must be an integer",
     ):
-        validate_project_config({"generation": {"max_tokens": value}})
+        validate_project_config({"analysis": {"max_context_units": "20"}})
 
 
-@pytest.mark.parametrize(
-    "section",
-    (
-        ("provider", "invalid"),
-        ("generation", "invalid"),
-    ),
-)
-def test_validate_project_config_rejects_non_table_sections(
-    section: tuple[str, object],
-) -> None:
-    name, value = section
-
+def test_validate_project_config_rejects_negative_max_context_units() -> None:
     with pytest.raises(
         ConfigurationValidationError,
-        match=f"Configuration section '{name}' must be a table",
+        match="Configuration value 'max_context_units' must be positive",
     ):
-        validate_project_config({name: value})
+        validate_project_config({"analysis": {"max_context_units": -5}})
