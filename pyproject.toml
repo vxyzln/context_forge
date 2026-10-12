@@ -1,7 +1,7 @@
 [project]
 name = "context-forge"
 version = "0.1.0"
-description = "A local-first project intelligence and context generation engine for AI agents."
+description = "Deterministic, local-first repository intelligence and agent memory for Python projects."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
