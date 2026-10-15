@@ -1415,3 +1415,118 @@ def test_analyzer_detects_added_and_deleted_files_incrementally(
     assert retained_after.id == retained_file.id
 
     assert {symbol.name for symbol in second_project.symbols} == {"retained", "added"}
+
+
+def test_incremental_analysis_preserves_errors_from_unchanged_files(
+    tmp_path: Path,
+) -> None:
+    broken_source = tmp_path / "broken.py"
+    changing_source = tmp_path / "changing.py"
+    database_path = tmp_path / ".context_forge.db"
+
+    broken_source.write_text(
+        "def broken(:\n    pass\n",
+        encoding="utf-8",
+    )
+    changing_source.write_text(
+        "def original() -> str:\n    return 'original'\n",
+        encoding="utf-8",
+    )
+
+    first_project = ProjectAnalyzer(
+        tmp_path,
+        database_path,
+    ).analyze()
+
+    original_errors = [
+        error for error in first_project.errors if error.startswith("broken.py:")
+    ]
+
+    assert original_errors
+    assert first_project.analysis_status == "analyzed"
+
+    changing_source.write_text(
+        "def updated() -> str:\n    return 'updated'\n",
+        encoding="utf-8",
+    )
+
+    second_project = ProjectAnalyzer(
+        tmp_path,
+        database_path,
+    ).analyze()
+
+    preserved_errors = [
+        error for error in second_project.errors if error.startswith("broken.py:")
+    ]
+
+    assert preserved_errors == original_errors
+    assert second_project.analysis_status == "analyzed"
+    assert "updated" in {symbol.name for symbol in second_project.symbols}
+
+
+def test_failed_source_read_does_not_persist_new_fingerprint(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    database_path = tmp_path / ".context_forge.db"
+
+    source.write_text(
+        "def hello() -> str:\n    return 'hello'\n",
+        encoding="utf-8",
+    )
+
+    analyzer = ProjectAnalyzer(tmp_path, database_path)
+    first_project = analyzer.analyze()
+
+    assert first_project.analysis_status == "analyzed"
+    assert Path("main.py") in analyzer.repository.load_file_fingerprints(
+        analyzer.identity.key,
+    )
+
+    source.write_bytes(b"\xff\xfe\xfa")
+
+    failing_analyzer = ProjectAnalyzer(tmp_path, database_path)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Unable to read source file 'main.py'",
+    ):
+        failing_analyzer.analyze()
+
+    fingerprints = failing_analyzer.repository.load_file_fingerprints(
+        failing_analyzer.identity.key,
+    )
+
+    assert Path("main.py") not in fingerprints
+
+
+def test_incremental_analysis_recovers_after_source_read_failure(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    database_path = tmp_path / ".context_forge.db"
+
+    source.write_text(
+        "def original() -> str:\n    return 'original'\n",
+        encoding="utf-8",
+    )
+
+    ProjectAnalyzer(tmp_path, database_path).analyze()
+
+    source.write_bytes(b"\xff\xfe\xfa")
+
+    with pytest.raises(RuntimeError, match="Unable to read source file"):
+        ProjectAnalyzer(tmp_path, database_path).analyze()
+
+    source.write_text(
+        "def recovered() -> str:\n    return 'recovered'\n",
+        encoding="utf-8",
+    )
+
+    recovered_project = ProjectAnalyzer(
+        tmp_path,
+        database_path,
+    ).analyze()
+
+    assert recovered_project.analysis_status == "analyzed"
+    assert "recovered" in {symbol.name for symbol in recovered_project.symbols}

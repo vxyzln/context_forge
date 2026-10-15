@@ -63,12 +63,12 @@ class ProjectAnalyzer:
 
             try:
                 source = (project.root_path / file.path).read_text(encoding="utf-8")
-
-                result: ParseResult = parser.parse(source, file)
-
             except (OSError, UnicodeDecodeError) as error:
-                project.errors.append(f"{file.path}: {error}")
-                continue
+                raise RuntimeError(
+                    f"Unable to read source file '{file.path}': {error}"
+                ) from error
+
+            result: ParseResult = parser.parse(source, file)
 
             for symbol in result.symbols:
                 project.add_symbol(symbol)
@@ -188,7 +188,12 @@ class ProjectAnalyzer:
         cached_project.references = cached_references
         cached_project.inheritance_references = cached_inheritance_references
         cached_project.relationships = []
-        cached_project.errors = []
+        changed_path_prefixes = tuple(f"{path.as_posix()}:" for path in changed_paths)
+        cached_project.errors = [
+            error
+            for error in cached_project.errors
+            if not error.startswith(changed_path_prefixes)
+        ]
 
         cached_project.name = scanned_project.name
         cached_project.repository_url = scanned_project.repository_url
