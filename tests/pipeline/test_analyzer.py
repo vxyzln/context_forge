@@ -1397,10 +1397,8 @@ def test_analyzer_detects_added_and_deleted_files_incrementally(
         encoding="utf-8",
     )
 
-    second_project = ProjectAnalyzer(
-        tmp_path,
-        database_path,
-    ).analyze()
+    second_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    second_project = second_analyzer.analyze()
 
     assert second_project.id == first_project.id
     assert {file.path for file in second_project.files} == {
@@ -1415,6 +1413,32 @@ def test_analyzer_detects_added_and_deleted_files_incrementally(
     assert retained_after.id == retained_file.id
 
     assert {symbol.name for symbol in second_project.symbols} == {"retained", "added"}
+
+    # The persisted analysis must match the current repository.
+    loaded_analysis = second_analyzer.repository.load_analysis(
+        second_analyzer.identity.key,
+    )
+
+    assert loaded_analysis is not None
+    loaded_project, _ = loaded_analysis
+
+    assert {file.path for file in loaded_project.files} == {
+        Path("retained.py"),
+        Path("added.py"),
+    }
+    assert {symbol.name for symbol in loaded_project.symbols} == {
+        "retained",
+        "added",
+    }
+
+    fingerprints = second_analyzer.repository.load_file_fingerprints(
+        second_analyzer.identity.key,
+    )
+
+    assert set(fingerprints) == {
+        Path("retained.py"),
+        Path("added.py"),
+    }
 
 
 def test_incremental_analysis_preserves_errors_from_unchanged_files(
@@ -1530,3 +1554,87 @@ def test_incremental_analysis_recovers_after_source_read_failure(
 
     assert recovered_project.analysis_status == "analyzed"
     assert "recovered" in {symbol.name for symbol in recovered_project.symbols}
+
+
+def test_analyzer_handles_file_rename_incrementally(
+    tmp_path: Path,
+) -> None:
+    original_source = tmp_path / "original.py"
+    retained_source = tmp_path / "retained.py"
+    database_path = tmp_path / ".context_forge.db"
+
+    original_source.write_text(
+        "def original_name() -> str:\n    return 'original'\n",
+        encoding="utf-8",
+    )
+    retained_source.write_text(
+        "def retained_name() -> str:\n    return 'retained'\n",
+        encoding="utf-8",
+    )
+
+    first_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    first_project = first_analyzer.analyze()
+
+    original_file = next(
+        file for file in first_project.files if file.path == Path("original.py")
+    )
+    retained_file = next(
+        file for file in first_project.files if file.path == Path("retained.py")
+    )
+    original_symbol_ids = {
+        symbol.id
+        for symbol in first_project.symbols
+        if symbol.file_id == original_file.id
+    }
+
+    assert original_symbol_ids
+
+    renamed_source = tmp_path / "renamed.py"
+    original_source.rename(renamed_source)
+
+    second_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    second_project = second_analyzer.analyze()
+
+    current_paths = {file.path for file in second_project.files}
+
+    assert current_paths == {
+        Path("renamed.py"),
+        Path("retained.py"),
+    }
+
+    symbol_names = {symbol.name for symbol in second_project.symbols}
+
+    assert "original_name" in symbol_names
+    assert "retained_name" in symbol_names
+
+    retained_after = next(
+        file for file in second_project.files if file.path == Path("retained.py")
+    )
+    renamed_file = next(
+        file for file in second_project.files if file.path == Path("renamed.py")
+    )
+
+    assert retained_after.id == retained_file.id
+    assert renamed_file.id != original_file.id
+
+    # Obsolete symbols from the original path must not survive.
+    current_symbol_ids = {symbol.id for symbol in second_project.symbols}
+    assert original_symbol_ids.isdisjoint(current_symbol_ids)
+
+    # The persisted analysis must agree with the in-memory result.
+    loaded_analysis = second_analyzer.repository.load_analysis(
+        second_analyzer.identity.key,
+    )
+
+    assert loaded_analysis is not None
+    loaded_project, _ = loaded_analysis
+
+    assert {file.path for file in loaded_project.files} == current_paths
+    assert {symbol.name for symbol in loaded_project.symbols} == symbol_names
+
+    fingerprints = second_analyzer.repository.load_file_fingerprints(
+        second_analyzer.identity.key,
+    )
+
+    assert set(fingerprints) == current_paths
+    assert Path("original.py") not in fingerprints
