@@ -776,3 +776,122 @@ def test_traverse_is_cycle_safe(tmp_path: Path) -> None:
     assert result == [
         project.files[1].id,
     ]
+
+
+def test_query_searches_file_by_exact_repository_relative_path(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+
+    file = File(
+        project_id=project.id,
+        path=Path("src/main.py"),
+        name="main.py",
+        extension=".py",
+    )
+    project.add_file(file)
+
+    results = ProjectQuery(project).search("src/main.py")
+
+    matching_results = [result for result in results if result.entity_id == file.id]
+
+    assert len(matching_results) == 1
+    assert matching_results[0].score == 1.0
+    assert matching_results[0].reason == "Exact file path match"
+    assert matching_results[0].path == "src/main.py"
+
+
+def test_query_normalizes_windows_separators_for_file_paths(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+
+    file = File(
+        project_id=project.id,
+        path=Path("src/main.py"),
+        name="main.py",
+        extension=".py",
+    )
+    project.add_file(file)
+
+    results = ProjectQuery(project).search(r"src\main.py")
+
+    matching_results = [result for result in results if result.entity_id == file.id]
+
+    assert len(matching_results) == 1
+    assert matching_results[0].score == 1.0
+    assert matching_results[0].reason == "Exact file path match"
+
+
+def test_query_searches_directory_by_exact_repository_relative_path(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+
+    directory = Directory(
+        project_id=project.id,
+        path=Path("src/helpers"),
+        name="helpers",
+    )
+    project.add_directory(directory)
+
+    results = ProjectQuery(project).search("src/helpers")
+
+    matching_results = [
+        result for result in results if result.entity_id == directory.id
+    ]
+
+    assert len(matching_results) == 1
+    assert matching_results[0].score == 1.0
+    assert matching_results[0].reason == "Exact directory path match"
+
+
+def test_query_search_tie_breaking_is_independent_of_symbol_order(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    file = project.files[0]
+
+    first = Symbol(
+        file_id=file.id,
+        name="duplicate",
+        kind="function",
+        start_line=20,
+        end_line=21,
+        qualified_name="duplicate",
+    )
+    second = Symbol(
+        file_id=file.id,
+        name="duplicate",
+        kind="function",
+        start_line=30,
+        end_line=31,
+        qualified_name="duplicate",
+    )
+
+    project.add_symbol(first)
+    project.add_symbol(second)
+
+    query = ProjectQuery(project)
+
+    first_order = [
+        result.entity_id
+        for result in query.search("duplicate")
+        if result.entity_id in {first.id, second.id}
+    ]
+
+    project.symbols.reverse()
+
+    second_order = [
+        result.entity_id
+        for result in query.search("duplicate")
+        if result.entity_id in {first.id, second.id}
+    ]
+
+    expected_order = sorted(
+        [first.id, second.id],
+        key=lambda entity_id: entity_id.hex,
+    )
+
+    assert first_order == expected_order
+    assert second_order == expected_order

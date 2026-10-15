@@ -271,7 +271,7 @@ class ProjectQuery:
         )
 
     def search(self, query: str) -> list[SearchResult]:
-        normalized_query = query.strip().lower()
+        normalized_query = query.strip().replace("\\", "/").lower()
 
         if not normalized_query:
             return []
@@ -288,6 +288,9 @@ class ProjectQuery:
             if name == normalized_query:
                 score = 1.0
                 reason = "Exact directory name match"
+            elif path == normalized_query:
+                score = 1.0
+                reason = "Exact directory path match"
             elif normalized_query in name:
                 score = 0.8
                 reason = "Directory name contains query"
@@ -317,6 +320,9 @@ class ProjectQuery:
             if name == normalized_query:
                 score = 1.0
                 reason = "Exact file name match"
+            elif path == normalized_query:
+                score = 1.0
+                reason = "Exact file path match"
             elif normalized_query in name:
                 score = 0.8
                 reason = "File name contains query"
@@ -379,6 +385,7 @@ class ProjectQuery:
                 result.result_type.value,
                 result.name.lower(),
                 result.path or "",
+                result.entity_id.hex,
             )
         )
 
