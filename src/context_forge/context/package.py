@@ -145,10 +145,10 @@ class ContextPackageBuilder:
                     value=retrieval_evidence.candidate_confidence,
                     evidence=(
                         Evidence(
-                            source_id=candidate.entity_id,
+                            source_id=retrieval_evidence.source_candidate_id,
                             description=(
-                                f"Retrieved through {relationship_type} relationship "
-                                f"at depth {retrieval_evidence.depth}"
+                                f"Retrieved through {retrieval_evidence.relationship_type} "
+                                f"relationship at depth {retrieval_evidence.depth}; "
                                 f"{retrieval_evidence.provenance}"
                             ),
                         ),

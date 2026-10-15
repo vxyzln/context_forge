@@ -1,5 +1,6 @@
 import json
 import sys
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -635,3 +636,15 @@ def test_context_command_handles_eof(
     assert exc_info.value.code == 1
     captured = capsys.readouterr()
     assert captured.err == "Error: Task input ended unexpectedly\n"
+
+
+def test_cli_entry_points_share_the_same_application() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    project_config = tomllib.loads(
+        (project_root / "pyproject.toml").read_text(encoding="utf-8")
+    )
+
+    scripts = project_config["project"]["scripts"]
+
+    assert scripts["context-forge"] == "context_forge.main:main"
+    assert scripts["cf"] == scripts["context-forge"]

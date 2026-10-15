@@ -195,6 +195,13 @@ def test_package_builder_includes_relationship_retrieval_evidence() -> None:
     assert "relationship-aware repository expansion" in (
         relationship_signal.evidence[0].description
     )
+    assert relationship_signal.evidence[0].source_id == (
+        retrieval_evidence.source_candidate_id
+    )
+    assert (
+        "; relationship-aware repository expansion"
+        in relationship_signal.evidence[0].description
+    )
 
 
 def test_package_builder_preserves_selection_confidence() -> None:
