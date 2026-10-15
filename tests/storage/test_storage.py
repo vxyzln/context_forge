@@ -1696,3 +1696,61 @@ def test_database_migration_adds_project_classification_columns(
     assert loaded.name == "Legacy Project"
     assert loaded.languages == []
     assert loaded.frameworks == []
+
+
+def test_load_analysis_keeps_separate_repositories_isolated(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    first_root = tmp_path / "project_a"
+    second_root = tmp_path / "project_b"
+    first_root.mkdir()
+    second_root.mkdir()
+
+    first_project = Project(
+        name="Project A",
+        root_path=first_root,
+    )
+    second_project = Project(
+        name="Project B",
+        root_path=second_root,
+    )
+
+    first_key = RepositoryIdentity(first_root).key
+    second_key = RepositoryIdentity(second_root).key
+
+    first_metadata = RepositoryCacheMetadata(
+        repository_key=first_key,
+        project_id=first_project.id,
+    )
+    second_metadata = RepositoryCacheMetadata(
+        repository_key=second_key,
+        project_id=second_project.id,
+    )
+
+    repository.save_analysis(first_project, first_metadata)
+    repository.save_analysis(second_project, second_metadata)
+
+    first_loaded = repository.load_analysis(first_key)
+    second_loaded = repository.load_analysis(second_key)
+
+    assert first_loaded is not None
+    assert second_loaded is not None
+
+    first_loaded_project, first_loaded_metadata = first_loaded
+    second_loaded_project, second_loaded_metadata = second_loaded
+
+    assert first_loaded_project.id == first_project.id
+    assert first_loaded_project.name == "Project A"
+    assert first_loaded_metadata == first_metadata
+
+    assert second_loaded_project.id == second_project.id
+    assert second_loaded_project.name == "Project B"
+    assert second_loaded_metadata == second_metadata
+
+    assert first_loaded_metadata.repository_key != (
+        second_loaded_metadata.repository_key
+    )
