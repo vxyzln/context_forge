@@ -1559,3 +1559,140 @@ def test_save_analysis_rolls_back_all_writes_on_failure(
     assert fingerprint["size"] == 100
     assert fingerprint["modified_at_ns"] == 123456789
     assert fingerprint["content_hash"] == "original-hash"
+
+
+def test_project_languages_and_frameworks_survive_repository_round_trip(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="Classification Test",
+        root_path=tmp_path,
+        languages=["Python", "TypeScript"],
+        frameworks=["Django", "FastAPI"],
+    )
+
+    repository.save(project)
+
+    loaded = repository.load(project.id)
+
+    assert loaded is not None
+    assert loaded.languages == ["Python", "TypeScript"]
+    assert loaded.frameworks == ["Django", "FastAPI"]
+
+
+def test_project_empty_languages_and_frameworks_survive_round_trip(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(
+        name="Unclassified Project",
+        root_path=tmp_path,
+    )
+
+    repository.save(project)
+
+    loaded = repository.load(project.id)
+
+    assert loaded is not None
+    assert loaded.languages == []
+    assert loaded.frameworks == []
+
+
+def test_database_migration_adds_project_classification_columns(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "context_forge.db"
+
+    # Simulate a database created before classification columns existed.
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                root_path TEXT NOT NULL,
+                repository_url TEXT,
+                default_branch TEXT,
+                project_type TEXT,
+                package_manager TEXT,
+                analysis_status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                git_total_commits INTEGER,
+                git_total_authors INTEGER,
+                git_files_changed INTEGER,
+                git_total_additions INTEGER,
+                git_total_deletions INTEGER
+            )
+            """
+        )
+
+        project_id = uuid4()
+        root_path = str(tmp_path)
+        timestamp = "2026-01-01T00:00:00+00:00"
+
+        connection.execute(
+            """
+            INSERT INTO projects (
+                id,
+                name,
+                root_path,
+                analysis_status,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(project_id),
+                "Legacy Project",
+                root_path,
+                "analyzed",
+                timestamp,
+                timestamp,
+            ),
+        )
+
+    # Initialization must upgrade the existing database.
+    database = Database(database_path)
+    database.initialize()
+
+    with database.connect() as connection:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(projects)").fetchall()
+        }
+
+        row = connection.execute(
+            "SELECT * FROM projects WHERE id = ?",
+            (str(project_id),),
+        ).fetchone()
+
+    assert "languages" in columns
+    assert "frameworks" in columns
+
+    # The migration must preserve the existing project.
+    assert row is not None
+    assert row["name"] == "Legacy Project"
+    assert row["root_path"] == root_path
+    assert row["analysis_status"] == "analyzed"
+
+    # Existing projects receive valid empty-list defaults.
+    assert row["languages"] == "[]"
+    assert row["frameworks"] == "[]"
+
+    # The migrated project must also load through the repository.
+    repository = ProjectRepository(database)
+    loaded = repository.load(project_id)
+
+    assert loaded is not None
+    assert loaded.name == "Legacy Project"
+    assert loaded.languages == []
+    assert loaded.frameworks == []

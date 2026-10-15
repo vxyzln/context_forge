@@ -23,6 +23,8 @@ class Database:
                     default_branch TEXT,
                     project_type TEXT,
                     package_manager TEXT,
+                    languages TEXT NOT NULL DEFAULT '[]',
+                    frameworks TEXT NOT NULL DEFAULT '[]',
                     analysis_status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -137,15 +139,17 @@ class Database:
                 for row in connection.execute("PRAGMA table_info(projects)").fetchall()
             }
 
-            git_columns = {
+            project_columns = {
                 "git_total_commits": "INTEGER",
                 "git_total_authors": "INTEGER",
                 "git_files_changed": "INTEGER",
                 "git_total_additions": "INTEGER",
                 "git_total_deletions": "INTEGER",
+                "languages": "TEXT NOT NULL DEFAULT '[]'",
+                "frameworks": "TEXT NOT NULL DEFAULT '[]'",
             }
 
-            for name, column_type in git_columns.items():
+            for name, column_type in project_columns.items():
                 if name not in columns:
                     connection.execute(
                         f"ALTER TABLE projects ADD COLUMN {name} {column_type}"

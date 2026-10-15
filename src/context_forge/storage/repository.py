@@ -514,6 +514,8 @@ class ProjectRepository:
                 default_branch,
                 project_type,
                 package_manager,
+                languages,
+                frameworks,
                 analysis_status,
                 created_at,
                 updated_at,
@@ -523,7 +525,7 @@ class ProjectRepository:
                 git_total_additions,
                 git_total_deletions
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(project.id),
@@ -533,6 +535,8 @@ class ProjectRepository:
                 project.default_branch,
                 project.project_type,
                 project.package_manager,
+                json.dumps(project.languages),
+                json.dumps(project.frameworks),
                 project.analysis_status,
                 project.created_at.isoformat(),
                 project.updated_at.isoformat(),
@@ -831,6 +835,8 @@ class ProjectRepository:
             default_branch=project_row["default_branch"],
             project_type=project_row["project_type"],
             package_manager=project_row["package_manager"],
+            languages=json.loads(project_row["languages"]),
+            frameworks=json.loads(project_row["frameworks"]),
             analysis_status=project_row["analysis_status"],
             created_at=datetime.fromisoformat(project_row["created_at"]),
             updated_at=datetime.fromisoformat(project_row["updated_at"]),
