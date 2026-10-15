@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID
@@ -32,23 +33,30 @@ class ProjectRepository:
         metadata: RepositoryCacheMetadata,
     ) -> None:
         with self.database.connect() as connection:
-            connection.execute(
-                """
-                INSERT OR REPLACE INTO repository_cache (
-                    repository_key,
-                    project_id,
-                    cache_schema_version,
-                    analyzer_version
-                )
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    metadata.repository_key,
-                    str(metadata.project_id),
-                    metadata.cache_schema_version,
-                    metadata.analyzer_version,
-                ),
+            self._save_cache_metadata(connection, metadata)
+
+    def _save_cache_metadata(
+        self,
+        connection: sqlite3.Connection,
+        metadata: RepositoryCacheMetadata,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO repository_cache (
+                repository_key,
+                project_id,
+                cache_schema_version,
+                analyzer_version
             )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                metadata.repository_key,
+                str(metadata.project_id),
+                metadata.cache_schema_version,
+                metadata.analyzer_version,
+            ),
+        )
 
     def load_cache_metadata(
         self,
@@ -84,34 +92,42 @@ class ProjectRepository:
         fingerprints: list[FileFingerprint],
     ) -> None:
         with self.database.connect() as connection:
+            self._save_file_fingerprints(connection, repository_key, fingerprints)
+
+    def _save_file_fingerprints(
+        self,
+        connection: sqlite3.Connection,
+        repository_key: str,
+        fingerprints: list[FileFingerprint],
+    ) -> None:
+        connection.execute(
+            """
+            DELETE FROM repository_file_fingerprints
+            WHERE repository_key = ?
+            """,
+            (repository_key,),
+        )
+
+        for fingerprint in fingerprints:
             connection.execute(
                 """
-                DELETE FROM repository_file_fingerprints
-                WHERE repository_key = ?
-                """,
-                (repository_key,),
-            )
-
-            for fingerprint in fingerprints:
-                connection.execute(
-                    """
-                    INSERT INTO repository_file_fingerprints (
-                        repository_key,
-                        path,
-                        size,
-                        modified_at_ns,
-                        content_hash
-                    )
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        repository_key,
-                        fingerprint.path.as_posix(),
-                        fingerprint.size,
-                        fingerprint.modified_at_ns,
-                        fingerprint.content_hash,
-                    ),
+                INSERT INTO repository_file_fingerprints (
+                    repository_key,
+                    path,
+                    size,
+                    modified_at_ns,
+                    content_hash
                 )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    repository_key,
+                    fingerprint.path.as_posix(),
+                    fingerprint.size,
+                    fingerprint.modified_at_ns,
+                    fingerprint.content_hash,
+                ),
+            )
 
     def load_file_fingerprints(
         self,
@@ -436,218 +452,240 @@ class ProjectRepository:
 
     def save(self, project: Project) -> None:
         with self.database.connect() as connection:
-            connection.execute(
-                "DELETE FROM analysis_errors WHERE project_id = ?",
-                (str(project.id),),
-            )
+            self._save_project(connection, project)
 
+    def _save_project(
+        self,
+        connection: sqlite3.Connection,
+        project: Project,
+    ) -> None:
+        connection.execute(
+            "DELETE FROM analysis_errors WHERE project_id = ?",
+            (str(project.id),),
+        )
+
+        connection.execute(
+            """
+            DELETE FROM relationships
+            WHERE source_id IN (
+                SELECT id FROM files WHERE project_id = ?
+            )
+            OR target_id IN (
+                SELECT id FROM files WHERE project_id = ?
+            )
+            OR source_id IN (
+                SELECT symbols.id
+                FROM symbols
+                JOIN files ON files.id = symbols.file_id
+                WHERE files.project_id = ?
+            )
+            OR target_id IN (
+                SELECT symbols.id
+                FROM symbols
+                JOIN files ON files.id = symbols.file_id
+                WHERE files.project_id = ?
+            )
+            """,
+            (
+                str(project.id),
+                str(project.id),
+                str(project.id),
+                str(project.id),
+            ),
+        )
+
+        connection.execute(
+            """
+            DELETE FROM symbols
+            WHERE file_id IN (
+                SELECT id FROM files WHERE project_id = ?
+            )
+            """,
+            (str(project.id),),
+        )
+
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO projects (
+                id,
+                name,
+                root_path,
+                repository_url,
+                default_branch,
+                project_type,
+                package_manager,
+                analysis_status,
+                created_at,
+                updated_at,
+                git_total_commits,
+                git_total_authors,
+                git_files_changed,
+                git_total_additions,
+                git_total_deletions
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(project.id),
+                project.name,
+                str(project.root_path),
+                project.repository_url,
+                project.default_branch,
+                project.project_type,
+                project.package_manager,
+                project.analysis_status,
+                project.created_at.isoformat(),
+                project.updated_at.isoformat(),
+                (
+                    project.git_activity.total_commits
+                    if project.git_activity is not None
+                    else None
+                ),
+                (
+                    project.git_activity.total_authors
+                    if project.git_activity is not None
+                    else None
+                ),
+                (
+                    project.git_activity.files_changed
+                    if project.git_activity is not None
+                    else None
+                ),
+                (
+                    project.git_activity.total_additions
+                    if project.git_activity is not None
+                    else None
+                ),
+                (
+                    project.git_activity.total_deletions
+                    if project.git_activity is not None
+                    else None
+                ),
+            ),
+        )
+
+        for directory in project.directories:
             connection.execute(
                 """
-                DELETE FROM symbols
-                WHERE file_id IN (
-                    SELECT id FROM files WHERE project_id = ?
-                )
-                """,
-                (str(project.id),),
-            )
-
-            connection.execute(
-                """
-                DELETE FROM relationships
-                WHERE source_id IN (
-                    SELECT id FROM files WHERE project_id = ?
-                )
-                OR target_id IN (
-                    SELECT id FROM files WHERE project_id = ?
-                )
-                """,
-                (str(project.id), str(project.id)),
-            )
-
-            connection.execute(
-                """
-                INSERT OR REPLACE INTO projects (
+                INSERT OR REPLACE INTO directories (
                     id,
+                    project_id,
+                    path,
                     name,
-                    root_path,
-                    repository_url,
-                    default_branch,
-                    project_type,
-                    package_manager,
-                    analysis_status,
-                    created_at,
-                    updated_at,
-                    git_total_commits,
-                    git_total_authors,
-                    git_files_changed,
-                    git_total_additions,
-                    git_total_deletions
+                    parent_id,
+                    depth,
+                    directory_type
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    str(project.id),
-                    project.name,
-                    str(project.root_path),
-                    project.repository_url,
-                    project.default_branch,
-                    project.project_type,
-                    project.package_manager,
-                    project.analysis_status,
-                    project.created_at.isoformat(),
-                    project.updated_at.isoformat(),
-                    (
-                        project.git_activity.total_commits
-                        if project.git_activity is not None
-                        else None
-                    ),
-                    (
-                        project.git_activity.total_authors
-                        if project.git_activity is not None
-                        else None
-                    ),
-                    (
-                        project.git_activity.files_changed
-                        if project.git_activity is not None
-                        else None
-                    ),
-                    (
-                        project.git_activity.total_additions
-                        if project.git_activity is not None
-                        else None
-                    ),
-                    (
-                        project.git_activity.total_deletions
-                        if project.git_activity is not None
-                        else None
-                    ),
+                    str(directory.id),
+                    str(directory.project_id),
+                    str(directory.path),
+                    directory.name,
+                    str(directory.parent_id) if directory.parent_id else None,
+                    directory.depth,
+                    directory.directory_type.value,
                 ),
             )
 
-            for directory in project.directories:
-                connection.execute(
-                    """
-                    INSERT OR REPLACE INTO directories (
-                        id,
-                        project_id,
-                        path,
-                        name,
-                        parent_id,
-                        depth,
-                        directory_type
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(directory.id),
-                        str(directory.project_id),
-                        str(directory.path),
-                        directory.name,
-                        str(directory.parent_id) if directory.parent_id else None,
-                        directory.depth,
-                        directory.directory_type.value,
-                    ),
+        for file in project.files:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO files (
+                    id,
+                    project_id,
+                    directory_id,
+                    path,
+                    name,
+                    extension,
+                    file_type,
+                    size,
+                    is_generated,
+                    is_ignored
                 )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(file.id),
+                    str(file.project_id),
+                    str(file.directory_id) if file.directory_id else None,
+                    str(file.path),
+                    file.name,
+                    file.extension,
+                    file.file_type.value,
+                    file.size,
+                    int(file.is_generated),
+                    int(file.is_ignored),
+                ),
+            )
 
-            for file in project.files:
-                connection.execute(
-                    """
-                    INSERT OR REPLACE INTO files (
-                        id,
-                        project_id,
-                        directory_id,
-                        path,
-                        name,
-                        extension,
-                        file_type,
-                        size,
-                        is_generated,
-                        is_ignored
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(file.id),
-                        str(file.project_id),
-                        str(file.directory_id) if file.directory_id else None,
-                        str(file.path),
-                        file.name,
-                        file.extension,
-                        file.file_type.value,
-                        file.size,
-                        int(file.is_generated),
-                        int(file.is_ignored),
-                    ),
+        for symbol in project.symbols:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO symbols (
+                    id,
+                    file_id,
+                    name,
+                    kind,
+                    qualified_name,
+                    start_line,
+                    end_line,
+                    parent_symbol_id,
+                    signature
                 )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(symbol.id),
+                    str(symbol.file_id),
+                    symbol.name,
+                    symbol.kind,
+                    symbol.qualified_name,
+                    symbol.start_line,
+                    symbol.end_line,
+                    str(symbol.parent_symbol_id) if symbol.parent_symbol_id else None,
+                    symbol.signature,
+                ),
+            )
 
-            for symbol in project.symbols:
-                connection.execute(
-                    """
-                    INSERT OR REPLACE INTO symbols (
-                        id,
-                        file_id,
-                        name,
-                        kind,
-                        qualified_name,
-                        start_line,
-                        end_line,
-                        parent_symbol_id,
-                        signature
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(symbol.id),
-                        str(symbol.file_id),
-                        symbol.name,
-                        symbol.kind,
-                        symbol.qualified_name,
-                        symbol.start_line,
-                        symbol.end_line,
-                        str(symbol.parent_symbol_id)
-                        if symbol.parent_symbol_id
-                        else None,
-                        symbol.signature,
-                    ),
+        for relationship in project.relationships:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO relationships (
+                    id,
+                    source_id,
+                    target_id,
+                    relationship_type,
+                    confidence,
+                    metadata
                 )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(relationship.id),
+                    str(relationship.source_id),
+                    str(relationship.target_id),
+                    relationship.relationship_type,
+                    relationship.confidence,
+                    json.dumps(relationship.metadata),
+                ),
+            )
 
-            for relationship in project.relationships:
-                connection.execute(
-                    """
-                    INSERT OR REPLACE INTO relationships (
-                        id,
-                        source_id,
-                        target_id,
-                        relationship_type,
-                        confidence,
-                        metadata
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(relationship.id),
-                        str(relationship.source_id),
-                        str(relationship.target_id),
-                        relationship.relationship_type,
-                        relationship.confidence,
-                        json.dumps(relationship.metadata),
-                    ),
+        for error in project.errors:
+            connection.execute(
+                """
+                INSERT INTO analysis_errors (
+                    project_id,
+                    message
                 )
-
-            for error in project.errors:
-                connection.execute(
-                    """
-                    INSERT INTO analysis_errors (
-                        project_id,
-                        message
-                    )
-                    VALUES (?, ?)
-                    """,
-                    (
-                        str(project.id),
-                        error,
-                    ),
-                )
+                VALUES (?, ?)
+                """,
+                (
+                    str(project.id),
+                    error,
+                ),
+            )
 
     def save_analysis(
         self,
@@ -655,11 +693,16 @@ class ProjectRepository:
         metadata: RepositoryCacheMetadata,
         fingerprints: list[FileFingerprint] | None = None,
     ) -> None:
-        self.save(project)
-        self.save_cache_metadata(metadata)
+        with self.database.connect() as connection:
+            self._save_project(connection, project)
+            self._save_cache_metadata(connection, metadata)
 
-        if fingerprints is not None:
-            self.save_file_fingerprints(metadata.repository_key, fingerprints)
+            if fingerprints is not None:
+                self._save_file_fingerprints(
+                    connection,
+                    metadata.repository_key,
+                    fingerprints,
+                )
 
     def load_analysis(
         self,

@@ -1,5 +1,8 @@
+import sqlite3
 from pathlib import Path
 from uuid import uuid4
+
+import pytest
 
 from context_forge.git import GitActivitySummary
 from context_forge.graph.builder import RelationshipBuilder
@@ -1391,3 +1394,168 @@ def test_refresh_cache_state_fully_invalidates_incompatible_cache(
     assert repository.load_analysis(repository_key) is None
     assert repository.load_cache_metadata(repository_key) is None
     assert repository.load_file_fingerprints(repository_key) == {}
+
+
+def test_project_save_removes_stale_symbol_relationships(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text(
+        """
+class Parent:
+    def method(self):
+        return 1
+""",
+        encoding="utf-8",
+    )
+
+    project = RepositoryScanner(tmp_path).scan()
+    parse_project(project)
+    RelationshipBuilder().build(project, project.imports)
+
+    symbol_ids = {str(symbol.id) for symbol in project.symbols}
+    symbol_relationships = [
+        relationship
+        for relationship in project.relationships
+        if str(relationship.source_id) in symbol_ids
+        and str(relationship.target_id) in symbol_ids
+    ]
+
+    assert symbol_relationships, "Test setup must produce symbol-to-symbol edges"
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    repository.save(project)
+
+    project.relationships = []
+    repository.save(project)
+
+    with database.connect() as connection:
+        remaining = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM relationships
+            WHERE source_id IN (SELECT id FROM symbols)
+               OR target_id IN (SELECT id FROM symbols)
+            """
+        ).fetchone()["count"]
+
+    assert remaining == 0, (
+        f"Expected stale symbol relationships to be removed; found {remaining}"
+    )
+
+
+def test_save_analysis_rolls_back_all_writes_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = RepositoryScanner(tmp_path).scan()
+
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    metadata = RepositoryCacheMetadata(
+        repository_key="atomic-save-test",
+        project_id=project.id,
+        cache_schema_version=1,
+        analyzer_version="original",
+    )
+
+    repository.save_analysis(project, metadata)
+
+    original_project_name = project.name
+
+    # Seed an existing fingerprint that must survive a failed update.
+    with database.connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO repository_file_fingerprints (
+                repository_key,
+                path,
+                size,
+                modified_at_ns,
+                content_hash
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                metadata.repository_key,
+                "main.py",
+                100,
+                123456789,
+                "original-hash",
+            ),
+        )
+
+    # Preserve the original implementation so the fingerprint deletion
+    # happens before the injected failure.
+    original_save_fingerprints = repository._save_file_fingerprints
+
+    def fail_after_fingerprint_write(
+        connection: sqlite3.Connection,
+        repository_key: str,
+        fingerprints: list[FileFingerprint],
+    ) -> None:
+        original_save_fingerprints(
+            connection,
+            repository_key,
+            fingerprints,
+        )
+        raise RuntimeError("injected fingerprint persistence failure")
+
+    monkeypatch.setattr(
+        repository,
+        "_save_file_fingerprints",
+        fail_after_fingerprint_write,
+    )
+
+    project.name = "updated-project"
+
+    updated_metadata = RepositoryCacheMetadata(
+        repository_key=metadata.repository_key,
+        project_id=project.id,
+        cache_schema_version=1,
+        analyzer_version="updated",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="injected fingerprint persistence failure",
+    ):
+        repository.save_analysis(
+            project,
+            updated_metadata,
+            fingerprints=[],
+        )
+
+    # Project data must remain unchanged in the database.
+    saved_project = repository.load(project.id)
+    assert saved_project is not None
+    assert saved_project.name == original_project_name
+
+    # Cache metadata must also remain unchanged.
+    saved_metadata = repository.load_cache_metadata(
+        metadata.repository_key,
+    )
+    assert saved_metadata is not None
+    assert saved_metadata.analyzer_version == "original"
+
+    # The fingerprint deleted during the failed transaction must be restored.
+    with database.connect() as connection:
+        fingerprint = connection.execute(
+            """
+            SELECT path, size, modified_at_ns, content_hash
+            FROM repository_file_fingerprints
+            WHERE repository_key = ?
+            """,
+            (metadata.repository_key,),
+        ).fetchone()
+
+    assert fingerprint is not None
+    assert fingerprint["path"] == "main.py"
+    assert fingerprint["size"] == 100
+    assert fingerprint["modified_at_ns"] == 123456789
+    assert fingerprint["content_hash"] == "original-hash"
