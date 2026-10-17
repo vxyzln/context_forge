@@ -744,6 +744,14 @@ def test_main_rejects_invalid_arguments_before_dispatch(
         (["memory", "search", "Calculator", "."], "run_memory_search"),
         (["memory", "file", "main.py", "."], "run_memory_file"),
         (["memory", "symbol", "Calculator", "."], "run_memory_symbol"),
+        (
+            ["memory", "references", "Calculator", "."],
+            "run_memory_references",
+        ),
+        (
+            ["memory", "relationships", "Calculator", "."],
+            "run_memory_relationships",
+        ),
     ],
 )
 def test_command_dispatch_reports_execution_errors(
@@ -1266,4 +1274,385 @@ def test_memory_symbol_resolves_qualified_name(
 
     query_mock.return_value.find_symbols_by_qualified_name.assert_called_once_with(
         "Calculator.hello",
+    )
+
+
+def test_parse_memory_references_and_relationships_commands() -> None:
+    args = parse_args(["memory", "references", "Calculator.hello"])
+
+    assert args.command == "memory"
+    assert args.memory_command == "references"
+    assert args.symbol_name == "Calculator.hello"
+    assert args.path == Path(".")
+
+    args = parse_args(
+        [
+            "memory",
+            "relationships",
+            "src/main.py",
+            "/tmp/project",
+            "--direction",
+            "incoming",
+            "--type",
+            "references",
+        ]
+    )
+
+    assert args.command == "memory"
+    assert args.memory_command == "relationships"
+    assert args.entity_name == "src/main.py"
+    assert args.path == Path("/tmp/project")
+    assert args.direction == "incoming"
+    assert args.relationship_type == "references"
+
+
+def test_memory_relationships_reports_no_relationships(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("main.py"),
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [file],
+            "symbols": [],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "relationships",
+                "main.py",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = file
+        query_mock.return_value.get_relationships.return_value = []
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "Entity type: file" in captured.out
+    assert "Relationships: 0" in captured.out
+    assert "No relationships found." in captured.out
+
+
+def test_memory_references_reports_missing_symbol(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [],
+            "symbols": [],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "references",
+                "missing_symbol",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.find_symbols.return_value = []
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "Matches: 0" in captured.out
+    assert "No matching symbol found." in captured.out
+
+
+def test_memory_references_displays_indexed_reference(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("src/main.py"),
+        },
+    )()
+
+    symbol = type(
+        "Symbol",
+        (),
+        {
+            "id": UUID(int=2),
+            "file_id": source_file.id,
+            "name": "calculate",
+            "qualified_name": "Calculator.calculate",
+            "kind": "function",
+            "start_line": 10,
+            "end_line": 20,
+        },
+    )()
+
+    relationship = type(
+        "Relationship",
+        (),
+        {
+            "id": UUID(int=3),
+            "source_id": source_file.id,
+            "target_id": symbol.id,
+            "relationship_type": "references",
+            "confidence": 0.9,
+            "metadata": {
+                "line": "invalid",
+                "name": "calculate",
+                "qualified_name": "Calculator.calculate",
+            },
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [source_file],
+            "symbols": [symbol],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "references",
+                "calculate",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.find_symbols.return_value = [symbol]
+        query_mock.return_value.get_incoming_relationships.return_value = [relationship]
+
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "Matches: 1" in captured.out
+    assert "References: 1" in captured.out
+    assert "Path: src/main.py" in captured.out
+    assert "Line: invalid" in captured.out
+    assert "Reference: calculate" in captured.out
+    assert "Qualified name: Calculator.calculate" in captured.out
+    assert "Confidence: 0.90" in captured.out
+
+    query_mock.return_value.get_incoming_relationships.assert_called_once_with(
+        symbol.id,
+        relationship_type="references",
+    )
+
+
+def test_memory_relationships_displays_indexed_relationship(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("src/main.py"),
+        },
+    )()
+
+    symbol = type(
+        "Symbol",
+        (),
+        {
+            "id": UUID(int=2),
+            "file_id": source_file.id,
+            "name": "calculate",
+            "qualified_name": "Calculator.calculate",
+            "kind": "function",
+        },
+    )()
+
+    relationship = type(
+        "Relationship",
+        (),
+        {
+            "id": UUID(int=3),
+            "source_id": source_file.id,
+            "target_id": symbol.id,
+            "relationship_type": "defines",
+            "confidence": 1.0,
+            "metadata": {
+                "line": "10",
+                "qualified_name": "Calculator.calculate",
+            },
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [source_file],
+            "symbols": [symbol],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "relationships",
+                "src/main.py",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = source_file
+        query_mock.return_value.get_relationships.return_value = [relationship]
+
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "Entity type: file" in captured.out
+    assert "Relationships: 1" in captured.out
+    assert "[defines] [file] src/main.py -> [function] Calculator.calculate" in (
+        captured.out
+    )
+    assert "Confidence: 1.00" in captured.out
+    assert "Line: 10" in captured.out
+    assert "Qualified name: Calculator.calculate" in captured.out
+
+    query_mock.return_value.get_relationships.assert_called_once_with(
+        source_file.id,
+        relationship_type=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("direction", "method_name"),
+    [
+        ("incoming", "get_incoming_relationships"),
+        ("outgoing", "get_outgoing_relationships"),
+        ("both", "get_relationships"),
+    ],
+)
+def test_memory_relationships_applies_direction_and_type(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    direction: str,
+    method_name: str,
+) -> None:
+    file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("main.py"),
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [file],
+            "symbols": [],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "relationships",
+                "main.py",
+                str(tmp_path),
+                "--direction",
+                direction,
+                "--type",
+                "references",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = file
+        getattr(query_mock.return_value, method_name).return_value = []
+
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert f"Direction: {direction}" in captured.out
+    assert "Relationship type: references" in captured.out
+    assert "Relationships: 0" in captured.out
+
+    getattr(
+        query_mock.return_value,
+        method_name,
+    ).assert_called_once_with(
+        file.id,
+        relationship_type="references",
     )
