@@ -740,3 +740,26 @@ def test_command_dispatch_reports_execution_errors(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "Error: operation failed\n"
+
+
+def test_status_reports_uninitialized_repository(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "status", str(tmp_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "Error: No persisted analysis found; run 'context-forge analyze' first\n"
+    )

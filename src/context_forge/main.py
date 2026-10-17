@@ -1,4 +1,5 @@
 import argparse
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -137,9 +138,17 @@ def analyze_project(root_path: Path):
 def load_project_analysis(root_path: Path):
     database_path = root_path / ".context_forge.db"
     repository = ProjectRepository(Database(database_path))
-
     repository_key = RepositoryIdentity(root_path).key
-    loaded = repository.load_analysis(repository_key)
+
+    try:
+        loaded = repository.load_analysis(repository_key)
+    except sqlite3.OperationalError as exc:
+        if "no such table: repository_cache" not in str(exc):
+            raise
+
+        raise ValueError(
+            "No persisted analysis found; run 'context-forge analyze' first"
+        ) from None
 
     if loaded is None:
         raise ValueError(
