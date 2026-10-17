@@ -686,3 +686,57 @@ def test_cli_entry_points_share_the_same_application() -> None:
 
     assert scripts["context-forge"] == "context_forge.main:main"
     assert scripts["cf"] == scripts["context-forge"]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["memory"],
+        ["memory", "unknown"],
+        ["status", "--unknown"],
+        ["context", "--unknown"],
+    ],
+)
+def test_main_rejects_invalid_arguments_before_dispatch(
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(sys, "argv", ["context-forge", *argv]),
+        patch("context_forge.main._dispatch_command") as dispatch_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 2
+    assert "error:" in capsys.readouterr().err
+    dispatch_mock.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("argv", "handler_name"),
+    [
+        (["status", "."], "run_status"),
+        (["memory", "inspect", "."], "run_inspect"),
+    ],
+)
+def test_command_dispatch_reports_execution_errors(
+    argv: list[str],
+    handler_name: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(sys, "argv", ["context-forge", *argv]),
+        patch(
+            f"context_forge.main.{handler_name}",
+            side_effect=RuntimeError("operation failed"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Error: operation failed\n"

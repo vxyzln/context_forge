@@ -428,6 +428,30 @@ def run_context(args: argparse.Namespace) -> None:
             ) from exc
 
 
+def _dispatch_command(args: argparse.Namespace) -> None:
+    handlers = {
+        "analyze": lambda: run_analyze(args.path),
+        "status": lambda: run_status(args.path),
+        "cache": lambda: run_cache(args.path),
+        "inspect": lambda: run_inspect(args.path),
+        "diagnostics": lambda: run_diagnostics(args.path),
+        ("memory", "inspect"): lambda: run_inspect(args.path),
+        "context": lambda: run_context(args),
+    }
+
+    if args.command == "memory":
+        command_key = (args.command, args.memory_command)
+    else:
+        command_key = args.command
+
+    handler = handlers.get(command_key)
+
+    if handler is None:
+        raise ValueError(f"Unsupported command: {args.command}")
+
+    handler()
+
+
 def main() -> None:
     args = parse_args()
 
@@ -435,58 +459,8 @@ def main() -> None:
         create_parser().print_help()
         return
 
-    if args.command == "analyze":
-        try:
-            run_analyze(args.path)
-        except (RuntimeError, TypeError, ValueError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            raise SystemExit(1) from None
-        return
-
-    if args.command == "status":
-        try:
-            run_status(args.path)
-        except (RuntimeError, TypeError, ValueError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            raise SystemExit(1) from None
-        return
-
-    if args.command == "cache":
-        try:
-            run_cache(args.path)
-        except (RuntimeError, TypeError, ValueError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            raise SystemExit(1) from None
-        return
-
-    if args.command == "inspect":
-        try:
-            run_inspect(args.path)
-        except (RuntimeError, TypeError, ValueError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            raise SystemExit(1) from None
-        return
-
-    if args.command == "diagnostics":
-        try:
-            run_diagnostics(args.path)
-        except (RuntimeError, TypeError, ValueError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            raise SystemExit(1) from None
-        return
-
-    if args.command == "memory" and args.memory_command == "inspect":
-        try:
-            run_inspect(args.path)
-        except (RuntimeError, TypeError, ValueError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            raise SystemExit(1) from None
-        return
-
-    if args.command == "context":
-        try:
-            run_context(args)
-        except (RuntimeError, TypeError, ValueError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            raise SystemExit(1) from None
-        return
+    try:
+        _dispatch_command(args)
+    except (RuntimeError, TypeError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
