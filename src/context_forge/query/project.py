@@ -24,6 +24,13 @@ class ProjectQuery:
     def find_symbols(self, name: str) -> list[Symbol]:
         return [symbol for symbol in self.project.symbols if symbol.name == name]
 
+    def find_symbols_by_qualified_name(self, qualified_name: str) -> list[Symbol]:
+        return [
+            symbol
+            for symbol in self.project.symbols
+            if symbol.qualified_name == qualified_name
+        ]
+
     def find_symbols_in_file(self, file_id: UUID) -> list[Symbol]:
         return [symbol for symbol in self.project.symbols if symbol.file_id == file_id]
 

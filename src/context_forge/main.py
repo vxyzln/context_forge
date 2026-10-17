@@ -542,7 +542,13 @@ def run_memory_symbol(symbol_name: str, path: Path) -> None:
     project, _ = load_fresh_project(root_path)
     query = ProjectQuery(project)
 
-    symbols = query.find_symbols(normalized_name)
+    if "." in normalized_name:
+        symbols = query.find_symbols_by_qualified_name(normalized_name)
+
+        if not symbols:
+            symbols = query.find_symbols(normalized_name)
+    else:
+        symbols = query.find_symbols(normalized_name)
 
     files_by_id = {file.id: file for file in project.files}
 

@@ -895,3 +895,44 @@ def test_query_search_tie_breaking_is_independent_of_symbol_order(
 
     assert first_order == expected_order
     assert second_order == expected_order
+
+
+def test_query_finds_symbols_by_qualified_name(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    symbols = query.find_symbols_by_qualified_name("Calculator.hello")
+
+    assert len(symbols) == 1
+    assert symbols[0].name == "hello"
+    assert symbols[0].qualified_name == "Calculator.hello"
+
+
+def test_query_returns_all_matching_qualified_names(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    file = project.files[0]
+
+    duplicate = Symbol(
+        file_id=file.id,
+        name="hello",
+        kind="method",
+        start_line=12,
+        end_line=14,
+        qualified_name="Calculator.hello",
+    )
+    project.add_symbol(duplicate)
+
+    query = ProjectQuery(project)
+    symbols = query.find_symbols_by_qualified_name("Calculator.hello")
+
+    assert len(symbols) == 2
+    assert all(symbol.qualified_name == "Calculator.hello" for symbol in symbols)
+
+
+def test_query_returns_empty_for_unknown_qualified_name(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    assert query.find_symbols_by_qualified_name("Missing.method") == []

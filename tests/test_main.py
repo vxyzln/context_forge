@@ -1171,3 +1171,99 @@ def test_memory_file_displays_metadata_and_symbols(
 
     query_mock.return_value.get_file.assert_called_once_with("main.py")
     query_mock.return_value.find_symbols_in_file.assert_called_once_with(file.id)
+
+
+def test_memory_symbol_resolves_qualified_name(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file_one = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("main.py"),
+        },
+    )()
+    file_two = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=2),
+            "path": Path("utils.py"),
+        },
+    )()
+
+    symbol_one = type(
+        "Symbol",
+        (),
+        {
+            "file_id": file_one.id,
+            "name": "hello",
+            "qualified_name": "Calculator.hello",
+            "kind": "method",
+            "start_line": 7,
+            "end_line": 8,
+            "signature": "hello(self)",
+        },
+    )()
+    symbol_two = type(
+        "Symbol",
+        (),
+        {
+            "file_id": file_two.id,
+            "name": "hello",
+            "qualified_name": "hello",
+            "kind": "function",
+            "start_line": 1,
+            "end_line": 2,
+            "signature": None,
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [file_one, file_two],
+            "symbols": [symbol_one, symbol_two],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "symbol",
+                "Calculator.hello",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.find_symbols_by_qualified_name.return_value = [
+            symbol_one,
+        ]
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "Symbol: Calculator.hello" in captured.out
+    assert "Matches: 1" in captured.out
+    assert "[method] Calculator.hello" in captured.out
+    assert "Path: main.py" in captured.out
+    assert "Lines: 7-8" in captured.out
+    assert "Signature: hello(self)" in captured.out
+    assert "utils.py" not in captured.out
+
+    query_mock.return_value.find_symbols_by_qualified_name.assert_called_once_with(
+        "Calculator.hello",
+    )
