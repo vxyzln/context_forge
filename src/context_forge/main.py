@@ -103,6 +103,37 @@ def create_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("."),
     )
+    memory_file_parser = memory_subparsers.add_parser(
+        "file",
+        help="Retrieve a file and its defined symbols.",
+    )
+    memory_file_parser.add_argument(
+        "file_path",
+        help="Repository-relative path of the file to retrieve.",
+    )
+    memory_file_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path.",
+    )
+
+    memory_symbol_parser = memory_subparsers.add_parser(
+        "symbol",
+        help="Retrieve symbol definitions by exact name.",
+    )
+    memory_symbol_parser.add_argument(
+        "symbol_name",
+        help="Exact name of the symbol to retrieve.",
+    )
+    memory_symbol_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path.",
+    )
 
     diagnostics_parser = subparsers.add_parser(
         "diagnostics",
@@ -456,6 +487,104 @@ def run_memory_search(query: str, path: Path) -> None:
             print(f"    Match: {result.reason}")
 
 
+def run_memory_file(file_path: str, path: Path) -> None:
+    normalized_file_path = file_path.strip()
+
+    if not normalized_file_path:
+        raise ValueError("File path cannot be empty")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+    query = ProjectQuery(project)
+
+    file = query.get_file(normalized_file_path)
+
+    print(f"Repository: {root_path}")
+    print(f"File: {normalized_file_path}")
+
+    if file is None:
+        print("File not found.")
+        return
+
+    print(f"Name: {file.name}")
+    print(f"Extension: {file.extension}")
+    print(f"Type: {file.file_type.value}")
+    print(f"Size: {file.size} bytes")
+
+    symbols = sorted(
+        query.find_symbols_in_file(file.id),
+        key=lambda symbol: (symbol.start_line, symbol.name),
+    )
+
+    print(f"Symbols: {len(symbols)}")
+
+    if not symbols:
+        print("No symbols defined in this file.")
+        return
+
+    for symbol in symbols:
+        display_name = symbol.qualified_name or symbol.name
+
+        print(f"  [{symbol.kind}] {display_name}")
+        print(f"    Lines: {symbol.start_line}-{symbol.end_line}")
+
+        if symbol.signature is not None:
+            print(f"    Signature: {symbol.signature}")
+
+
+def run_memory_symbol(symbol_name: str, path: Path) -> None:
+    normalized_name = symbol_name.strip()
+
+    if not normalized_name:
+        raise ValueError("Symbol name cannot be empty")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+    query = ProjectQuery(project)
+
+    symbols = query.find_symbols(normalized_name)
+
+    files_by_id = {file.id: file for file in project.files}
+
+    symbols = sorted(
+        symbols,
+        key=lambda symbol: (
+            files_by_id[symbol.file_id].path.as_posix()
+            if symbol.file_id in files_by_id
+            else "",
+            symbol.start_line,
+            symbol.name,
+        ),
+    )
+
+    print(f"Repository: {root_path}")
+    print(f"Symbol: {normalized_name}")
+    print(f"Matches: {len(symbols)}")
+
+    if not symbols:
+        print("No matching symbol found.")
+        return
+
+    if len(symbols) > 1:
+        print("Multiple definitions found:")
+
+    for symbol in symbols:
+        display_name = symbol.qualified_name or symbol.name
+        file = files_by_id.get(symbol.file_id)
+
+        print(f"  [{symbol.kind}] {display_name}")
+
+        if file is not None:
+            print(f"    Path: {file.path.as_posix()}")
+        else:
+            print("    Path: Unknown")
+
+        print(f"    Lines: {symbol.start_line}-{symbol.end_line}")
+
+        if symbol.signature is not None:
+            print(f"    Signature: {symbol.signature}")
+
+
 def run_diagnostics(path: Path) -> None:
     root_path = resolve_project_path(path)
     _, _, project, _ = load_project_analysis(root_path)
@@ -501,6 +630,14 @@ def _dispatch_command(args: argparse.Namespace) -> None:
         ("memory", "inspect"): lambda: run_inspect(args.path),
         ("memory", "search"): lambda: run_memory_search(
             args.query,
+            args.path,
+        ),
+        ("memory", "file"): lambda: run_memory_file(
+            args.file_path,
+            args.path,
+        ),
+        ("memory", "symbol"): lambda: run_memory_symbol(
+            args.symbol_name,
             args.path,
         ),
         "context": lambda: run_context(args),

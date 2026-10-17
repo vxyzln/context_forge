@@ -742,6 +742,8 @@ def test_main_rejects_invalid_arguments_before_dispatch(
         (["status", "."], "run_status"),
         (["memory", "inspect", "."], "run_inspect"),
         (["memory", "search", "Calculator", "."], "run_memory_search"),
+        (["memory", "file", "main.py", "."], "run_memory_file"),
+        (["memory", "symbol", "Calculator", "."], "run_memory_symbol"),
     ],
 )
 def test_command_dispatch_reports_execution_errors(
@@ -915,3 +917,257 @@ def test_memory_search_rejects_blank_query(
     assert captured.err == "Error: Search query cannot be empty\n"
 
     load_project_mock.assert_not_called()
+
+
+def test_parse_memory_file_and_symbol_commands() -> None:
+    args = parse_args(["memory", "file", "src/main.py"])
+
+    assert args.command == "memory"
+    assert args.memory_command == "file"
+    assert args.file_path == "src/main.py"
+    assert args.path == Path(".")
+
+    args = parse_args(["memory", "file", "src/main.py", "/tmp/project"])
+
+    assert args.file_path == "src/main.py"
+    assert args.path == Path("/tmp/project")
+
+    args = parse_args(["memory", "symbol", "Calculator"])
+
+    assert args.command == "memory"
+    assert args.memory_command == "symbol"
+    assert args.symbol_name == "Calculator"
+    assert args.path == Path(".")
+
+    args = parse_args(["memory", "symbol", "hello", "/tmp/project"])
+
+    assert args.symbol_name == "hello"
+    assert args.path == Path("/tmp/project")
+
+
+def test_memory_file_reports_missing_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "file",
+                "missing.py",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(type("Project", (), {"files": [], "symbols": []})(), None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = None
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "File: missing.py" in captured.out
+    assert "File not found." in captured.out
+
+
+def test_memory_symbol_reports_all_matching_definitions(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file_one = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("main.py"),
+        },
+    )()
+    file_two = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=2),
+            "path": Path("utils.py"),
+        },
+    )()
+
+    symbol_one = type(
+        "Symbol",
+        (),
+        {
+            "file_id": file_one.id,
+            "name": "hello",
+            "qualified_name": "Calculator.hello",
+            "kind": "function",
+            "start_line": 7,
+            "end_line": 8,
+            "signature": "hello(self)",
+        },
+    )()
+    symbol_two = type(
+        "Symbol",
+        (),
+        {
+            "file_id": file_two.id,
+            "name": "hello",
+            "qualified_name": "hello",
+            "kind": "function",
+            "start_line": 1,
+            "end_line": 2,
+            "signature": None,
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [file_one, file_two],
+            "symbols": [symbol_one, symbol_two],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "symbol",
+                "hello",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.find_symbols.return_value = [
+            symbol_one,
+            symbol_two,
+        ]
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "Matches: 2" in captured.out
+    assert "Multiple definitions found:" in captured.out
+    assert "Path: main.py" in captured.out
+    assert "Path: utils.py" in captured.out
+    assert "Lines: 7-8" in captured.out
+    assert "Lines: 1-2" in captured.out
+    assert "Signature: hello(self)" in captured.out
+
+
+def test_memory_symbol_rejects_blank_name(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "symbol",
+                "   ",
+                str(tmp_path),
+            ],
+        ),
+        patch("context_forge.main.load_fresh_project") as load_project_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == "Error: Symbol name cannot be empty\n"
+    load_project_mock.assert_not_called()
+
+
+def test_memory_file_displays_metadata_and_symbols(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "name": "main.py",
+            "extension": ".py",
+            "file_type": type("FileType", (), {"value": "source"})(),
+            "size": 128,
+        },
+    )()
+
+    symbol = type(
+        "Symbol",
+        (),
+        {
+            "name": "Calculator",
+            "qualified_name": "Calculator",
+            "kind": "class",
+            "start_line": 1,
+            "end_line": 10,
+            "signature": "class Calculator",
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {"files": [file], "symbols": [symbol]},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "file",
+                "main.py",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = file
+        query_mock.return_value.find_symbols_in_file.return_value = [symbol]
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "File: main.py" in captured.out
+    assert "Name: main.py" in captured.out
+    assert "Extension: .py" in captured.out
+    assert "Size: 128 bytes" in captured.out
+    assert "Symbols: 1" in captured.out
+    assert "[class] Calculator" in captured.out
+    assert "Lines: 1-10" in captured.out
+    assert "Signature: class Calculator" in captured.out
+
+    query_mock.return_value.get_file.assert_called_once_with("main.py")
+    query_mock.return_value.find_symbols_in_file.assert_called_once_with(file.id)
