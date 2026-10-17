@@ -1656,3 +1656,776 @@ def test_memory_relationships_applies_direction_and_type(
         file.id,
         relationship_type="references",
     )
+
+
+def test_output_format_defaults_to_text() -> None:
+    from context_forge.main import parse_args
+
+    commands = [
+        ["analyze"],
+        ["refresh"],
+        ["status"],
+        ["cache"],
+        ["inspect"],
+        ["memory", "inspect"],
+        ["memory", "search", "Calculator"],
+        ["memory", "file", "src/calculator.py"],
+        ["memory", "symbol", "Calculator"],
+        ["memory", "references", "Calculator"],
+        ["memory", "relationships", "src/calculator.py"],
+        ["diagnostics"],
+    ]
+
+    for command in commands:
+        args = parse_args(command)
+        assert args.format == "text"
+
+
+def test_output_format_accepts_json() -> None:
+    from context_forge.main import parse_args
+
+    commands = [
+        ["analyze"],
+        ["refresh"],
+        ["status"],
+        ["cache"],
+        ["inspect"],
+        ["memory", "inspect"],
+        ["memory", "search", "Calculator"],
+        ["memory", "file", "src/calculator.py"],
+        ["memory", "symbol", "Calculator"],
+        ["memory", "references", "Calculator"],
+        ["memory", "relationships", "src/calculator.py"],
+        ["diagnostics"],
+    ]
+
+    for command in commands:
+        args = parse_args([*command, "--format", "json"])
+        assert args.format == "json"
+
+
+def test_emit_json_produces_valid_deterministic_json(capsys) -> None:
+    from context_forge.main import _emit_json
+
+    _emit_json({"z": [], "a": {"value": 1}})
+
+    output = capsys.readouterr().out
+    assert json.loads(output) == {"a": {"value": 1}, "z": []}
+    assert output == '{"a":{"value":1},"z":[]}\n'
+
+
+def test_analyze_command_outputs_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": Path("/tmp/project"),
+            "files": [1, 2, 3],
+            "symbols": [1, 2],
+            "relationships": [1, 2, 3, 4],
+            "analysis_status": "analyzed",
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "analyze", ".", "--format", "json"],
+        ),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch("context_forge.operational_logging.log_analysis_started"),
+        patch("context_forge.operational_logging.log_analysis_completed"),
+    ):
+        analyzer.return_value.analyze.return_value = project
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "analysis_status": "analyzed",
+        "files": 3,
+        "relationships": 4,
+        "repository": "/tmp/project",
+        "symbols": 2,
+    }
+
+
+def test_status_command_outputs_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class Freshness:
+        is_fresh = True
+
+    class Repository:
+        def check_cache_freshness(self, repository_key, fingerprints):
+            return Freshness()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": tmp_path.resolve(),
+            "name": "sample-repo",
+            "analysis_status": "analyzed",
+            "project_type": "python",
+            "files": [1],
+            "symbols": [1, 2],
+            "relationships": [],
+            "errors": [],
+        },
+    )()
+
+    metadata = type(
+        "Metadata",
+        (),
+        {"cache_schema_version": 1, "analyzer_version": "0.1.0"},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "status", str(tmp_path), "--format", "json"],
+        ),
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(Repository(), "sample-key", project, metadata),
+        ),
+        patch("context_forge.main.current_fingerprints", return_value={}),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+    payload = json.loads(captured.out)
+    assert payload["repository"] == str(tmp_path.resolve())
+    assert payload["cache_status"] == "fresh"
+    assert payload["files"] == 1
+    assert payload["symbols"] == 2
+    assert payload["relationships"] == 0
+    assert payload["analysis_errors"] == 0
+    assert payload["cache_schema_version"] == 1
+    assert payload["analyzer_version"] == "0.1.0"
+
+
+def test_cache_command_outputs_json_with_sorted_change_paths(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class Changes:
+        added = ("z.py", "a.py")
+        modified = ("d.py", "b.py")
+        deleted = ("y.py", "c.py")
+
+    class Freshness:
+        is_fresh = False
+        reason = "Files were modified"
+        changes = Changes()
+
+    class Repository:
+        def check_cache_freshness(self, repository_key, fingerprints):
+            return Freshness()
+
+    project = type(
+        "Project",
+        (),
+        {"root_path": tmp_path.resolve()},
+    )()
+
+    metadata = type(
+        "Metadata",
+        (),
+        {"cache_schema_version": 1, "analyzer_version": "0.1.0"},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "cache", str(tmp_path), "--format", "json"],
+        ),
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(Repository(), "sample-key", project, metadata),
+        ),
+        patch(
+            "context_forge.main.current_fingerprints",
+            return_value={"tracked.py": "hash"},
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+    assert json.loads(captured.out) == {
+        "added_paths": ["a.py", "z.py"],
+        "analyzer_version": "0.1.0",
+        "cache_schema_version": 1,
+        "cache_status": "stale",
+        "deleted_paths": ["c.py", "y.py"],
+        "freshness_reason": "Files were modified",
+        "modified_paths": ["b.py", "d.py"],
+        "repository": "sample-key",
+        "tracked_files": 1,
+    }
+
+
+def test_inspect_command_outputs_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file_obj = type("File", (), {"path": "auth/login.py"})()
+    symbol_obj = type(
+        "Symbol",
+        (),
+        {
+            "file_id": 1,
+            "start_line": 10,
+            "end_line": 20,
+            "name": "login",
+            "qualified_name": "auth.login",
+            "kind": "function",
+        },
+    )()
+    relationship_type = type("RelationshipType", (), {"value": "imports"})()
+    relationship = type(
+        "Relationship",
+        (),
+        {
+            "relationship_type": relationship_type,
+            "source_id": "auth.login",
+            "target_id": "hashlib",
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": tmp_path.resolve(),
+            "files": [file_obj],
+            "symbols": [symbol_obj],
+            "relationships": [relationship],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "inspect", str(tmp_path), "--format", "json"],
+        ),
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(None, "key", project, None),
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+    assert json.loads(captured.out) == {
+        "files": [{"path": "auth/login.py"}],
+        "relationships": [
+            {
+                "source_id": "auth.login",
+                "target_id": "hashlib",
+                "type": "imports",
+            }
+        ],
+        "repository": str(tmp_path.resolve()),
+        "symbols": [
+            {
+                "end_line": 20,
+                "kind": "function",
+                "name": "login",
+                "qualified_name": "auth.login",
+                "start_line": 10,
+            }
+        ],
+    }
+
+
+def test_diagnostics_command_outputs_empty_errors_and_null_fields(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project_without_errors = type(
+        "Project",
+        (),
+        {"root_path": tmp_path.resolve(), "errors": []},
+    )()
+
+    project_with_missing_details = type(
+        "Project",
+        (),
+        {
+            "root_path": tmp_path.resolve(),
+            "errors": [
+                type(
+                    "Error",
+                    (),
+                    {
+                        "severity": "error",
+                        "message": "Unknown location",
+                        "path": None,
+                        "line": None,
+                    },
+                )()
+            ],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "diagnostics",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(None, "key", project_without_errors, None),
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "errors": [],
+        "repository": str(tmp_path.resolve()),
+    }
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "diagnostics",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(None, "key", project_with_missing_details, None),
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "errors": [
+            {
+                "line": None,
+                "message": "Unknown location",
+                "path": None,
+                "severity": "error",
+            }
+        ],
+        "repository": str(tmp_path.resolve()),
+    }
+
+
+def test_memory_search_json_reports_empty_results(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from context_forge.main import main
+
+    monkeypatch.setattr(
+        "context_forge.main.load_fresh_project",
+        lambda path: (object(), None),
+    )
+    monkeypatch.setattr(
+        "context_forge.main.ProjectQuery.search",
+        lambda self, query: [],
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "memory",
+            "search",
+            "missing",
+            str(tmp_path),
+            "--format",
+            "json",
+        ],
+    )
+
+    main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload["query"] == "missing"
+    assert payload["repository"] == str(tmp_path.resolve())
+    assert payload["results"] == []
+
+
+def test_memory_file_json_reports_missing_file(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from context_forge.main import main
+
+    monkeypatch.setattr(
+        "context_forge.main.load_fresh_project",
+        lambda path: (object(), None),
+    )
+    monkeypatch.setattr(
+        "context_forge.main.ProjectQuery.get_file",
+        lambda self, file_path: None,
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "memory",
+            "file",
+            "missing.py",
+            str(tmp_path),
+            "--format",
+            "json",
+        ],
+    )
+
+    main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload["repository"] == str(tmp_path.resolve())
+    assert payload["requested_path"] == "missing.py"
+    assert payload["file"] is None
+
+
+def test_memory_symbol_json_reports_no_matches(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from context_forge.main import main
+
+    monkeypatch.setattr(
+        "context_forge.main.load_fresh_project",
+        lambda path: (type("Project", (), {"files": []})(), None),
+    )
+    monkeypatch.setattr(
+        "context_forge.main.ProjectQuery.find_symbols",
+        lambda self, name: [],
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "memory",
+            "symbol",
+            "missing_symbol",
+            str(tmp_path),
+            "--format",
+            "json",
+        ],
+    )
+
+    main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload["query"] == "missing_symbol"
+    assert payload["repository"] == str(tmp_path.resolve())
+    assert payload["matches"] == []
+
+
+def test_memory_search_json_returns_ranked_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = SearchResult(
+        result_type=SearchResultType.SYMBOL,
+        entity_id=UUID(int=1),
+        name="hello",
+        path="src/calculator.py",
+        score=0.95,
+        reason="Exact qualified symbol name match",
+        qualified_name="Calculator.hello",
+    )
+
+    monkeypatch.setattr(
+        "context_forge.main.load_fresh_project",
+        lambda path: (object(), None),
+    )
+    monkeypatch.setattr(
+        "context_forge.main.ProjectQuery.search",
+        lambda self, query: [result],
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "memory",
+            "search",
+            "Calculator.hello",
+            str(tmp_path),
+            "--format",
+            "json",
+        ],
+    )
+
+    main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload == {
+        "query": "Calculator.hello",
+        "repository": str(tmp_path.resolve()),
+        "results": [
+            {
+                "name": "hello",
+                "path": "src/calculator.py",
+                "qualified_name": "Calculator.hello",
+                "reason": "Exact qualified symbol name match",
+                "score": 0.95,
+                "type": "symbol",
+            }
+        ],
+    }
+
+
+def test_memory_file_json_returns_metadata_and_symbols(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "name": "main.py",
+            "extension": ".py",
+            "file_type": type(
+                "FileType",
+                (),
+                {"value": "source"},
+            )(),
+            "size": 128,
+        },
+    )()
+
+    symbol = type(
+        "Symbol",
+        (),
+        {
+            "name": "Calculator",
+            "qualified_name": "Calculator",
+            "kind": "class",
+            "start_line": 1,
+            "end_line": 10,
+            "signature": "class Calculator",
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {"files": [file]},
+    )()
+
+    monkeypatch.setattr(
+        "context_forge.main.load_fresh_project",
+        lambda path: (project, None),
+    )
+    monkeypatch.setattr(
+        "context_forge.main.ProjectQuery.get_file",
+        lambda self, file_path: file,
+    )
+    monkeypatch.setattr(
+        "context_forge.main.ProjectQuery.find_symbols_in_file",
+        lambda self, file_id: [symbol],
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "memory",
+            "file",
+            "main.py",
+            str(tmp_path),
+            "--format",
+            "json",
+        ],
+    )
+
+    main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload == {
+        "file": {
+            "extension": ".py",
+            "name": "main.py",
+            "path": "main.py",
+            "size": 128,
+            "symbols": [
+                {
+                    "end_line": 10,
+                    "kind": "class",
+                    "name": "Calculator",
+                    "qualified_name": "Calculator",
+                    "signature": "class Calculator",
+                    "start_line": 1,
+                }
+            ],
+            "type": "source",
+        },
+        "repository": str(tmp_path.resolve()),
+        "requested_path": "main.py",
+    }
+
+
+def test_memory_symbol_json_returns_ordered_matches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file_z = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=2),
+            "path": Path("src/zeta.py"),
+        },
+    )()
+
+    file_a = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("src/alpha.py"),
+        },
+    )()
+
+    symbol_z = type(
+        "Symbol",
+        (),
+        {
+            "file_id": file_z.id,
+            "name": "run",
+            "qualified_name": "Zeta.run",
+            "kind": "function",
+            "start_line": 5,
+            "end_line": 8,
+            "signature": "def run()",
+        },
+    )()
+
+    symbol_a = type(
+        "Symbol",
+        (),
+        {
+            "file_id": file_a.id,
+            "name": "run",
+            "qualified_name": "Alpha.run",
+            "kind": "function",
+            "start_line": 2,
+            "end_line": 4,
+            "signature": "def run()",
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {"files": [file_z, file_a]},
+    )()
+
+    monkeypatch.setattr(
+        "context_forge.main.load_fresh_project",
+        lambda path: (project, None),
+    )
+    monkeypatch.setattr(
+        "context_forge.main.ProjectQuery.find_symbols",
+        lambda self, name: [symbol_z, symbol_a],
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "memory",
+            "symbol",
+            "run",
+            str(tmp_path),
+            "--format",
+            "json",
+        ],
+    )
+
+    main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload == {
+        "matches": [
+            {
+                "end_line": 4,
+                "kind": "function",
+                "name": "run",
+                "path": "src/alpha.py",
+                "qualified_name": "Alpha.run",
+                "signature": "def run()",
+                "start_line": 2,
+            },
+            {
+                "end_line": 8,
+                "kind": "function",
+                "name": "run",
+                "path": "src/zeta.py",
+                "qualified_name": "Zeta.run",
+                "signature": "def run()",
+                "start_line": 5,
+            },
+        ],
+        "query": "run",
+        "repository": str(tmp_path.resolve()),
+    }
