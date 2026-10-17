@@ -135,6 +135,54 @@ def create_parser() -> argparse.ArgumentParser:
         help="Repository root path.",
     )
 
+    memory_references_parser = memory_subparsers.add_parser(
+        "references",
+        help="Show indexed references to a symbol.",
+    )
+    memory_references_parser.add_argument(
+        "symbol_name",
+        help="Exact symbol name or qualified name.",
+    )
+    memory_references_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path.",
+    )
+
+    memory_relationships_parser = memory_subparsers.add_parser(
+        "relationships",
+        help="Inspect indexed relationships for a file or symbol.",
+    )
+    memory_relationships_parser.add_argument(
+        "entity_name",
+        help="Repository-relative file path, symbol name, or qualified name.",
+    )
+    memory_relationships_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path.",
+    )
+    memory_relationships_parser.add_argument(
+        "--direction",
+        choices=("both", "incoming", "outgoing"),
+        default="both",
+        help="Relationship direction (default: both).",
+    )
+    memory_relationships_parser.add_argument(
+        "--type",
+        dest="relationship_type",
+        choices=("defines", "contains", "imports", "references", "inherits"),
+        default=None,
+        help=(
+            "Filter by a currently supported relationship type. "
+            "'calls' and 'depends_on' are not currently generated."
+        ),
+    )
+
     diagnostics_parser = subparsers.add_parser(
         "diagnostics",
         help="Show persisted repository analysis diagnostics.",
@@ -591,6 +639,232 @@ def run_memory_symbol(symbol_name: str, path: Path) -> None:
             print(f"    Signature: {symbol.signature}")
 
 
+def _find_memory_symbols(query: ProjectQuery, name: str):
+    if "." in name:
+        symbols = query.find_symbols_by_qualified_name(name)
+        if symbols:
+            return symbols
+
+    return query.find_symbols(name)
+
+
+def _relationship_type_name(relationship) -> str:
+    relationship_type = relationship.relationship_type
+
+    if hasattr(relationship_type, "value"):
+        return relationship_type.value
+
+    return str(relationship_type)
+
+
+def _relationship_line_number(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _relationship_entity_label(entity_id, files_by_id, symbols_by_id) -> str:
+    file = files_by_id.get(entity_id)
+    if file is not None:
+        return f"[file] {file.path.as_posix()}"
+
+    symbol = symbols_by_id.get(entity_id)
+    if symbol is not None:
+        name = symbol.qualified_name or symbol.name
+        return f"[{symbol.kind}] {name}"
+
+    return f"[unknown] {entity_id}"
+
+
+def _print_matching_symbols(symbols, files_by_id) -> None:
+    for symbol in sorted(
+        symbols,
+        key=lambda item: (
+            files_by_id[item.file_id].path.as_posix()
+            if item.file_id in files_by_id
+            else "",
+            item.start_line,
+            item.name,
+        ),
+    ):
+        file = files_by_id.get(symbol.file_id)
+        print(f"  [{symbol.kind}] {symbol.qualified_name or symbol.name}")
+        print(
+            f"    Path: {file.path.as_posix()}"
+            if file is not None
+            else "    Path: Unknown"
+        )
+        print(f"    Lines: {symbol.start_line}-{symbol.end_line}")
+
+
+def run_memory_references(symbol_name: str, path: Path) -> None:
+    normalized_name = symbol_name.strip()
+    if not normalized_name:
+        raise ValueError("Symbol name cannot be empty")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+    query = ProjectQuery(project)
+
+    symbols = _find_memory_symbols(query, normalized_name)
+    files_by_id = {file.id: file for file in project.files}
+
+    print(f"Repository: {root_path}")
+    print(f"Symbol: {normalized_name}")
+    print(f"Matches: {len(symbols)}")
+
+    if not symbols:
+        print("No matching symbol found.")
+        return
+
+    if len(symbols) > 1:
+        print("Multiple definitions found:")
+        _print_matching_symbols(symbols, files_by_id)
+        print("Use a qualified name to narrow the results.")
+        return
+
+    symbol = symbols[0]
+    relationships = query.get_incoming_relationships(
+        symbol.id,
+        relationship_type="references",
+    )
+
+    relationships = sorted(
+        relationships,
+        key=lambda item: (
+            files_by_id[item.source_id].path.as_posix()
+            if item.source_id in files_by_id
+            else "",
+            _relationship_line_number(item.metadata.get("line", "0")),
+            item.id.hex,
+        ),
+    )
+
+    print(f"References: {len(relationships)}")
+
+    if not relationships:
+        print("No indexed references found.")
+        return
+
+    for relationship in relationships:
+        source_file = files_by_id.get(relationship.source_id)
+        source_path = (
+            source_file.path.as_posix() if source_file is not None else "Unknown"
+        )
+
+        print(f"  Path: {source_path}")
+
+        line = relationship.metadata.get("line")
+        if line is not None:
+            print(f"    Line: {line}")
+
+        name = relationship.metadata.get("name")
+        if name is not None:
+            print(f"    Reference: {name}")
+
+        qualified_name = relationship.metadata.get("qualified_name")
+        if qualified_name is not None:
+            print(f"    Qualified name: {qualified_name}")
+
+        print(f"    Confidence: {relationship.confidence:.2f}")
+
+
+def run_memory_relationships(
+    entity_name: str,
+    path: Path,
+    direction: str,
+    relationship_type: str | None,
+) -> None:
+    normalized_name = entity_name.strip()
+    if not normalized_name:
+        raise ValueError("Entity name cannot be empty")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+    query = ProjectQuery(project)
+
+    files_by_id = {file.id: file for file in project.files}
+    symbols_by_id = {symbol.id: symbol for symbol in project.symbols}
+
+    # An exact repository-relative file path takes precedence.
+    file = query.get_file(normalized_name)
+    if file is not None:
+        entity = file
+        entity_kind = "file"
+    else:
+        symbols = _find_memory_symbols(query, normalized_name)
+
+        print(f"Repository: {root_path}")
+        print(f"Entity: {normalized_name}")
+
+        if not symbols:
+            print("Entity not found.")
+            return
+
+        if len(symbols) > 1:
+            print(f"Multiple matching symbols found: {len(symbols)}")
+            _print_matching_symbols(symbols, files_by_id)
+            print("Use a qualified name to narrow the results.")
+            return
+
+        entity = symbols[0]
+        entity_kind = "symbol"
+
+    print(f"Repository: {root_path}")
+    print(f"Entity: {normalized_name}")
+    print(f"Entity type: {entity_kind}")
+    print(f"Direction: {direction}")
+
+    if relationship_type is not None:
+        print(f"Relationship type: {relationship_type}")
+
+    if direction == "incoming":
+        relationships = query.get_incoming_relationships(
+            entity.id,
+            relationship_type=relationship_type,
+        )
+    elif direction == "outgoing":
+        relationships = query.get_outgoing_relationships(
+            entity.id,
+            relationship_type=relationship_type,
+        )
+    else:
+        relationships = query.get_relationships(
+            entity.id,
+            relationship_type=relationship_type,
+        )
+
+    print(f"Relationships: {len(relationships)}")
+
+    if not relationships:
+        print("No relationships found.")
+        return
+
+    for relationship in relationships:
+        source = _relationship_entity_label(
+            relationship.source_id,
+            files_by_id,
+            symbols_by_id,
+        )
+        target = _relationship_entity_label(
+            relationship.target_id,
+            files_by_id,
+            symbols_by_id,
+        )
+
+        print(f"  [{_relationship_type_name(relationship)}] {source} -> {target}")
+        print(f"    Confidence: {relationship.confidence:.2f}")
+
+        line = relationship.metadata.get("line")
+        if line is not None:
+            print(f"    Line: {line}")
+
+        qualified_name = relationship.metadata.get("qualified_name")
+        if qualified_name is not None:
+            print(f"    Qualified name: {qualified_name}")
+
+
 def run_diagnostics(path: Path) -> None:
     root_path = resolve_project_path(path)
     _, _, project, _ = load_project_analysis(root_path)
@@ -645,6 +919,16 @@ def _dispatch_command(args: argparse.Namespace) -> None:
         ("memory", "symbol"): lambda: run_memory_symbol(
             args.symbol_name,
             args.path,
+        ),
+        ("memory", "references"): lambda: run_memory_references(
+            args.symbol_name,
+            args.path,
+        ),
+        ("memory", "relationships"): lambda: run_memory_relationships(
+            args.entity_name,
+            args.path,
+            args.direction,
+            args.relationship_type,
         ),
         "context": lambda: run_context(args),
     }
