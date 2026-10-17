@@ -3,6 +3,7 @@ import sys
 import tomllib
 from pathlib import Path
 from unittest.mock import patch
+from uuid import UUID
 
 import pytest
 
@@ -18,6 +19,7 @@ from context_forge.main import (
     run_inspect,
     run_status,
 )
+from context_forge.query.result import SearchResult, SearchResultType
 
 
 def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
@@ -165,6 +167,18 @@ def test_parse_args_subcommands():
 
     args = parse_args(["refresh"])
     assert args.command == "refresh"
+    assert args.path == Path(".")
+
+    args = parse_args(["memory", "search", "Calculator.hello", "/tmp/project"])
+    assert args.command == "memory"
+    assert args.memory_command == "search"
+    assert args.query == "Calculator.hello"
+    assert args.path == Path("/tmp/project")
+
+    args = parse_args(["memory", "search", "Calculator"])
+    assert args.command == "memory"
+    assert args.memory_command == "search"
+    assert args.query == "Calculator"
     assert args.path == Path(".")
 
     args = parse_args(
@@ -727,6 +741,7 @@ def test_main_rejects_invalid_arguments_before_dispatch(
     [
         (["status", "."], "run_status"),
         (["memory", "inspect", "."], "run_inspect"),
+        (["memory", "search", "Calculator", "."], "run_memory_search"),
     ],
 )
 def test_command_dispatch_reports_execution_errors(
@@ -788,3 +803,115 @@ def test_refresh_command_reuses_analyze_handler(
         main()
 
     run_analyze_mock.assert_called_once_with(tmp_path)
+
+
+def test_memory_search_prints_ranked_results(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = SearchResult(
+        result_type=SearchResultType.SYMBOL,
+        entity_id=UUID(int=1),
+        name="hello",
+        path="src/calculator.py",
+        score=0.95,
+        reason="Exact qualified symbol name match",
+        qualified_name="Calculator.hello",
+    )
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "search",
+                "Calculator.hello",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(object(), object()),
+        ) as load_project_mock,
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.search.return_value = [result]
+        main()
+
+    load_project_mock.assert_called_once_with(tmp_path.resolve())
+    query_mock.return_value.search.assert_called_once_with("Calculator.hello")
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert f"Repository: {tmp_path.resolve()}" in captured.out
+    assert "Query: Calculator.hello" in captured.out
+    assert "Results: 1" in captured.out
+    assert "[symbol] Calculator.hello" in captured.out
+    assert "Path: src/calculator.py" in captured.out
+    assert "Score: 0.95" in captured.out
+    assert "Match: Exact qualified symbol name match" in captured.out
+
+
+def test_memory_search_reports_no_matches(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "search",
+                "nonexistent_entity",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(object(), object()),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.search.return_value = []
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "Results: 0" in captured.out
+    assert "No matches found." in captured.out
+
+
+def test_memory_search_rejects_blank_query(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "search",
+                "   ",
+                str(tmp_path),
+            ],
+        ),
+        patch("context_forge.main.load_fresh_project") as load_project_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Error: Search query cannot be empty\n"
+
+    load_project_mock.assert_not_called()

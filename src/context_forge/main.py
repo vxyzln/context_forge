@@ -8,6 +8,7 @@ from context_forge.pipeline.analyzer import (
     ProjectAnalyzer,
     current_fingerprints,
 )
+from context_forge.query.project import ProjectQuery
 from context_forge.storage.cache import RepositoryIdentity
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
@@ -83,6 +84,20 @@ def create_parser() -> argparse.ArgumentParser:
         help="Inspect persisted repository intelligence.",
     )
     memory_inspect_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+    )
+    memory_search_parser = memory_subparsers.add_parser(
+        "search",
+        help="Search persisted repository memory.",
+    )
+    memory_search_parser.add_argument(
+        "query",
+        help="Search for a file, directory, or symbol.",
+    )
+    memory_search_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
@@ -409,6 +424,38 @@ def run_inspect(path: Path) -> None:
     print_inspection_summary(project)
 
 
+def run_memory_search(query: str, path: Path) -> None:
+    normalized_query = query.strip()
+
+    if not normalized_query:
+        raise ValueError("Search query cannot be empty")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+    results = ProjectQuery(project).search(normalized_query)
+
+    print(f"Repository: {root_path}")
+    print(f"Query: {normalized_query}")
+    print(f"Results: {len(results)}")
+
+    if not results:
+        print("No matches found.")
+        return
+
+    for result in results:
+        display_name = result.qualified_name or result.name
+
+        print(f"  [{result.result_type.value}] {display_name}")
+
+        if result.path is not None:
+            print(f"    Path: {result.path}")
+
+        print(f"    Score: {result.score:.2f}")
+
+        if result.reason is not None:
+            print(f"    Match: {result.reason}")
+
+
 def run_diagnostics(path: Path) -> None:
     root_path = resolve_project_path(path)
     _, _, project, _ = load_project_analysis(root_path)
@@ -452,6 +499,10 @@ def _dispatch_command(args: argparse.Namespace) -> None:
         "inspect": lambda: run_inspect(args.path),
         "diagnostics": lambda: run_diagnostics(args.path),
         ("memory", "inspect"): lambda: run_inspect(args.path),
+        ("memory", "search"): lambda: run_memory_search(
+            args.query,
+            args.path,
+        ),
         "context": lambda: run_context(args),
     }
 
