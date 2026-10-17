@@ -15,7 +15,9 @@ from context_forge.storage.repository import ProjectRepository
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="context-forge",
-        description="Deterministic repository intelligence and memory for software projects.",
+        description=(
+            "Deterministic repository intelligence and memory for software projects."
+        ),
     )
 
     subparsers = parser.add_subparsers(dest="command")
@@ -61,6 +63,26 @@ def create_parser() -> argparse.ArgumentParser:
     )
     inspect_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
 
+    memory_parser = subparsers.add_parser(
+        "memory",
+        help="Inspect and retrieve persistent repository memory.",
+    )
+    memory_subparsers = memory_parser.add_subparsers(
+        dest="memory_command",
+        required=True,
+    )
+
+    memory_inspect_parser = memory_subparsers.add_parser(
+        "inspect",
+        help="Inspect persisted repository intelligence.",
+    )
+    memory_inspect_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+    )
+
     diagnostics_parser = subparsers.add_parser(
         "diagnostics",
         help="Show persisted repository analysis diagnostics.",
@@ -81,6 +103,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "status",
         "cache",
         "inspect",
+        "memory",
         "diagnostics",
         "-h",
         "--help",
@@ -447,6 +470,14 @@ def main() -> None:
     if args.command == "diagnostics":
         try:
             run_diagnostics(args.path)
+        except (RuntimeError, TypeError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        return
+
+    if args.command == "memory" and args.memory_command == "inspect":
+        try:
+            run_inspect(args.path)
         except (RuntimeError, TypeError, ValueError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             raise SystemExit(1) from None

@@ -36,6 +36,7 @@ def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> No
     assert "cache" in captured.out
     assert "inspect" in captured.out
     assert "diagnostics" in captured.out
+    assert "memory" in captured.out
     assert "generate" not in captured.out
     assert "runtime" not in captured.out
     assert "--provider" not in captured.out
@@ -152,6 +153,11 @@ def test_parse_args_subcommands():
     assert args.command == "diagnostics"
     assert args.path == Path("/tmp/project")
 
+    args = parse_args(["memory", "inspect", "/tmp/project"])
+    assert args.command == "memory"
+    assert args.memory_command == "inspect"
+    assert args.path == Path("/tmp/project")
+
     args = parse_args(
         ["context", "/tmp/project", "--task", "Fix bugs", "--output", "out.json"]
     )
@@ -159,6 +165,38 @@ def test_parse_args_subcommands():
     assert args.path == Path("/tmp/project")
     assert args.task == "Fix bugs"
     assert args.output == Path("out.json")
+
+
+def test_memory_inspect_command_reuses_existing_inspection(
+    tmp_path: Path,
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "memory", "inspect", str(tmp_path)],
+        ),
+        patch("context_forge.main.run_inspect") as run_inspect_mock,
+    ):
+        main()
+
+    run_inspect_mock.assert_called_once_with(tmp_path)
+
+
+def test_legacy_inspect_command_remains_supported(
+    tmp_path: Path,
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "inspect", str(tmp_path)],
+        ),
+        patch("context_forge.main.run_inspect") as run_inspect_mock,
+    ):
+        main()
+
+    run_inspect_mock.assert_called_once_with(tmp_path)
 
 
 def test_parse_args_bare_path_defaults_to_status():
