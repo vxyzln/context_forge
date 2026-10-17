@@ -29,6 +29,11 @@ def create_parser() -> argparse.ArgumentParser:
     )
     analyze_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
 
+    refresh_parser = subparsers.add_parser(
+        "refresh", help="Refresh repository analysis and cached intelligence."
+    )
+    refresh_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+
     context_parser = subparsers.add_parser(
         "context",
         help="Retrieve deterministic context package for a development task.",
@@ -100,6 +105,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Default a bare project path to `status`
     if argv and argv[0] not in {
         "analyze",
+        "refresh",
         "context",
         "status",
         "cache",
@@ -440,6 +446,7 @@ def run_context(args: argparse.Namespace) -> None:
 def _dispatch_command(args: argparse.Namespace) -> None:
     handlers = {
         "analyze": lambda: run_analyze(args.path),
+        "refresh": lambda: run_analyze(args.path),
         "status": lambda: run_status(args.path),
         "cache": lambda: run_cache(args.path),
         "inspect": lambda: run_inspect(args.path),

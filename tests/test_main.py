@@ -31,6 +31,7 @@ def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> No
 
     assert "usage: context-forge" in captured.out
     assert "analyze" in captured.out
+    assert "refresh" in captured.out
     assert "context" in captured.out
     assert "status" in captured.out
     assert "cache" in captured.out
@@ -157,6 +158,14 @@ def test_parse_args_subcommands():
     assert args.command == "memory"
     assert args.memory_command == "inspect"
     assert args.path == Path("/tmp/project")
+
+    args = parse_args(["refresh", "/tmp/project"])
+    assert args.command == "refresh"
+    assert args.path == Path("/tmp/project")
+
+    args = parse_args(["refresh"])
+    assert args.command == "refresh"
+    assert args.path == Path(".")
 
     args = parse_args(
         ["context", "/tmp/project", "--task", "Fix bugs", "--output", "out.json"]
@@ -763,3 +772,19 @@ def test_status_reports_uninitialized_repository(
     assert captured.err == (
         "Error: No persisted analysis found; run 'context-forge analyze' first\n"
     )
+
+
+def test_refresh_command_reuses_analyze_handler(
+    tmp_path: Path,
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "refresh", str(tmp_path)],
+        ),
+        patch("context_forge.main.run_analyze") as run_analyze_mock,
+    ):
+        main()
+
+    run_analyze_mock.assert_called_once_with(tmp_path)
