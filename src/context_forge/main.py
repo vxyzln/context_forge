@@ -1,4 +1,5 @@
 import argparse
+import json
 import sqlite3
 import sys
 import time
@@ -12,6 +13,21 @@ from context_forge.query.project import ProjectQuery
 from context_forge.storage.cache import RepositoryIdentity
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
+
+
+def _add_output_format_argument(
+    parser: argparse.ArgumentParser,
+) -> None:
+    parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format (default: text).",
+    )
+
+
+def _emit_json(payload: dict) -> None:
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -29,11 +45,13 @@ def create_parser() -> argparse.ArgumentParser:
         help="Analyze a repository and persist repository intelligence.",
     )
     analyze_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    _add_output_format_argument(analyze_parser)
 
     refresh_parser = subparsers.add_parser(
         "refresh", help="Refresh repository analysis and cached intelligence."
     )
     refresh_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    _add_output_format_argument(refresh_parser)
 
     context_parser = subparsers.add_parser(
         "context",
@@ -57,18 +75,21 @@ def create_parser() -> argparse.ArgumentParser:
         help="Show repository and analysis status.",
     )
     status_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    _add_output_format_argument(status_parser)
 
     cache_parser = subparsers.add_parser(
         "cache",
         help="Show repository cache state and freshness.",
     )
     cache_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    _add_output_format_argument(cache_parser)
 
     inspect_parser = subparsers.add_parser(
         "inspect",
         help="Inspect persisted repository intelligence.",
     )
     inspect_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    _add_output_format_argument(inspect_parser)
 
     memory_parser = subparsers.add_parser(
         "memory",
@@ -89,6 +110,7 @@ def create_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("."),
     )
+    _add_output_format_argument(memory_inspect_parser)
     memory_search_parser = memory_subparsers.add_parser(
         "search",
         help="Search persisted repository memory.",
@@ -103,6 +125,7 @@ def create_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("."),
     )
+    _add_output_format_argument(memory_search_parser)
     memory_file_parser = memory_subparsers.add_parser(
         "file",
         help="Retrieve a file and its defined symbols.",
@@ -118,6 +141,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=Path("."),
         help="Repository root path.",
     )
+    _add_output_format_argument(memory_file_parser)
 
     memory_symbol_parser = memory_subparsers.add_parser(
         "symbol",
@@ -134,6 +158,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=Path("."),
         help="Repository root path.",
     )
+    _add_output_format_argument(memory_symbol_parser)
 
     memory_references_parser = memory_subparsers.add_parser(
         "references",
@@ -150,6 +175,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=Path("."),
         help="Repository root path.",
     )
+    _add_output_format_argument(memory_references_parser)
 
     memory_relationships_parser = memory_subparsers.add_parser(
         "relationships",
@@ -182,12 +208,14 @@ def create_parser() -> argparse.ArgumentParser:
             "'calls' and 'depends_on' are not currently generated."
         ),
     )
+    _add_output_format_argument(memory_relationships_parser)
 
     diagnostics_parser = subparsers.add_parser(
         "diagnostics",
         help="Show persisted repository analysis diagnostics.",
     )
     diagnostics_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    _add_output_format_argument(diagnostics_parser)
 
     return parser
 
@@ -281,7 +309,19 @@ def load_fresh_project(root_path: Path):
 load_generation_project = load_fresh_project
 
 
-def print_analysis_summary(project) -> None:
+def print_analysis_summary(project, output_format: str = "text") -> None:
+    payload = {
+        "analysis_status": str(project.analysis_status),
+        "files": len(project.files),
+        "relationships": len(project.relationships),
+        "repository": str(project.root_path),
+        "symbols": len(project.symbols),
+    }
+
+    if output_format == "json":
+        _emit_json(payload)
+        return
+
     print(f"Analyzed: {project.root_path}")
     print(f"Files: {len(project.files)}")
     print(f"Symbols: {len(project.symbols)}")
@@ -289,7 +329,30 @@ def print_analysis_summary(project) -> None:
     print(f"Status: {project.analysis_status}")
 
 
-def print_status_summary(project, metadata, freshness) -> None:
+def print_status_summary(
+    project,
+    metadata,
+    freshness,
+    output_format: str = "text",
+) -> None:
+    payload = {
+        "analysis_errors": len(project.errors),
+        "analysis_status": str(project.analysis_status),
+        "analyzer_version": metadata.analyzer_version,
+        "cache_schema_version": metadata.cache_schema_version,
+        "cache_status": "fresh" if freshness.is_fresh else "stale",
+        "files": len(project.files),
+        "project": project.name,
+        "project_type": project.project_type or "unknown",
+        "relationships": len(project.relationships),
+        "repository": str(project.root_path),
+        "symbols": len(project.symbols),
+    }
+
+    if output_format == "json":
+        _emit_json(payload)
+        return
+
     print(f"Repository: {project.root_path}")
     print(f"Project: {project.name}")
     print(f"Analysis status: {project.analysis_status}")
@@ -309,89 +372,158 @@ def print_cache_summary(
     metadata,
     fingerprints,
     freshness,
+    output_format: str = "text",
 ) -> None:
+    changes = freshness.changes
+
+    added = sorted(changes.added) if changes is not None else []
+    modified = sorted(changes.modified) if changes is not None else []
+    deleted = sorted(changes.deleted) if changes is not None else []
+
+    payload = {
+        "added_paths": added,
+        "analyzer_version": metadata.analyzer_version,
+        "cache_schema_version": metadata.cache_schema_version,
+        "cache_status": "fresh" if freshness.is_fresh else "stale",
+        "deleted_paths": deleted,
+        "freshness_reason": freshness.reason,
+        "modified_paths": modified,
+        "repository": str(repository_key),
+        "tracked_files": len(fingerprints),
+    }
+
+    if output_format == "json":
+        _emit_json(payload)
+        return
+
     print(f"Repository: {repository_key}")
     print(f"Cache status: {'fresh' if freshness.is_fresh else 'stale'}")
     print(f"Cache schema version: {metadata.cache_schema_version}")
     print(f"Analyzer version: {metadata.analyzer_version}")
     print(f"Tracked files: {len(fingerprints)}")
-
-    changes = freshness.changes
-
     print(f"Freshness reason: {freshness.reason}")
+    print(f"Added paths: {len(added)}")
+    print(f"Modified paths: {len(modified)}")
+    print(f"Deleted paths: {len(deleted)}")
 
-    if changes is None:
-        print("Added paths: 0")
-        print("Modified paths: 0")
-        print("Deleted paths: 0")
-        return
-
-    print(f"Added paths: {len(changes.added)}")
-    print(f"Modified paths: {len(changes.modified)}")
-    print(f"Deleted paths: {len(changes.deleted)}")
-
-    if changes.added:
-        print()
-        print("Added paths:")
-        for path in sorted(changes.added):
-            print(f"  {path}")
-
-    if changes.modified:
-        print()
-        print("Modified paths:")
-        for path in sorted(changes.modified):
-            print(f"  {path}")
-
-    if changes.deleted:
-        print()
-        print("Deleted paths:")
-        for path in sorted(changes.deleted):
-            print(f"  {path}")
+    for label, paths in (
+        ("Added paths:", added),
+        ("Modified paths:", modified),
+        ("Deleted paths:", deleted),
+    ):
+        if paths:
+            print()
+            print(label)
+            for path in paths:
+                print(f"  {path}")
 
 
-def print_inspection_summary(project) -> None:
-    print(f"Repository: {project.root_path}")
-    print()
-
-    print("Files:")
-    for file in sorted(project.files, key=lambda item: item.path):
-        print(f"  {file.path}")
-
-    print()
-    print("Symbols:")
-    for symbol in sorted(
+def print_inspection_summary(
+    project,
+    output_format: str = "text",
+) -> None:
+    files = sorted(project.files, key=lambda item: item.path)
+    symbols = sorted(
         project.symbols,
         key=lambda item: (
             item.file_id,
             item.start_line,
             item.name,
         ),
-    ):
-        qualified_name = symbol.qualified_name or symbol.name
-        print(
-            f"  {qualified_name}"
-            f" [{symbol.kind}]"
-            f" lines {symbol.start_line}-{symbol.end_line}"
-        )
-
-    print()
-    print("Relationships:")
-    for relationship in sorted(
+    )
+    relationships = sorted(
         project.relationships,
         key=lambda item: (
             item.relationship_type.value,
             str(item.source_id),
             str(item.target_id),
         ),
-    ):
+    )
+
+    if output_format == "json":
+        _emit_json(
+            {
+                "files": [
+                    {
+                        "path": item.path,
+                    }
+                    for item in files
+                ],
+                "relationships": [
+                    {
+                        "source_id": str(item.source_id),
+                        "target_id": str(item.target_id),
+                        "type": item.relationship_type.value,
+                    }
+                    for item in relationships
+                ],
+                "repository": str(project.root_path),
+                "symbols": [
+                    {
+                        "end_line": item.end_line,
+                        "kind": str(item.kind),
+                        "name": item.name,
+                        "qualified_name": item.qualified_name or item.name,
+                        "start_line": item.start_line,
+                    }
+                    for item in symbols
+                ],
+            }
+        )
+        return
+
+    print(f"Repository: {project.root_path}")
+    print()
+
+    print("Files:")
+    for item in files:
+        print(f"  {item.path}")
+
+    print()
+    print("Symbols:")
+    for item in symbols:
+        qualified_name = item.qualified_name or item.name
         print(
-            f"  {relationship.relationship_type.value}"
-            f": {relationship.source_id}"
-            f" -> {relationship.target_id}"
+            f"  {qualified_name} [{item.kind}] lines {item.start_line}-{item.end_line}"
         )
 
+    print()
+    print("Relationships:")
+    for item in relationships:
+        print(f"  {item.relationship_type.value}: {item.source_id} -> {item.target_id}")
 
-def print_diagnostics_summary(project) -> None:
+
+def print_diagnostics_summary(
+    project,
+    output_format: str = "text",
+) -> None:
+    errors = sorted(
+        project.errors,
+        key=lambda item: (
+            str(item.path or ""),
+            item.line if item.line is not None else -1,
+            str(item.severity),
+            item.message,
+        ),
+    )
+
+    if output_format == "json":
+        _emit_json(
+            {
+                "errors": [
+                    {
+                        "line": item.line,
+                        "message": item.message,
+                        "path": str(item.path) if item.path is not None else None,
+                        "severity": str(item.severity),
+                    }
+                    for item in errors
+                ],
+                "repository": str(project.root_path),
+            }
+        )
+        return
+
     print(f"Repository: {project.root_path}")
     print(f"Analysis errors: {len(project.errors)}")
 
@@ -430,7 +562,7 @@ def read_task(task: str | None) -> str:
     return normalized
 
 
-def run_analyze(path: Path) -> None:
+def run_analyze(path: Path, output_format: str = "text") -> None:
     from context_forge.operational_logging import (
         log_analysis_completed,
         log_analysis_failed,
@@ -449,7 +581,7 @@ def run_analyze(path: Path) -> None:
             files_count=len(project.files),
             symbols_count=len(project.symbols),
         )
-        print_analysis_summary(project)
+        print_analysis_summary(project, output_format)
     except Exception as exc:
         log_analysis_failed(
             project_path=root_path,
@@ -459,7 +591,7 @@ def run_analyze(path: Path) -> None:
         raise
 
 
-def run_status(path: Path) -> None:
+def run_status(path: Path, output_format: str = "text") -> None:
     root_path = resolve_project_path(path)
     repository, repository_key, project, metadata = load_project_analysis(root_path)
 
@@ -470,14 +602,10 @@ def run_status(path: Path) -> None:
         fingerprints,
     )
 
-    print_status_summary(
-        project,
-        metadata,
-        freshness,
-    )
+    print_status_summary(project, metadata, freshness, output_format)
 
 
-def run_cache(path: Path) -> None:
+def run_cache(path: Path, output_format: str = "text") -> None:
     root_path = resolve_project_path(path)
     repository, repository_key, project, metadata = load_project_analysis(root_path)
 
@@ -489,31 +617,59 @@ def run_cache(path: Path) -> None:
     )
 
     print_cache_summary(
-        repository_key,
-        metadata,
-        fingerprints,
-        freshness,
+        repository_key, metadata, fingerprints, freshness, output_format
     )
 
 
-def run_inspect(path: Path) -> None:
+def run_inspect(path: Path, output_format: str = "text") -> None:
     root_path = resolve_project_path(path)
     _, _, project, _ = load_project_analysis(root_path)
 
-    print_inspection_summary(project)
+    print_inspection_summary(project, output_format)
 
 
-def run_memory_search(query: str, path: Path) -> None:
+def run_memory_search(
+    query: str,
+    path: Path,
+    output_format: str = "text",
+) -> None:
     normalized_query = query.strip()
-
     if not normalized_query:
         raise ValueError("Search query cannot be empty")
 
-    root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    root = resolve_project_path(path)
+    project, _ = load_fresh_project(root)
     results = ProjectQuery(project).search(normalized_query)
 
-    print(f"Repository: {root_path}")
+    if output_format == "json":
+        _emit_json(
+            {
+                "query": normalized_query,
+                "repository": str(root),
+                "results": [
+                    {
+                        "name": result.name,
+                        "path": (
+                            str(result.path)
+                            if getattr(result, "path", None) is not None
+                            else None
+                        ),
+                        "qualified_name": getattr(result, "qualified_name", None),
+                        "reason": getattr(result, "reason", None),
+                        "score": float(result.score),
+                        "type": getattr(
+                            result.result_type,
+                            "value",
+                            result.result_type,
+                        ),
+                    }
+                    for result in results
+                ],
+            }
+        )
+        return
+
+    print(f"Repository: {root}")
     print(f"Query: {normalized_query}")
     print(f"Results: {len(results)}")
 
@@ -523,47 +679,86 @@ def run_memory_search(query: str, path: Path) -> None:
 
     for result in results:
         display_name = result.qualified_name or result.name
-
-        print(f"  [{result.result_type.value}] {display_name}")
-
-        if result.path is not None:
-            print(f"    Path: {result.path}")
-
-        print(f"    Score: {result.score:.2f}")
-
-        if result.reason is not None:
-            print(f"    Match: {result.reason}")
+        print(f"- [{result.result_type.value}] {display_name}")
+        if result.path:
+            print(f"  Path: {result.path}")
+        print(f"  Score: {result.score:.2f}")
+        if result.reason:
+            print(f"  Match: {result.reason}")
 
 
-def run_memory_file(file_path: str, path: Path) -> None:
+def run_memory_file(
+    file_path: str,
+    path: Path,
+    output_format: str = "text",
+) -> None:
     normalized_file_path = file_path.strip()
-
     if not normalized_file_path:
         raise ValueError("File path cannot be empty")
 
-    root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    root = resolve_project_path(path)
+    project, _ = load_fresh_project(root)
     query = ProjectQuery(project)
-
     file = query.get_file(normalized_file_path)
 
-    print(f"Repository: {root_path}")
-    print(f"File: {normalized_file_path}")
-
     if file is None:
+        if output_format == "json":
+            _emit_json(
+                {
+                    "file": None,
+                    "repository": str(root),
+                    "requested_path": normalized_file_path,
+                }
+            )
+            return
+
+        print(f"Repository: {root}")
+        print(f"File: {normalized_file_path}")
         print("File not found.")
         return
-
-    print(f"Name: {file.name}")
-    print(f"Extension: {file.extension}")
-    print(f"Type: {file.file_type.value}")
-    print(f"Size: {file.size} bytes")
 
     symbols = sorted(
         query.find_symbols_in_file(file.id),
         key=lambda symbol: (symbol.start_line, symbol.name),
     )
 
+    if output_format == "json":
+        _emit_json(
+            {
+                "file": {
+                    "extension": file.extension,
+                    "name": file.name,
+                    "path": normalized_file_path,
+                    "size": int(file.size),
+                    "symbols": [
+                        {
+                            "end_line": int(symbol.end_line),
+                            "kind": getattr(symbol.kind, "value", symbol.kind),
+                            "name": symbol.name,
+                            "qualified_name": symbol.qualified_name,
+                            "signature": symbol.signature,
+                            "start_line": int(symbol.start_line),
+                        }
+                        for symbol in symbols
+                    ],
+                    "type": getattr(
+                        file.file_type,
+                        "value",
+                        file.file_type,
+                    ),
+                },
+                "repository": str(root),
+                "requested_path": normalized_file_path,
+            }
+        )
+        return
+
+    print(f"Repository: {root}")
+    print(f"File: {normalized_file_path}")
+    print(f"Name: {file.name}")
+    print(f"Extension: {file.extension}")
+    print(f"Type: {file.file_type.value}")
+    print(f"Size: {file.size} bytes")
     print(f"Symbols: {len(symbols)}")
 
     if not symbols:
@@ -572,27 +767,27 @@ def run_memory_file(file_path: str, path: Path) -> None:
 
     for symbol in symbols:
         display_name = symbol.qualified_name or symbol.name
-
-        print(f"  [{symbol.kind}] {display_name}")
-        print(f"    Lines: {symbol.start_line}-{symbol.end_line}")
-
-        if symbol.signature is not None:
-            print(f"    Signature: {symbol.signature}")
+        print(f"- [{symbol.kind}] {display_name}")
+        print(f"  Lines: {symbol.start_line}-{symbol.end_line}")
+        if symbol.signature:
+            print(f"  Signature: {symbol.signature}")
 
 
-def run_memory_symbol(symbol_name: str, path: Path) -> None:
+def run_memory_symbol(
+    symbol_name: str,
+    path: Path,
+    output_format: str = "text",
+) -> None:
     normalized_name = symbol_name.strip()
-
     if not normalized_name:
         raise ValueError("Symbol name cannot be empty")
 
-    root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    root = resolve_project_path(path)
+    project, _ = load_fresh_project(root)
     query = ProjectQuery(project)
 
     if "." in normalized_name:
         symbols = query.find_symbols_by_qualified_name(normalized_name)
-
         if not symbols:
             symbols = query.find_symbols(normalized_name)
     else:
@@ -603,15 +798,38 @@ def run_memory_symbol(symbol_name: str, path: Path) -> None:
     symbols = sorted(
         symbols,
         key=lambda symbol: (
-            files_by_id[symbol.file_id].path.as_posix()
-            if symbol.file_id in files_by_id
-            else "",
+            files_by_id[symbol.file_id].path if symbol.file_id in files_by_id else "",
             symbol.start_line,
             symbol.name,
         ),
     )
 
-    print(f"Repository: {root_path}")
+    if output_format == "json":
+        _emit_json(
+            {
+                "matches": [
+                    {
+                        "end_line": int(symbol.end_line),
+                        "kind": getattr(symbol.kind, "value", symbol.kind),
+                        "name": symbol.name,
+                        "path": (
+                            str(files_by_id[symbol.file_id].path)
+                            if symbol.file_id in files_by_id
+                            else None
+                        ),
+                        "qualified_name": (symbol.qualified_name or symbol.name),
+                        "signature": symbol.signature,
+                        "start_line": int(symbol.start_line),
+                    }
+                    for symbol in symbols
+                ],
+                "query": normalized_name,
+                "repository": str(root),
+            }
+        )
+        return
+
+    print(f"Repository: {root}")
     print(f"Symbol: {normalized_name}")
     print(f"Matches: {len(symbols)}")
 
@@ -624,19 +842,14 @@ def run_memory_symbol(symbol_name: str, path: Path) -> None:
 
     for symbol in symbols:
         display_name = symbol.qualified_name or symbol.name
+        print(f"- [{symbol.kind}] {display_name}")
+
         file = files_by_id.get(symbol.file_id)
+        print(f"  Path: {file.path if file else 'Unknown'}")
+        print(f"  Lines: {symbol.start_line}-{symbol.end_line}")
 
-        print(f"  [{symbol.kind}] {display_name}")
-
-        if file is not None:
-            print(f"    Path: {file.path.as_posix()}")
-        else:
-            print("    Path: Unknown")
-
-        print(f"    Lines: {symbol.start_line}-{symbol.end_line}")
-
-        if symbol.signature is not None:
-            print(f"    Signature: {symbol.signature}")
+        if symbol.signature:
+            print(f"  Signature: {symbol.signature}")
 
 
 def _find_memory_symbols(query: ProjectQuery, name: str):
@@ -865,11 +1078,11 @@ def run_memory_relationships(
             print(f"    Qualified name: {qualified_name}")
 
 
-def run_diagnostics(path: Path) -> None:
+def run_diagnostics(path: Path, output_format: str = "text") -> None:
     root_path = resolve_project_path(path)
     _, _, project, _ = load_project_analysis(root_path)
 
-    print_diagnostics_summary(project)
+    print_diagnostics_summary(project, output_format)
 
 
 def run_context(args: argparse.Namespace) -> None:
@@ -901,24 +1114,39 @@ def run_context(args: argparse.Namespace) -> None:
 
 def _dispatch_command(args: argparse.Namespace) -> None:
     handlers = {
-        "analyze": lambda: run_analyze(args.path),
-        "refresh": lambda: run_analyze(args.path),
-        "status": lambda: run_status(args.path),
-        "cache": lambda: run_cache(args.path),
-        "inspect": lambda: run_inspect(args.path),
-        "diagnostics": lambda: run_diagnostics(args.path),
-        ("memory", "inspect"): lambda: run_inspect(args.path),
-        ("memory", "search"): lambda: run_memory_search(
-            args.query,
-            args.path,
+        "analyze": lambda: run_analyze(args.path, args.format),
+        "refresh": lambda: (
+            run_analyze(args.path, args.format)
+            if args.format == "json"
+            else run_analyze(args.path)
         ),
-        ("memory", "file"): lambda: run_memory_file(
-            args.file_path,
-            args.path,
+        "status": lambda: run_status(args.path, args.format),
+        "cache": lambda: run_cache(args.path, args.format),
+        "inspect": lambda: (
+            run_inspect(args.path, args.format)
+            if args.format == "json"
+            else run_inspect(args.path)
         ),
-        ("memory", "symbol"): lambda: run_memory_symbol(
-            args.symbol_name,
-            args.path,
+        "diagnostics": lambda: run_diagnostics(args.path, args.format),
+        ("memory", "inspect"): lambda: (
+            run_inspect(args.path, args.format)
+            if args.format == "json"
+            else run_inspect(args.path)
+        ),
+        ("memory", "search"): lambda: (
+            run_memory_search(args.query, args.path, args.format)
+            if args.format == "json"
+            else run_memory_search(args.query, args.path)
+        ),
+        ("memory", "file"): lambda: (
+            run_memory_file(args.file_path, args.path, args.format)
+            if args.format == "json"
+            else run_memory_file(args.file_path, args.path)
+        ),
+        ("memory", "symbol"): lambda: (
+            run_memory_symbol(args.symbol_name, args.path, args.format)
+            if args.format == "json"
+            else run_memory_symbol(args.symbol_name, args.path)
         ),
         ("memory", "references"): lambda: run_memory_references(
             args.symbol_name,
