@@ -2429,3 +2429,235 @@ def test_memory_symbol_json_returns_ordered_matches(
         "query": "run",
         "repository": str(tmp_path.resolve()),
     }
+
+
+def test_memory_references_json_reports_missing_symbol(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {"files": [], "symbols": []},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "references",
+                "missing_symbol",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.find_symbols.return_value = []
+        main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload["status"] == "not_found"
+    assert payload["symbol"] == "missing_symbol"
+    assert payload["matches"] == []
+    assert payload["references"] == []
+
+
+def test_memory_references_json_serializes_indexed_reference(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("src/main.py"),
+        },
+    )()
+
+    symbol = type(
+        "Symbol",
+        (),
+        {
+            "id": UUID(int=2),
+            "file_id": source_file.id,
+            "name": "calculate",
+            "qualified_name": "Calculator.calculate",
+            "kind": "function",
+            "start_line": 10,
+            "end_line": 20,
+        },
+    )()
+
+    relationship = type(
+        "Relationship",
+        (),
+        {
+            "id": UUID(int=3),
+            "source_id": source_file.id,
+            "target_id": symbol.id,
+            "relationship_type": "references",
+            "confidence": 0.9,
+            "metadata": {
+                "line": "12",
+                "name": "calculate",
+                "qualified_name": "Calculator.calculate",
+            },
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {"files": [source_file], "symbols": [symbol]},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "references",
+                "calculate",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.find_symbols.return_value = [symbol]
+        query_mock.return_value.get_incoming_relationships.return_value = [relationship]
+        main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload["status"] == "ok"
+    assert payload["matches"][0]["qualified_name"] == "Calculator.calculate"
+    assert payload["references"] == [
+        {
+            "confidence": 0.9,
+            "line": 12,
+            "name": "calculate",
+            "path": "src/main.py",
+            "qualified_name": "Calculator.calculate",
+            "relationship_type": "references",
+        }
+    ]
+
+
+def test_memory_relationships_json_reports_empty_results(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("main.py"),
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {"files": [file], "symbols": []},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "relationships",
+                "main.py",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = file
+        query_mock.return_value.get_relationships.return_value = []
+        main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload["status"] == "ok"
+    assert payload["entity_type"] == "file"
+    assert payload["direction"] == "both"
+    assert payload["relationships"] == []
+
+
+def test_memory_relationships_json_reports_missing_entity(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {"files": [], "symbols": []},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "relationships",
+                "missing.py",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = None
+        query_mock.return_value.find_symbols_by_qualified_name.return_value = []
+        query_mock.return_value.find_symbols.return_value = []
+        main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload["status"] == "not_found"
+    assert payload["entity"] == "missing.py"
+    assert payload["relationships"] == []
