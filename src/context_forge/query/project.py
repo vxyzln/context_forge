@@ -1,10 +1,17 @@
 from uuid import UUID
 
+from context_forge.graph.builder import RelationshipBuilder
 from context_forge.models.directory import Directory
 from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship, RelationshipType
 from context_forge.models.symbol import Symbol
+from context_forge.query.architecture import (
+    ArchitectureInventory,
+    ContainmentEdge,
+    StructuralIntegrityFinding,
+    UnresolvedImport,
+)
 from context_forge.query.result import SearchResult, SearchResultType
 
 
@@ -427,6 +434,563 @@ class ProjectQuery:
         )
 
         return results
+
+    def get_architecture_inventory(
+        self,
+        entity_types: set[str] | None = None,
+    ) -> ArchitectureInventory:
+        """Return a deterministic inventory of repository structure.
+
+        Supported entity types are ``directory``, ``file``, and ``symbol``.
+        Containment and dependency relationships are returned separately.
+        """
+        supported_types = {"directory", "file", "symbol"}
+
+        if entity_types is not None:
+            unsupported_types = entity_types - supported_types
+
+            if unsupported_types:
+                unsupported = ", ".join(sorted(unsupported_types))
+                raise ValueError(
+                    f"Unsupported architecture entity types: {unsupported}"
+                )
+
+        selected_types = supported_types if entity_types is None else entity_types
+
+        directories = tuple(
+            sorted(
+                (
+                    directory
+                    for directory in self.project.directories
+                    if "directory" in selected_types
+                ),
+                key=lambda directory: (
+                    directory.path.as_posix(),
+                    directory.id.hex,
+                ),
+            )
+        )
+
+        files = tuple(
+            sorted(
+                (file for file in self.project.files if "file" in selected_types),
+                key=lambda file: (
+                    file.path.as_posix(),
+                    file.id.hex,
+                ),
+            )
+        )
+
+        symbols = tuple(
+            sorted(
+                (
+                    symbol
+                    for symbol in self.project.symbols
+                    if "symbol" in selected_types
+                ),
+                key=lambda symbol: (
+                    symbol.qualified_name or symbol.name,
+                    symbol.name,
+                    symbol.file_id.hex,
+                    symbol.id.hex,
+                ),
+            )
+        )
+
+        entity_types_by_id = {
+            entity.id: entity_type
+            for entity_type, entities in (
+                ("directory", directories),
+                ("file", files),
+                ("symbol", symbols),
+            )
+            for entity in entities
+        }
+
+        entity_paths_by_id = {
+            directory.id: directory.path.as_posix() for directory in directories
+        }
+        entity_paths_by_id.update({file.id: file.path.as_posix() for file in files})
+
+        file_by_id = {file.id: file for file in files}
+
+        for symbol in symbols:
+            file = file_by_id.get(symbol.file_id)
+            if file is not None:
+                entity_paths_by_id[symbol.id] = (
+                    f"{file.path.as_posix()}::{symbol.qualified_name or symbol.name}"
+                )
+
+        containment_edges: set[ContainmentEdge] = set()
+
+        if "directory" in selected_types:
+            for directory in directories:
+                if (
+                    directory.parent_id in entity_types_by_id
+                    and entity_types_by_id[directory.parent_id] == "directory"
+                ):
+                    containment_edges.add(
+                        ContainmentEdge(
+                            source_type="directory",
+                            source_id=directory.parent_id,
+                            target_type="directory",
+                            target_id=directory.id,
+                        )
+                    )
+
+        if "directory" in selected_types and "file" in selected_types:
+            for file in files:
+                if (
+                    file.directory_id in entity_types_by_id
+                    and entity_types_by_id[file.directory_id] == "directory"
+                ):
+                    containment_edges.add(
+                        ContainmentEdge(
+                            source_type="directory",
+                            source_id=file.directory_id,
+                            target_type="file",
+                            target_id=file.id,
+                        )
+                    )
+
+        structural_relationship_types = {
+            RelationshipType.DEFINES.value,
+            RelationshipType.CONTAINS.value,
+        }
+
+        for relationship in self.project.relationships:
+            relationship_type = self._relationship_type_value(relationship)
+
+            if relationship_type not in structural_relationship_types:
+                continue
+
+            source_type = entity_types_by_id.get(relationship.source_id)
+            target_type = entity_types_by_id.get(relationship.target_id)
+
+            if source_type is None or target_type is None:
+                continue
+
+            if relationship_type == RelationshipType.DEFINES.value and (
+                source_type != "file" or target_type != "symbol"
+            ):
+                continue
+
+            if relationship_type == RelationshipType.CONTAINS.value and (
+                source_type != "symbol" or target_type != "symbol"
+            ):
+                continue
+
+            containment_edges.add(
+                ContainmentEdge(
+                    source_type=source_type,
+                    source_id=relationship.source_id,
+                    target_type=target_type,
+                    target_id=relationship.target_id,
+                )
+            )
+
+        containment = tuple(
+            sorted(
+                containment_edges,
+                key=lambda edge: (
+                    edge.source_type,
+                    entity_paths_by_id.get(edge.source_id, ""),
+                    edge.target_type,
+                    entity_paths_by_id.get(edge.target_id, ""),
+                    edge.source_id.hex,
+                    edge.target_id.hex,
+                ),
+            )
+        )
+
+        all_files_by_id = {file.id: file for file in self.project.files}
+
+        dependencies = tuple(
+            sorted(
+                (
+                    relationship
+                    for relationship in self.project.relationships
+                    if self._relationship_type_value(relationship)
+                    == RelationshipType.IMPORTS.value
+                    and relationship.source_id in all_files_by_id
+                    and relationship.target_id in all_files_by_id
+                ),
+                key=lambda relationship: (
+                    all_files_by_id[relationship.source_id].path.as_posix(),
+                    all_files_by_id[relationship.target_id].path.as_posix(),
+                    relationship.id.hex,
+                ),
+            )
+        )
+
+        builder = RelationshipBuilder()
+        file_by_module = builder.build_module_index(self.project)
+
+        unresolved_imports_list: list[UnresolvedImport] = []
+        integrity_findings_list: list[StructuralIntegrityFinding] = []
+
+        if self.project.analysis_status != "analyzed":
+            integrity_findings_list.append(
+                StructuralIntegrityFinding(
+                    finding_type="incomplete_analysis",
+                    message=(
+                        f"Project analysis status is '{self.project.analysis_status}'; "
+                        "structural findings may be incomplete."
+                    ),
+                    source_type="project",
+                    source_id=self.project.id,
+                    source_path=(
+                        self.project.root_path.as_posix()
+                        if self.project.root_path
+                        else None
+                    ),
+                )
+            )
+
+        for import_reference in self.project.imports:
+            source_file = all_files_by_id.get(import_reference.file_id)
+            if source_file is None:
+                integrity_findings_list.append(
+                    StructuralIntegrityFinding(
+                        finding_type="missing_import_file",
+                        message=(
+                            f"Import '{import_reference.module_name}' references "
+                            f"non-existent file {import_reference.file_id}."
+                        ),
+                        source_type="file",
+                        source_id=import_reference.file_id,
+                    )
+                )
+                continue
+
+            target = builder.resolve_import_target(
+                self.project,
+                import_reference,
+                file_by_module,
+            )
+
+            if target is None:
+                unresolved_imports_list.append(
+                    UnresolvedImport(
+                        file_id=import_reference.file_id,
+                        module_name=import_reference.module_name,
+                        imported_name=import_reference.imported_name,
+                        alias=import_reference.alias,
+                        level=import_reference.level,
+                        source_path=source_file.path,
+                    )
+                )
+
+        unresolved_imports = tuple(
+            sorted(
+                unresolved_imports_list,
+                key=lambda item: (
+                    item.source_path.as_posix() if item.source_path else "",
+                    item.file_id.hex,
+                    item.module_name,
+                    item.imported_name or "",
+                    item.alias or "",
+                    item.level,
+                ),
+            )
+        )
+
+        entity_types_by_id_all: dict[UUID, str] = {}
+        for directory in self.project.directories:
+            entity_types_by_id_all[directory.id] = "directory"
+        for file in self.project.files:
+            entity_types_by_id_all[file.id] = "file"
+        for symbol in self.project.symbols:
+            entity_types_by_id_all[symbol.id] = "symbol"
+
+        symbols_by_id = {symbol.id: symbol for symbol in self.project.symbols}
+
+        for directory in self.project.directories:
+            if directory.parent_id is not None:
+                parent_type = entity_types_by_id_all.get(directory.parent_id)
+                if parent_type is None:
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="missing_directory_parent",
+                            message=(
+                                f"Directory '{directory.path.as_posix()}' references "
+                                f"non-existent parent directory {directory.parent_id}."
+                            ),
+                            source_type="directory",
+                            source_id=directory.id,
+                            source_path=directory.path.as_posix(),
+                            target_type="directory",
+                            target_id=directory.parent_id,
+                        )
+                    )
+                elif parent_type != "directory":
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="invalid_directory_parent_type",
+                            message=(
+                                f"Directory '{directory.path.as_posix()}' references "
+                                f"{parent_type} ({directory.parent_id}) as parent directory."
+                            ),
+                            source_type="directory",
+                            source_id=directory.id,
+                            source_path=directory.path.as_posix(),
+                            target_type=parent_type,
+                            target_id=directory.parent_id,
+                        )
+                    )
+
+        for file in self.project.files:
+            if file.directory_id is not None:
+                dir_type = entity_types_by_id_all.get(file.directory_id)
+                if dir_type is None:
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="missing_file_directory",
+                            message=(
+                                f"File '{file.path.as_posix()}' references "
+                                f"non-existent directory {file.directory_id}."
+                            ),
+                            source_type="file",
+                            source_id=file.id,
+                            source_path=file.path.as_posix(),
+                            target_type="directory",
+                            target_id=file.directory_id,
+                        )
+                    )
+                elif dir_type != "directory":
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="invalid_file_directory_type",
+                            message=(
+                                f"File '{file.path.as_posix()}' references "
+                                f"{dir_type} ({file.directory_id}) as directory."
+                            ),
+                            source_type="file",
+                            source_id=file.id,
+                            source_path=file.path.as_posix(),
+                            target_type=dir_type,
+                            target_id=file.directory_id,
+                        )
+                    )
+
+        for symbol in self.project.symbols:
+            file_type = entity_types_by_id_all.get(symbol.file_id)
+            if file_type is None:
+                integrity_findings_list.append(
+                    StructuralIntegrityFinding(
+                        finding_type="missing_symbol_file",
+                        message=(
+                            f"Symbol '{symbol.qualified_name or symbol.name}' "
+                            f"references non-existent file {symbol.file_id}."
+                        ),
+                        source_type="symbol",
+                        source_id=symbol.id,
+                        source_path=symbol.qualified_name or symbol.name,
+                        target_type="file",
+                        target_id=symbol.file_id,
+                    )
+                )
+            elif file_type != "file":
+                integrity_findings_list.append(
+                    StructuralIntegrityFinding(
+                        finding_type="invalid_symbol_file_type",
+                        message=(
+                            f"Symbol '{symbol.qualified_name or symbol.name}' "
+                            f"references {file_type} ({symbol.file_id}) as file."
+                        ),
+                        source_type="symbol",
+                        source_id=symbol.id,
+                        source_path=symbol.qualified_name or symbol.name,
+                        target_type=file_type,
+                        target_id=symbol.file_id,
+                    )
+                )
+
+            if symbol.parent_symbol_id is not None:
+                parent_type = entity_types_by_id_all.get(symbol.parent_symbol_id)
+                if parent_type is None:
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="missing_parent_symbol",
+                            message=(
+                                f"Symbol '{symbol.qualified_name or symbol.name}' "
+                                f"references non-existent parent symbol {symbol.parent_symbol_id}."
+                            ),
+                            source_type="symbol",
+                            source_id=symbol.id,
+                            source_path=symbol.qualified_name or symbol.name,
+                            target_type="symbol",
+                            target_id=symbol.parent_symbol_id,
+                        )
+                    )
+                elif parent_type != "symbol":
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="invalid_parent_symbol_type",
+                            message=(
+                                f"Symbol '{symbol.qualified_name or symbol.name}' "
+                                f"references {parent_type} ({symbol.parent_symbol_id}) as parent symbol."
+                            ),
+                            source_type="symbol",
+                            source_id=symbol.id,
+                            source_path=symbol.qualified_name or symbol.name,
+                            target_type=parent_type,
+                            target_id=symbol.parent_symbol_id,
+                        )
+                    )
+                else:
+                    parent_symbol = symbols_by_id[symbol.parent_symbol_id]
+                    if parent_symbol.file_id != symbol.file_id:
+                        integrity_findings_list.append(
+                            StructuralIntegrityFinding(
+                                finding_type="inconsistent_symbol_parent",
+                                message=(
+                                    f"Symbol '{symbol.qualified_name or symbol.name}' "
+                                    f"in file {symbol.file_id} references parent symbol "
+                                    f"{symbol.parent_symbol_id} in different file {parent_symbol.file_id}."
+                                ),
+                                source_type="symbol",
+                                source_id=symbol.id,
+                                source_path=symbol.qualified_name or symbol.name,
+                                target_type="symbol",
+                                target_id=symbol.parent_symbol_id,
+                            )
+                        )
+
+        for relationship in self.project.relationships:
+            rel_type = self._relationship_type_value(relationship)
+
+            if rel_type == RelationshipType.DEFINES.value:
+                source_type = entity_types_by_id_all.get(relationship.source_id)
+                target_type = entity_types_by_id_all.get(relationship.target_id)
+
+                if source_type is None:
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="missing_relationship_endpoint",
+                            message=(
+                                f"DEFINES relationship {relationship.id} "
+                                f"references non-existent source file {relationship.source_id}."
+                            ),
+                            source_type="file",
+                            source_id=relationship.source_id,
+                            target_type=target_type or "symbol",
+                            target_id=relationship.target_id,
+                        )
+                    )
+                if target_type is None:
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="missing_relationship_endpoint",
+                            message=(
+                                f"DEFINES relationship {relationship.id} "
+                                f"references non-existent target symbol {relationship.target_id}."
+                            ),
+                            source_type=source_type or "file",
+                            source_id=relationship.source_id,
+                            target_type="symbol",
+                            target_id=relationship.target_id,
+                        )
+                    )
+                if (
+                    source_type is not None
+                    and target_type is not None
+                    and (source_type != "file" or target_type != "symbol")
+                ):
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="invalid_relationship_endpoint_type",
+                            message=(
+                                f"DEFINES relationship {relationship.id} requires "
+                                f"file -> symbol endpoints, but connects {source_type} "
+                                f"({relationship.source_id}) to {target_type} ({relationship.target_id})."
+                            ),
+                            source_type=source_type,
+                            source_id=relationship.source_id,
+                            target_type=target_type,
+                            target_id=relationship.target_id,
+                        )
+                    )
+
+            elif rel_type == RelationshipType.CONTAINS.value:
+                source_type = entity_types_by_id_all.get(relationship.source_id)
+                target_type = entity_types_by_id_all.get(relationship.target_id)
+
+                if source_type is None:
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="missing_relationship_endpoint",
+                            message=(
+                                f"CONTAINS relationship {relationship.id} "
+                                f"references non-existent source symbol {relationship.source_id}."
+                            ),
+                            source_type="symbol",
+                            source_id=relationship.source_id,
+                            target_type=target_type or "symbol",
+                            target_id=relationship.target_id,
+                        )
+                    )
+                if target_type is None:
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="missing_relationship_endpoint",
+                            message=(
+                                f"CONTAINS relationship {relationship.id} "
+                                f"references non-existent target symbol {relationship.target_id}."
+                            ),
+                            source_type=source_type or "symbol",
+                            source_id=relationship.source_id,
+                            target_type="symbol",
+                            target_id=relationship.target_id,
+                        )
+                    )
+                if (
+                    source_type is not None
+                    and target_type is not None
+                    and (source_type != "symbol" or target_type != "symbol")
+                ):
+                    integrity_findings_list.append(
+                        StructuralIntegrityFinding(
+                            finding_type="invalid_relationship_endpoint_type",
+                            message=(
+                                f"CONTAINS relationship {relationship.id} requires "
+                                f"symbol -> symbol endpoints, but connects {source_type} "
+                                f"({relationship.source_id}) to {target_type} ({relationship.target_id})."
+                            ),
+                            source_type=source_type,
+                            source_id=relationship.source_id,
+                            target_type=target_type,
+                            target_id=relationship.target_id,
+                        )
+                    )
+
+        integrity_findings = tuple(
+            sorted(
+                integrity_findings_list,
+                key=lambda finding: (
+                    finding.finding_type,
+                    finding.source_type or "",
+                    finding.source_path or "",
+                    finding.source_id.hex if finding.source_id else "",
+                    finding.target_type or "",
+                    finding.target_id.hex if finding.target_id else "",
+                    finding.message,
+                ),
+            )
+        )
+
+        return ArchitectureInventory(
+            project_id=self.project.id,
+            analysis_status=self.project.analysis_status,
+            errors=tuple(self.project.errors),
+            directories=directories,
+            files=files,
+            symbols=symbols,
+            containment=containment,
+            dependencies=dependencies,
+            unresolved_imports=unresolved_imports,
+            integrity_findings=integrity_findings,
+        )
 
     def get_directory(
         self,

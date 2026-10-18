@@ -24,6 +24,27 @@ class RelationshipBuilder:
         self._build_reference_relationships(project)
         self._build_inheritance_relationships(project)
 
+    def build_module_index(
+        self,
+        project: Project,
+    ) -> dict[str, File]:
+        return self._build_module_index(project)
+
+    def resolve_import_target(
+        self,
+        project: Project,
+        import_reference: ImportReference,
+        file_by_module: dict[str, File] | None = None,
+    ) -> File | None:
+        if file_by_module is None:
+            file_by_module = self._build_module_index(project)
+
+        return self._resolve_import_target(
+            project,
+            import_reference,
+            file_by_module,
+        )
+
     def _remove_existing_relationships(self, project: Project) -> None:
         project.relationships.clear()
 
