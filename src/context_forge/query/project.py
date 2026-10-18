@@ -3,7 +3,7 @@ from uuid import UUID
 from context_forge.models.directory import Directory
 from context_forge.models.file import File
 from context_forge.models.project import Project
-from context_forge.models.relationship import Relationship
+from context_forge.models.relationship import Relationship, RelationshipType
 from context_forge.models.symbol import Symbol
 from context_forge.query.result import SearchResult, SearchResultType
 
@@ -104,6 +104,36 @@ class ProjectQuery:
         return self._sort_relationships(
             relationships,
             entity_id,
+        )
+
+    def get_direct_dependencies(self, file_id: UUID) -> list[File]:
+        """Return files directly imported by the specified file."""
+        dependency_ids = {
+            relationship.target_id
+            for relationship in self.get_outgoing_relationships(
+                file_id,
+                relationship_type=RelationshipType.IMPORTS.value,
+            )
+        }
+
+        return sorted(
+            (file for file in self.project.files if file.id in dependency_ids),
+            key=lambda file: file.path.as_posix(),
+        )
+
+    def get_direct_dependents(self, file_id: UUID) -> list[File]:
+        """Return files that directly import the specified file."""
+        dependent_ids = {
+            relationship.source_id
+            for relationship in self.get_incoming_relationships(
+                file_id,
+                relationship_type=RelationshipType.IMPORTS.value,
+            )
+        }
+
+        return sorted(
+            (file for file in self.project.files if file.id in dependent_ids),
+            key=lambda file: file.path.as_posix(),
         )
 
     def get_related_entity_ids(

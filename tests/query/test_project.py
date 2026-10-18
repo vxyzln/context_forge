@@ -936,3 +936,32 @@ def test_query_returns_empty_for_unknown_qualified_name(
     query = ProjectQuery(project)
 
     assert query.find_symbols_by_qualified_name("Missing.method") == []
+
+
+def test_get_direct_dependencies(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    dependencies = query.get_direct_dependencies(project.files[0].id)
+
+    assert dependencies == [project.files[1]]
+
+
+def test_get_direct_dependents(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    dependents = query.get_direct_dependents(project.files[1].id)
+
+    assert dependents == [project.files[0]]
+
+
+def test_get_direct_dependencies_returns_empty_list_when_none_exist(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    dependencies = query.get_direct_dependencies(project.files[1].id)
+
+    assert dependencies == []
