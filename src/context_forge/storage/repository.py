@@ -11,6 +11,7 @@ from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship, RelationshipType
 from context_forge.models.symbol import Symbol
+from context_forge.parser.result import ImportReference
 from context_forge.storage.cache import (
     ANALYZER_VERSION,
     CACHE_SCHEMA_VERSION,
@@ -310,6 +311,14 @@ class ProjectRepository:
 
                 connection.execute(
                     """
+                    DELETE FROM imports
+                    WHERE project_id = ?
+                    """,
+                    (project_id,),
+                )
+
+                connection.execute(
+                    """
                     DELETE FROM projects
                     WHERE id = ?
                     """,
@@ -435,6 +444,14 @@ class ProjectRepository:
 
                 connection.execute(
                     f"""
+                    DELETE FROM imports
+                    WHERE file_id IN ({file_placeholders})
+                    """,
+                    file_ids,
+                )
+
+                connection.execute(
+                    f"""
                     DELETE FROM files
                     WHERE id IN ({file_placeholders})
                     """,
@@ -461,6 +478,11 @@ class ProjectRepository:
     ) -> None:
         connection.execute(
             "DELETE FROM analysis_errors WHERE project_id = ?",
+            (str(project.id),),
+        )
+
+        connection.execute(
+            "DELETE FROM imports WHERE project_id = ?",
             (str(project.id),),
         )
 
@@ -676,6 +698,29 @@ class ProjectRepository:
                 ),
             )
 
+        for reference in project.imports:
+            connection.execute(
+                """
+                INSERT INTO imports (
+                    project_id,
+                    file_id,
+                    module_name,
+                    imported_name,
+                    alias,
+                    level
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(project.id),
+                    str(reference.file_id),
+                    reference.module_name,
+                    reference.imported_name,
+                    reference.alias,
+                    reference.level,
+                ),
+            )
+
         for error in project.errors:
             connection.execute(
                 """
@@ -816,6 +861,16 @@ class ProjectRepository:
                 (str(project_id),),
             ).fetchall()
 
+            import_rows = connection.execute(
+                """
+                SELECT file_id, module_name, imported_name, alias, level
+                FROM imports
+                WHERE project_id = ?
+                ORDER BY id
+                """,
+                (str(project_id),),
+            ).fetchall()
+
         git_activity = None
 
         if project_row["git_total_commits"] is not None:
@@ -896,6 +951,17 @@ class ProjectRepository:
                 metadata=json.loads(row["metadata"]),
             )
             project.add_relationship(relationship)
+
+        for row in import_rows:
+            project.imports.append(
+                ImportReference(
+                    file_id=UUID(row["file_id"]),
+                    module_name=row["module_name"],
+                    imported_name=row["imported_name"],
+                    alias=row["alias"],
+                    level=row["level"],
+                )
+            )
 
         project.errors.extend(row["message"] for row in error_rows)
 

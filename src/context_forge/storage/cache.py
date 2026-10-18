@@ -3,7 +3,7 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import UUID
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 ANALYZER_VERSION = "0.1.0"
 
 

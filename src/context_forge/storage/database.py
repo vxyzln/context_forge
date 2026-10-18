@@ -111,6 +111,18 @@ class Database:
                     FOREIGN KEY (project_id) REFERENCES projects(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS imports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL,
+                    file_id TEXT NOT NULL,
+                    module_name TEXT NOT NULL,
+                    imported_name TEXT,
+                    alias TEXT,
+                    level INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (project_id) REFERENCES projects(id),
+                    FOREIGN KEY (file_id) REFERENCES files(id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_repository_cache_project
                 ON repository_cache(project_id);
 
@@ -131,6 +143,12 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_relationships_target
                 ON relationships(target_id);
+
+                CREATE INDEX IF NOT EXISTS idx_imports_project
+                ON imports(project_id);
+
+                CREATE INDEX IF NOT EXISTS idx_imports_file
+                ON imports(file_id);
                 """
             )
 

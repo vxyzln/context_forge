@@ -1638,3 +1638,147 @@ def test_analyzer_handles_file_rename_incrementally(
 
     assert set(fingerprints) == current_paths
     assert Path("original.py") not in fingerprints
+
+
+def test_analyzer_fresh_cache_hit_retains_raw_imports(tmp_path: Path) -> None:
+    source = tmp_path / "main.py"
+    source.write_text("import os\nimport sys\n", encoding="utf-8")
+    database_path = tmp_path / ".context_forge.db"
+
+    first_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    first_project = first_analyzer.analyze()
+
+    assert len(first_project.imports) == 2
+    modules = {imp.module_name for imp in first_project.imports}
+    assert modules == {"os", "sys"}
+
+    second_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    second_project = second_analyzer.analyze()
+
+    assert second_project.id == first_project.id
+    assert len(second_project.imports) == 2
+    assert {imp.module_name for imp in second_project.imports} == {"os", "sys"}
+
+
+def test_analyzer_incremental_analysis_preserves_and_replaces_imports(
+    tmp_path: Path,
+) -> None:
+    file_a = tmp_path / "a.py"
+    file_b = tmp_path / "b.py"
+
+    file_a.write_text("import math\n", encoding="utf-8")
+    file_b.write_text("import json\n", encoding="utf-8")
+
+    database_path = tmp_path / ".context_forge.db"
+    first_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    first_project = first_analyzer.analyze()
+
+    assert len(first_project.imports) == 2
+
+    # Now modify only b.py, leaving a.py unchanged.
+    file_b.write_text("import re\nimport csv\n", encoding="utf-8")
+
+    second_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    second_project = second_analyzer.analyze()
+
+    # a.py's import ("math") must survive from cache, and b.py's imports must be "re" and "csv".
+    assert len(second_project.imports) == 3
+    imports_by_file: dict[Path, list[str]] = {}
+    for file in second_project.files:
+        imports_by_file[file.path] = [
+            imp.module_name for imp in second_project.imports if imp.file_id == file.id
+        ]
+
+    assert imports_by_file[Path("a.py")] == ["math"]
+    assert sorted(imports_by_file[Path("b.py")]) == ["csv", "re"]
+
+
+def test_analyzer_incremental_analysis_removes_imports_for_deleted_file(
+    tmp_path: Path,
+) -> None:
+    file_a = tmp_path / "a.py"
+    file_b = tmp_path / "b.py"
+
+    file_a.write_text("import math\n", encoding="utf-8")
+    file_b.write_text("import json\n", encoding="utf-8")
+
+    database_path = tmp_path / ".context_forge.db"
+    first_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    first_project = first_analyzer.analyze()
+    assert len(first_project.imports) == 2
+
+    # Delete b.py
+    file_b.unlink()
+
+    second_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    second_project = second_analyzer.analyze()
+
+    assert len(second_project.files) == 1
+    assert len(second_project.imports) == 1
+    assert second_project.imports[0].module_name == "math"
+
+    # Verify persisted DB has only a.py's import
+    loaded = second_analyzer.repository.load(second_project.id)
+    assert loaded is not None
+    assert len(loaded.imports) == 1
+    assert loaded.imports[0].module_name == "math"
+
+
+def test_analyzer_cache_schema_mismatch_triggers_safe_reanalysis(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "main.py"
+    source.write_text("import sys\n", encoding="utf-8")
+    database_path = tmp_path / ".context_forge.db"
+
+    analyzer = ProjectAnalyzer(tmp_path, database_path)
+    analyzer.analyze()
+
+    # Modify metadata in DB to simulate old schema version
+    with analyzer.database.connect() as connection:
+        connection.execute(
+            "UPDATE repository_cache SET cache_schema_version = ?",
+            (0,),
+        )
+
+    second_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    reanalyzed = second_analyzer.analyze()
+
+    assert reanalyzed.analysis_status == "analyzed"
+    assert len(reanalyzed.imports) == 1
+    assert reanalyzed.imports[0].module_name == "sys"
+
+
+def test_analyzer_graph_relationships_consistent_with_cached_imports(
+    tmp_path: Path,
+) -> None:
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    helper = src_dir / "helper.py"
+    main = src_dir / "main.py"
+
+    helper.write_text("def assist(): pass\n", encoding="utf-8")
+    main.write_text("from helper import assist\n", encoding="utf-8")
+
+    database_path = tmp_path / ".context_forge.db"
+    first_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    first_project = first_analyzer.analyze()
+
+    import_rels = [
+        r
+        for r in first_project.relationships
+        if r.relationship_type == RelationshipType.IMPORTS
+    ]
+    assert len(import_rels) == 1
+
+    # Reload in a new analyzer instance via cache
+    second_analyzer = ProjectAnalyzer(tmp_path, database_path)
+    second_project = second_analyzer.analyze()
+
+    cached_import_rels = [
+        r
+        for r in second_project.relationships
+        if r.relationship_type == RelationshipType.IMPORTS
+    ]
+    assert len(cached_import_rels) == 1
+    assert len(second_project.imports) == 1

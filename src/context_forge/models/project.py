@@ -82,5 +82,11 @@ class Project:
 
         self.inheritance_references.append(reference)
 
+    def add_import(self, reference: ImportReference) -> None:
+        if reference.file_id not in {file.id for file in self.files}:
+            raise ValueError("Import reference file does not belong to project")
+
+        self.imports.append(reference)
+
     def add_relationship(self, relationship: Relationship) -> None:
         self.relationships.append(relationship)

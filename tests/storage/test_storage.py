@@ -6,8 +6,10 @@ import pytest
 
 from context_forge.git import GitActivitySummary
 from context_forge.graph.builder import RelationshipBuilder
+from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.parser.python import PythonParser
+from context_forge.parser.result import ImportReference
 from context_forge.scanner.repository import RepositoryScanner
 from context_forge.storage.cache import (
     ANALYZER_VERSION,
@@ -1754,3 +1756,173 @@ def test_load_analysis_keeps_separate_repositories_isolated(
     assert first_loaded_metadata.repository_key != (
         second_loaded_metadata.repository_key
     )
+
+
+def test_import_reference_round_trip_preserves_all_fields(tmp_path: Path) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(name="Import Test Project", root_path=tmp_path)
+    file_a = File(
+        project_id=project.id,
+        path=Path("main.py"),
+        name="main.py",
+        extension=".py",
+    )
+    project.add_file(file_a)
+
+    import_ref = ImportReference(
+        file_id=file_a.id,
+        module_name="os.path",
+        imported_name="join",
+        alias="pjoin",
+        level=0,
+    )
+    relative_ref = ImportReference(
+        file_id=file_a.id,
+        module_name="..sibling",
+        imported_name="Helper",
+        alias=None,
+        level=2,
+    )
+    project.add_import(import_ref)
+    project.add_import(relative_ref)
+
+    repository.save(project)
+    loaded = repository.load(project.id)
+
+    assert loaded is not None
+    assert len(loaded.imports) == 2
+    first, second = loaded.imports
+    assert first.file_id == file_a.id
+    assert first.module_name == "os.path"
+    assert first.imported_name == "join"
+    assert first.alias == "pjoin"
+    assert first.level == 0
+
+    assert second.file_id == file_a.id
+    assert second.module_name == "..sibling"
+    assert second.imported_name == "Helper"
+    assert second.alias is None
+    assert second.level == 2
+
+
+def test_import_reference_repeated_save_does_not_duplicate_records(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(name="Repeat Save Project", root_path=tmp_path)
+    file_a = File(
+        project_id=project.id,
+        path=Path("main.py"),
+        name="main.py",
+        extension=".py",
+    )
+    project.add_file(file_a)
+    project.add_import(
+        ImportReference(
+            file_id=file_a.id,
+            module_name="math",
+            imported_name="sqrt",
+        )
+    )
+
+    repository.save(project)
+    repository.save(project)
+
+    with database.connect() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) AS count FROM imports WHERE project_id = ?",
+            (str(project.id),),
+        ).fetchone()["count"]
+
+    assert count == 1
+
+    loaded = repository.load(project.id)
+    assert loaded is not None
+    assert len(loaded.imports) == 1
+
+
+def test_import_reference_repository_isolation(tmp_path: Path) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project_1 = Project(name="Project 1", root_path=tmp_path / "p1")
+    file_1 = File(
+        project_id=project_1.id,
+        path=Path("p1.py"),
+        name="p1.py",
+        extension=".py",
+    )
+    project_1.add_file(file_1)
+    project_1.add_import(ImportReference(file_id=file_1.id, module_name="pkg1"))
+
+    project_2 = Project(name="Project 2", root_path=tmp_path / "p2")
+    file_2 = File(
+        project_id=project_2.id,
+        path=Path("p2.py"),
+        name="p2.py",
+        extension=".py",
+    )
+    project_2.add_file(file_2)
+    project_2.add_import(ImportReference(file_id=file_2.id, module_name="pkg2"))
+
+    repository.save(project_1)
+    repository.save(project_2)
+
+    loaded_1 = repository.load(project_1.id)
+    loaded_2 = repository.load(project_2.id)
+
+    assert loaded_1 is not None and loaded_2 is not None
+    assert [imp.module_name for imp in loaded_1.imports] == ["pkg1"]
+    assert [imp.module_name for imp in loaded_2.imports] == ["pkg2"]
+
+
+def test_import_reference_deleted_file_invalidation(tmp_path: Path) -> None:
+    database = Database(tmp_path / "context_forge.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(name="Invalidation Test", root_path=tmp_path)
+    file_a = File(
+        project_id=project.id,
+        path=Path("a.py"),
+        name="a.py",
+        extension=".py",
+    )
+    file_b = File(
+        project_id=project.id,
+        path=Path("b.py"),
+        name="b.py",
+        extension=".py",
+    )
+    project.add_file(file_a)
+    project.add_file(file_b)
+    project.add_import(ImportReference(file_id=file_a.id, module_name="mod_a"))
+    project.add_import(ImportReference(file_id=file_b.id, module_name="mod_b"))
+
+    metadata = RepositoryCacheMetadata(
+        repository_key=str(tmp_path),
+        project_id=project.id,
+    )
+    repository.save_analysis(project, metadata)
+
+    invalidation = CacheInvalidation(
+        full=False,
+        paths=frozenset({Path("a.py")}),
+        reason="files_changed",
+    )
+    repository.invalidate_cache(str(tmp_path), invalidation)
+
+    with database.connect() as connection:
+        remaining = connection.execute(
+            "SELECT module_name FROM imports WHERE project_id = ?",
+            (str(project.id),),
+        ).fetchall()
+
+    assert [row["module_name"] for row in remaining] == ["mod_b"]
