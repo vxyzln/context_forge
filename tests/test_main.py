@@ -1674,6 +1674,7 @@ def test_output_format_defaults_to_text() -> None:
         ["memory", "symbol", "Calculator"],
         ["memory", "references", "Calculator"],
         ["memory", "relationships", "src/calculator.py"],
+        ["memory", "dependencies", "src/calculator.py"],
         ["diagnostics"],
     ]
 
@@ -1697,6 +1698,7 @@ def test_output_format_accepts_json() -> None:
         ["memory", "symbol", "Calculator"],
         ["memory", "references", "Calculator"],
         ["memory", "relationships", "src/calculator.py"],
+        ["memory", "dependencies", "src/calculator.py"],
         ["diagnostics"],
     ]
 
@@ -2718,3 +2720,252 @@ def test_main_handles_keyboard_interrupt_during_command(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "\n"
+
+
+def test_parse_memory_dependencies_command() -> None:
+    args = parse_args(
+        [
+            "memory",
+            "dependencies",
+            "src/main.py",
+            "/tmp/project",
+            "--direction",
+            "dependents",
+            "--format",
+            "json",
+        ]
+    )
+
+    assert args.command == "memory"
+    assert args.memory_command == "dependencies"
+    assert args.file_path == "src/main.py"
+    assert args.path == Path("/tmp/project")
+    assert args.direction == "dependents"
+    assert args.format == "json"
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected_dependencies", "expected_dependents"),
+    [
+        ("both", ["src/utils.py"], ["src/app.py"]),
+        ("dependencies", ["src/utils.py"], []),
+        ("dependents", [], ["src/app.py"]),
+    ],
+)
+def test_memory_dependencies_outputs_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    direction: str,
+    expected_dependencies: list[str],
+    expected_dependents: list[str],
+) -> None:
+    file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("src/main.py"),
+        },
+    )()
+
+    dependency = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=2),
+            "path": Path("src/utils.py"),
+        },
+    )()
+
+    dependent = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=3),
+            "path": Path("src/app.py"),
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [file, dependency, dependent],
+            "symbols": [],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "dependencies",
+                "src/main.py",
+                str(tmp_path),
+                "--direction",
+                direction,
+                "--format",
+                "json",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = file
+        query_mock.return_value.get_direct_dependencies.return_value = [dependency]
+        query_mock.return_value.get_direct_dependents.return_value = [dependent]
+
+        main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload == {
+        "repository": str(tmp_path.resolve()),
+        "file": "src/main.py",
+        "direction": direction,
+        "status": "ok",
+        "dependencies": expected_dependencies,
+        "dependents": expected_dependents,
+    }
+
+    if direction in ("both", "dependencies"):
+        query_mock.return_value.get_direct_dependencies.assert_called_once_with(file.id)
+    else:
+        query_mock.return_value.get_direct_dependencies.assert_not_called()
+
+    if direction in ("both", "dependents"):
+        query_mock.return_value.get_direct_dependents.assert_called_once_with(file.id)
+    else:
+        query_mock.return_value.get_direct_dependents.assert_not_called()
+
+
+def test_memory_dependencies_reports_missing_file_as_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [],
+            "symbols": [],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "dependencies",
+                "missing.py",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = None
+        main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert captured.err == ""
+    assert payload == {
+        "repository": str(tmp_path.resolve()),
+        "file": "missing.py",
+        "direction": "both",
+        "status": "not_found",
+        "dependencies": [],
+        "dependents": [],
+    }
+
+    query_mock.return_value.get_direct_dependencies.assert_not_called()
+    query_mock.return_value.get_direct_dependents.assert_not_called()
+
+
+def test_memory_dependencies_outputs_text(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=1),
+            "path": Path("src/main.py"),
+        },
+    )()
+    dependency = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=2),
+            "path": Path("src/utils.py"),
+        },
+    )()
+    dependent = type(
+        "File",
+        (),
+        {
+            "id": UUID(int=3),
+            "path": Path("src/app.py"),
+        },
+    )()
+    project = type(
+        "Project",
+        (),
+        {
+            "files": [file, dependency, dependent],
+            "symbols": [],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "dependencies",
+                "src/main.py",
+                str(tmp_path),
+            ],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project",
+            return_value=(project, None),
+        ),
+        patch("context_forge.main.ProjectQuery") as query_mock,
+    ):
+        query_mock.return_value.get_file.return_value = file
+        query_mock.return_value.get_direct_dependencies.return_value = [dependency]
+        query_mock.return_value.get_direct_dependents.return_value = [dependent]
+
+        main()
+
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "File: src/main.py" in captured.out
+    assert "Direct dependencies: 1" in captured.out
+    assert "  src/utils.py" in captured.out
+    assert "Direct dependents: 1" in captured.out
+    assert "  src/app.py" in captured.out

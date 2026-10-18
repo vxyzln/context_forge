@@ -210,6 +210,29 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _add_output_format_argument(memory_relationships_parser)
 
+    memory_dependencies_parser = memory_subparsers.add_parser(
+        "dependencies",
+        help="Show direct dependencies and dependents for a file.",
+    )
+    memory_dependencies_parser.add_argument(
+        "file_path",
+        help="Repository-relative path of the file to inspect.",
+    )
+    memory_dependencies_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path.",
+    )
+    memory_dependencies_parser.add_argument(
+        "--direction",
+        choices=("both", "dependencies", "dependents"),
+        default="both",
+        help="Which direct dependency relationships to show (default: both).",
+    )
+    _add_output_format_argument(memory_dependencies_parser)
+
     diagnostics_parser = subparsers.add_parser(
         "diagnostics",
         help="Show persisted repository analysis diagnostics.",
@@ -1330,6 +1353,83 @@ def run_memory_relationships(
             print(f"    Qualified name: {qualified_name}")
 
 
+def run_memory_dependencies(
+    file_path: str,
+    path: Path,
+    direction: str = "both",
+    output_format: str = "text",
+) -> None:
+    normalized_path = file_path.strip()
+    if not normalized_path:
+        raise ValueError("File path cannot be empty")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+    query = ProjectQuery(project)
+
+    file = query.get_file(normalized_path)
+
+    if file is None:
+        if output_format == "json":
+            _emit_json(
+                {
+                    "repository": str(root_path),
+                    "file": normalized_path,
+                    "direction": direction,
+                    "status": "not_found",
+                    "dependencies": [],
+                    "dependents": [],
+                }
+            )
+            return
+
+        print(f"Repository: {root_path}")
+        print(f"File: {normalized_path}")
+        print("File not found.")
+        return
+
+    dependencies = (
+        query.get_direct_dependencies(file.id)
+        if direction in ("both", "dependencies")
+        else []
+    )
+    dependents = (
+        query.get_direct_dependents(file.id)
+        if direction in ("both", "dependents")
+        else []
+    )
+
+    dependency_paths = sorted(item.path.as_posix() for item in dependencies)
+    dependent_paths = sorted(item.path.as_posix() for item in dependents)
+
+    if output_format == "json":
+        _emit_json(
+            {
+                "repository": str(root_path),
+                "file": file.path.as_posix(),
+                "direction": direction,
+                "status": "ok",
+                "dependencies": dependency_paths,
+                "dependents": dependent_paths,
+            }
+        )
+        return
+
+    print(f"Repository: {root_path}")
+    print(f"File: {file.path.as_posix()}")
+    print(f"Direction: {direction}")
+
+    if direction in ("both", "dependencies"):
+        print(f"Direct dependencies: {len(dependency_paths)}")
+        for dependency_path in dependency_paths:
+            print(f"  {dependency_path}")
+
+    if direction in ("both", "dependents"):
+        print(f"Direct dependents: {len(dependent_paths)}")
+        for dependent_path in dependent_paths:
+            print(f"  {dependent_path}")
+
+
 def run_diagnostics(path: Path, output_format: str = "text") -> None:
     root_path = resolve_project_path(path)
     _, _, project, _ = load_project_analysis(root_path)
@@ -1427,6 +1527,12 @@ def _dispatch_command(args: argparse.Namespace) -> None:
                 args.direction,
                 args.relationship_type,
             )
+        ),
+        ("memory", "dependencies"): lambda: run_memory_dependencies(
+            args.file_path,
+            args.path,
+            args.direction,
+            args.format,
         ),
         "context": lambda: run_context(args),
     }
