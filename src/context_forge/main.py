@@ -1453,6 +1453,15 @@ def main() -> None:
 
     try:
         _dispatch_command(args)
-    except (RuntimeError, TypeError, ValueError) as exc:
+    except KeyboardInterrupt:
+        print(file=sys.stderr)
+        raise SystemExit(130) from None
+    except (
+        OSError,
+        RuntimeError,
+        sqlite3.Error,
+        TypeError,
+        ValueError,
+    ) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from None

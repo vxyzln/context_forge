@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import sys
 import tomllib
 from pathlib import Path
@@ -2661,3 +2662,59 @@ def test_memory_relationships_json_reports_missing_entity(
     assert payload["status"] == "not_found"
     assert payload["entity"] == "missing.py"
     assert payload["relationships"] == []
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_stderr"),
+    [
+        (
+            OSError("disk unavailable"),
+            "Error: disk unavailable\n",
+        ),
+        (
+            sqlite3.OperationalError("database is locked"),
+            "Error: database is locked\n",
+        ),
+    ],
+    ids=["filesystem-error", "database-error"],
+)
+def test_main_reports_operational_errors_without_traceback(
+    error: Exception,
+    expected_stderr: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(sys, "argv", ["context-forge", "status", "."]),
+        patch(
+            "context_forge.main._dispatch_command",
+            side_effect=error,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == expected_stderr
+
+
+def test_main_handles_keyboard_interrupt_during_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(sys, "argv", ["context-forge", "status", "."]),
+        patch(
+            "context_forge.main._dispatch_command",
+            side_effect=KeyboardInterrupt,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 130
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "\n"
