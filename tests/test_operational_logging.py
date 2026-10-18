@@ -127,3 +127,41 @@ def test_analysis_failed_logs_error_metadata(
     assert "duration=0.456" in content
     assert "error_type=ValueError" in content
     assert "error=corrupt index" in content
+
+
+@pytest.mark.parametrize(
+    ("log_function", "kwargs"),
+    [
+        (
+            log_analysis_started,
+            {"project_path": Path("/tmp/project")},
+        ),
+        (
+            log_analysis_completed,
+            {
+                "project_path": Path("/tmp/project"),
+                "duration_seconds": 1.234,
+                "files_count": 12,
+                "symbols_count": 45,
+            },
+        ),
+        (
+            log_analysis_failed,
+            {
+                "project_path": Path("/tmp/project"),
+                "duration_seconds": 0.456,
+                "error": ValueError("corrupt index"),
+            },
+        ),
+    ],
+    ids=["analysis-started", "analysis-completed", "analysis-failed"],
+)
+def test_logging_filesystem_errors_do_not_escape(
+    log_function,
+    kwargs: dict[str, object],
+) -> None:
+    with patch(
+        "context_forge.operational_logging.global_config_directory",
+        side_effect=OSError("log directory unavailable"),
+    ):
+        log_function(**kwargs)

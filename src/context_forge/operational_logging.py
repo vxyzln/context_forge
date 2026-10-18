@@ -52,11 +52,24 @@ def get_logger() -> logging.Logger:
     return logger
 
 
+def _log_event(
+    level: int,
+    message: str,
+    *args: object,
+) -> None:
+    try:
+        get_logger().log(level, message, *args)
+    except OSError:
+        # Operational logging must not interrupt application beihaviour
+        pass
+
+
 def log_analysis_started(
     *,
     project_path: Path,
 ) -> None:
-    get_logger().info(
+    _log_event(
+        logging.INFO,
         "analysis_started project=%s",
         project_path,
     )
@@ -69,7 +82,8 @@ def log_analysis_completed(
     files_count: int,
     symbols_count: int,
 ) -> None:
-    get_logger().info(
+    _log_event(
+        logging.INFO,
         "analysis_completed project=%s duration=%.3f files=%d symbols=%d",
         project_path,
         duration_seconds,
@@ -84,7 +98,8 @@ def log_analysis_failed(
     duration_seconds: float,
     error: Exception,
 ) -> None:
-    get_logger().error(
+    _log_event(
+        logging.ERROR,
         "analysis_failed project=%s duration=%.3f error_type=%s error=%s",
         project_path,
         duration_seconds,
