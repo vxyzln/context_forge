@@ -870,6 +870,100 @@ def _relationship_type_name(relationship) -> str:
     return str(relationship_type)
 
 
+def _memory_symbol_payload(symbol, files_by_id: dict) -> dict:
+    file = files_by_id.get(symbol.file_id)
+
+    return {
+        "kind": symbol.kind,
+        "name": symbol.name,
+        "qualified_name": symbol.qualified_name,
+        "path": file.path.as_posix() if file is not None else None,
+        "start_line": symbol.start_line,
+        "end_line": symbol.end_line,
+    }
+
+
+def _memory_entity_payload(
+    entity_id,
+    files_by_id: dict,
+    symbols_by_id: dict,
+) -> dict:
+    file = files_by_id.get(entity_id)
+
+    if file is not None:
+        return {
+            "kind": "file",
+            "path": file.path.as_posix(),
+        }
+
+    symbol = symbols_by_id.get(entity_id)
+
+    if symbol is not None:
+        return {
+            "kind": "symbol",
+            **_memory_symbol_payload(symbol, files_by_id),
+        }
+
+    return {
+        "kind": "unknown",
+        "id": str(entity_id),
+    }
+
+
+def _memory_line_payload(metadata: dict) -> int | None:
+    value = metadata.get("line")
+
+    if value is None:
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _memory_reference_payload(
+    relationship,
+    files_by_id: dict,
+) -> dict:
+    source_file = files_by_id.get(relationship.source_id)
+    metadata = relationship.metadata
+
+    return {
+        "path": (source_file.path.as_posix() if source_file is not None else None),
+        "line": _memory_line_payload(metadata),
+        "name": metadata.get("name"),
+        "qualified_name": metadata.get("qualified_name"),
+        "confidence": relationship.confidence,
+        "relationship_type": _relationship_type_name(relationship),
+    }
+
+
+def _memory_relationship_payload(
+    relationship,
+    files_by_id: dict,
+    symbols_by_id: dict,
+) -> dict:
+    metadata = relationship.metadata
+
+    return {
+        "type": _relationship_type_name(relationship),
+        "source": _memory_entity_payload(
+            relationship.source_id,
+            files_by_id,
+            symbols_by_id,
+        ),
+        "target": _memory_entity_payload(
+            relationship.target_id,
+            files_by_id,
+            symbols_by_id,
+        ),
+        "confidence": relationship.confidence,
+        "line": _memory_line_payload(metadata),
+        "qualified_name": metadata.get("qualified_name"),
+    }
+
+
 def _relationship_line_number(value: object) -> int:
     try:
         return int(value)
@@ -911,7 +1005,11 @@ def _print_matching_symbols(symbols, files_by_id) -> None:
         print(f"    Lines: {symbol.start_line}-{symbol.end_line}")
 
 
-def run_memory_references(symbol_name: str, path: Path) -> None:
+def run_memory_references(
+    symbol_name: str,
+    path: Path,
+    output_format: str = "text",
+) -> None:
     normalized_name = symbol_name.strip()
     if not normalized_name:
         raise ValueError("Symbol name cannot be empty")
@@ -922,6 +1020,73 @@ def run_memory_references(symbol_name: str, path: Path) -> None:
 
     symbols = _find_memory_symbols(query, normalized_name)
     files_by_id = {file.id: file for file in project.files}
+
+    if output_format == "json":
+        if not symbols:
+            _emit_json(
+                {
+                    "repository": str(root_path),
+                    "symbol": normalized_name,
+                    "status": "not_found",
+                    "matches": [],
+                    "references": [],
+                }
+            )
+            return
+
+        if len(symbols) > 1:
+            matches = sorted(
+                symbols,
+                key=lambda item: (
+                    files_by_id[item.file_id].path.as_posix()
+                    if item.file_id in files_by_id
+                    else "",
+                    item.start_line,
+                    item.name,
+                ),
+            )
+            _emit_json(
+                {
+                    "repository": str(root_path),
+                    "symbol": normalized_name,
+                    "status": "ambiguous",
+                    "matches": [
+                        _memory_symbol_payload(item, files_by_id) for item in matches
+                    ],
+                    "references": [],
+                }
+            )
+            return
+
+        symbol = symbols[0]
+        relationships = query.get_incoming_relationships(
+            symbol.id,
+            relationship_type="references",
+        )
+        relationships = sorted(
+            relationships,
+            key=lambda item: (
+                files_by_id[item.source_id].path.as_posix()
+                if item.source_id in files_by_id
+                else "",
+                _relationship_line_number(item.metadata.get("line", "0")),
+                item.id.hex,
+            ),
+        )
+
+        _emit_json(
+            {
+                "repository": str(root_path),
+                "symbol": normalized_name,
+                "status": "ok",
+                "matches": [_memory_symbol_payload(symbol, files_by_id)],
+                "references": [
+                    _memory_reference_payload(item, files_by_id)
+                    for item in relationships
+                ],
+            }
+        )
+        return
 
     print(f"Repository: {root_path}")
     print(f"Symbol: {normalized_name}")
@@ -988,6 +1153,7 @@ def run_memory_relationships(
     path: Path,
     direction: str,
     relationship_type: str | None,
+    output_format: str = "text",
 ) -> None:
     normalized_name = entity_name.strip()
     if not normalized_name:
@@ -1002,20 +1168,64 @@ def run_memory_relationships(
 
     # An exact repository-relative file path takes precedence.
     file = query.get_file(normalized_name)
+
     if file is not None:
         entity = file
         entity_kind = "file"
     else:
         symbols = _find_memory_symbols(query, normalized_name)
 
-        print(f"Repository: {root_path}")
-        print(f"Entity: {normalized_name}")
-
         if not symbols:
+            if output_format == "json":
+                _emit_json(
+                    {
+                        "repository": str(root_path),
+                        "entity": normalized_name,
+                        "entity_type": None,
+                        "direction": direction,
+                        "relationship_type": relationship_type,
+                        "status": "not_found",
+                        "relationships": [],
+                    }
+                )
+                return
+
+            print(f"Repository: {root_path}")
+            print(f"Entity: {normalized_name}")
             print("Entity not found.")
             return
 
         if len(symbols) > 1:
+            if output_format == "json":
+                matches = sorted(
+                    symbols,
+                    key=lambda item: (
+                        files_by_id[item.file_id].path.as_posix()
+                        if item.file_id in files_by_id
+                        else "",
+                        item.start_line,
+                        item.name,
+                    ),
+                )
+                _emit_json(
+                    {
+                        "repository": str(root_path),
+                        "entity": normalized_name,
+                        "entity_type": "symbol",
+                        "direction": direction,
+                        "relationship_type": relationship_type,
+                        "status": "ambiguous",
+                        "matches": [
+                            _memory_symbol_payload(item, files_by_id)
+                            for item in matches
+                        ],
+                        "relationships": [],
+                    }
+                )
+                return
+
+            print(f"Repository: {root_path}")
+            print(f"Entity: {normalized_name}")
             print(f"Multiple matching symbols found: {len(symbols)}")
             _print_matching_symbols(symbols, files_by_id)
             print("Use a qualified name to narrow the results.")
@@ -1023,14 +1233,6 @@ def run_memory_relationships(
 
         entity = symbols[0]
         entity_kind = "symbol"
-
-    print(f"Repository: {root_path}")
-    print(f"Entity: {normalized_name}")
-    print(f"Entity type: {entity_kind}")
-    print(f"Direction: {direction}")
-
-    if relationship_type is not None:
-        print(f"Relationship type: {relationship_type}")
 
     if direction == "incoming":
         relationships = query.get_incoming_relationships(
@@ -1047,6 +1249,56 @@ def run_memory_relationships(
             entity.id,
             relationship_type=relationship_type,
         )
+
+    if output_format == "json":
+        relationships = sorted(
+            relationships,
+            key=lambda item: (
+                _relationship_type_name(item),
+                str(item.source_id),
+                str(item.target_id),
+                _relationship_line_number(item.metadata.get("line", "0")),
+                item.id.hex,
+            ),
+        )
+
+        entity_payload = (
+            {"kind": "file", "path": entity.path.as_posix()}
+            if entity_kind == "file"
+            else {
+                "kind": "symbol",
+                **_memory_symbol_payload(entity, files_by_id),
+            }
+        )
+
+        _emit_json(
+            {
+                "repository": str(root_path),
+                "entity": entity_payload,
+                "entity_name": normalized_name,
+                "entity_type": entity_kind,
+                "direction": direction,
+                "relationship_type": relationship_type,
+                "status": "ok",
+                "relationships": [
+                    _memory_relationship_payload(
+                        item,
+                        files_by_id,
+                        symbols_by_id,
+                    )
+                    for item in relationships
+                ],
+            }
+        )
+        return
+
+    print(f"Repository: {root_path}")
+    print(f"Entity: {normalized_name}")
+    print(f"Entity type: {entity_kind}")
+    print(f"Direction: {direction}")
+
+    if relationship_type is not None:
+        print(f"Relationship type: {relationship_type}")
 
     print(f"Relationships: {len(relationships)}")
 
@@ -1148,15 +1400,33 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             if args.format == "json"
             else run_memory_symbol(args.symbol_name, args.path)
         ),
-        ("memory", "references"): lambda: run_memory_references(
-            args.symbol_name,
-            args.path,
+        ("memory", "references"): lambda: (
+            run_memory_references(
+                args.symbol_name,
+                args.path,
+                args.format,
+            )
+            if args.format == "json"
+            else run_memory_references(
+                args.symbol_name,
+                args.path,
+            )
         ),
-        ("memory", "relationships"): lambda: run_memory_relationships(
-            args.entity_name,
-            args.path,
-            args.direction,
-            args.relationship_type,
+        ("memory", "relationships"): lambda: (
+            run_memory_relationships(
+                args.entity_name,
+                args.path,
+                args.direction,
+                args.relationship_type,
+                args.format,
+            )
+            if args.format == "json"
+            else run_memory_relationships(
+                args.entity_name,
+                args.path,
+                args.direction,
+                args.relationship_type,
+            )
         ),
         "context": lambda: run_context(args),
     }
