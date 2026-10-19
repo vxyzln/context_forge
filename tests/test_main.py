@@ -755,6 +755,7 @@ def test_main_rejects_invalid_arguments_before_dispatch(
             ["memory", "relationships", "Calculator", "."],
             "run_memory_relationships",
         ),
+        (["health", "."], "run_health"),
     ],
 )
 def test_command_dispatch_reports_execution_errors(
@@ -3664,3 +3665,149 @@ def test_impact_command_rejects_invalid_depth(
 
     assert exc_info.value.code == 1
     assert "positive integer" in capsys.readouterr().err
+
+
+def test_health_command_text_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("def hello():\n    return 42\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(sys, "argv", ["context-forge", "health", str(tmp_path)]):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert f"Repository: {tmp_path.resolve()}" in captured.out
+    assert "Analysis state:" in captured.out
+    assert "Status: analyzed" in captured.out
+    assert "Cache status: fresh" in captured.out
+    assert "Inventory:" in captured.out
+    assert "Files: 2" in captured.out
+    assert "Python modules: 2" in captured.out
+    assert "Findings summary:" in captured.out
+    assert "Limitations:" in captured.out
+
+
+def test_health_command_json_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "health", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["schema_version"] == 1
+    assert data["repository"] == tmp_path.resolve().as_posix()
+    assert data["analysis"]["status"] == "analyzed"
+    assert data["analysis"]["error_count"] == 0
+    assert data["cache"]["status"] == "fresh"
+    assert data["inventory"]["files"] == 1
+    assert isinstance(data["inventory"]["files"], int)
+    assert data["findings"]["summary"]["total_findings"] == 0
+    assert isinstance(data["limitations"], list)
+
+
+def test_health_command_stale_cache_does_not_abort(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target_file = tmp_path / "a.py"
+    target_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Modify file so cache is stale
+    target_file.write_text("x = 2\n", encoding="utf-8")
+
+    # health should succeed and report stale cache, rather than aborting
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "health", str(tmp_path)],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Cache status: stale" in captured.out
+    assert "Cached analysis is stale" in captured.out
+
+
+def test_health_command_unanalyzed_repository_aborts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(sys, "argv", ["context-forge", "health", str(tmp_path)]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    assert "No persisted analysis found" in capsys.readouterr().err
+
+
+def test_health_command_rejects_invalid_limit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "health", str(tmp_path), "--limit", "0"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    assert "positive integer" in capsys.readouterr().err
+
+
+def test_health_command_empty_analyzed_repository(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Analyze an empty directory
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "health", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["analysis"]["status"] == "analyzed"
+    assert data["inventory"]["files"] == 0
+    assert data["inventory"]["symbols"] == 0
+    assert data["findings"]["summary"]["total_findings"] == 0

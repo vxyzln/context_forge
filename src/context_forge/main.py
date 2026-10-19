@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from context_forge.pipeline.analyzer import (
     ProjectAnalyzer,
@@ -13,6 +14,7 @@ from context_forge.query.architecture_report import (
     DEFAULT_REPORT_LIMIT,
     build_architecture_report,
 )
+from context_forge.query.health import build_health_report
 from context_forge.query.impact import (
     DEFAULT_IMPACT_LIMIT,
     DEFAULT_IMPACT_MAX_DEPTH,
@@ -315,6 +317,28 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _add_output_format_argument(impact_parser)
 
+    health_parser = subparsers.add_parser(
+        "health",
+        help="Report repository health, inventory metrics, and structural findings.",
+    )
+    health_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path.",
+    )
+    health_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_REPORT_LIMIT,
+        help=(
+            "Maximum number of findings displayed per category "
+            f"(default: {DEFAULT_REPORT_LIMIT})."
+        ),
+    )
+    _add_output_format_argument(health_parser)
+
     return parser
 
 
@@ -334,6 +358,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "diagnostics",
         "architecture",
         "impact",
+        "health",
         "-h",
         "--help",
     }:
@@ -1691,6 +1716,131 @@ def run_architecture(
             print(f"  - {error}")
 
 
+def print_health_summary(report: dict[str, Any]) -> None:
+    print(f"Repository: {report['repository']}")
+    if report.get("project"):
+        print(
+            f"Project: {report['project']['name']} "
+            f"({report['project']['project_type']})"
+        )
+
+    print()
+    print("Analysis state:")
+    print(f"  Status: {report['analysis']['status']}")
+    cache = report["cache"]
+    print(f"  Cache status: {cache['status']}")
+    if cache.get("reason"):
+        print(f"  Freshness reason: {cache['reason']}")
+    if cache.get("cache_schema_version") is not None:
+        print(f"  Cache schema version: {cache['cache_schema_version']}")
+    if cache.get("analyzer_version") is not None:
+        print(f"  Analyzer version: {cache['analyzer_version']}")
+    print(f"  Analysis errors: {report['analysis']['error_count']}")
+
+    print()
+    print("Inventory:")
+    for name, count in report["inventory"].items():
+        label = name.replace("_", " ").capitalize()
+        val_str = str(count) if count is not None else "unavailable"
+        print(f"  {label}: {val_str}")
+
+    print()
+    print("Findings summary:")
+    for name, count in report["findings"]["summary"].items():
+        label = name.replace("_", " ").capitalize()
+        val_str = str(count) if count is not None else "unavailable"
+        print(f"  {label}: {val_str}")
+
+    unresolved_items = report["findings"]["unresolved_imports"]["items"]
+    cycle_items = report["findings"]["dependency_cycles"]["items"]
+    integrity_items = report["findings"]["structural_integrity"]["items"]
+
+    if unresolved_items:
+        print()
+        print("Unresolved imports:")
+        for item in unresolved_items:
+            source = f" ({item['source_path']})" if item.get("source_path") else ""
+            module = item["module_name"]
+            if item.get("imported_name"):
+                module = f"{module}.{item['imported_name']}"
+            print(f"  - {module}{source}")
+        if report["findings"]["unresolved_imports"]["truncated"]:
+            print(
+                f"  ... showing {len(unresolved_items)} of "
+                f"{report['findings']['unresolved_imports']['total']} unresolved imports"
+            )
+
+    if cycle_items:
+        print()
+        print("Dependency cycles:")
+        for cycle in cycle_items:
+            modules_str = ", ".join(cycle["modules"])
+            print(
+                f"  - Cycle ({cycle['module_count']} modules, "
+                f"{cycle['dependency_count']} dependencies): {modules_str}"
+            )
+        if report["findings"]["dependency_cycles"]["truncated"]:
+            print(
+                f"  ... showing {len(cycle_items)} of "
+                f"{report['findings']['dependency_cycles']['total']} cycles"
+            )
+
+    if integrity_items:
+        print()
+        print("Structural integrity findings:")
+        for finding in integrity_items:
+            print(f"  - [{finding['type']}] {finding['message']}")
+        if report["findings"]["structural_integrity"]["truncated"]:
+            print(
+                f"  ... showing {len(integrity_items)} of "
+                f"{report['findings']['structural_integrity']['total']} findings"
+            )
+
+    if report["analysis"]["errors"]:
+        print()
+        print("Analysis errors:")
+        for error in report["analysis"]["errors"]:
+            print(f"  - {error}")
+
+    print()
+    print("Limitations:")
+    for limitation in report["limitations"]:
+        print(f"  - {limitation}")
+
+
+def run_health(
+    path: Path,
+    output_format: str = "text",
+    limit: int = DEFAULT_REPORT_LIMIT,
+) -> None:
+    """Print an evidence-based repository health report."""
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("Report limit must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    repository, repository_key, project, metadata = load_project_analysis(root_path)
+
+    fingerprints = current_fingerprints(project)
+    freshness = repository.check_cache_freshness(
+        repository_key,
+        fingerprints,
+    )
+
+    report = build_health_report(
+        project=project,
+        repository_path=root_path,
+        metadata=metadata,
+        freshness=freshness,
+        limit=limit,
+    )
+
+    if output_format == "json":
+        _emit_json(report)
+        return
+
+    print_health_summary(report)
+
+
 def run_impact(
     target: str,
     path: Path,
@@ -1930,6 +2080,11 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.limit,
             args.format,
             args.max_depth,
+        ),
+        "health": lambda: run_health(
+            args.path,
+            args.format,
+            args.limit,
         ),
     }
 
