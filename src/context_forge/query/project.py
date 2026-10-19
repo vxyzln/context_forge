@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from context_forge.graph.builder import RelationshipBuilder
@@ -12,6 +13,7 @@ from context_forge.query.architecture import (
     StructuralIntegrityFinding,
     UnresolvedImport,
 )
+from context_forge.query.health import DEFAULT_HEALTH_LIMIT, build_health_report
 from context_forge.query.impact import (
     DEFAULT_IMPACT_LIMIT,
     DEFAULT_IMPACT_MAX_DEPTH,
@@ -23,6 +25,7 @@ from context_forge.query.impact import (
     resolve_impact_target,
 )
 from context_forge.query.result import SearchResult, SearchResultType
+from context_forge.storage.cache import CacheFreshness, RepositoryCacheMetadata
 
 
 class ProjectQuery:
@@ -1123,5 +1126,20 @@ class ProjectQuery:
             relationship_types=relationship_types,
             target_types=target_types,
             max_depth=max_depth,
+            limit=limit,
+        )
+
+    def get_health_report(
+        self,
+        metadata: RepositoryCacheMetadata | None = None,
+        freshness: CacheFreshness | None = None,
+        limit: int = DEFAULT_HEALTH_LIMIT,
+    ) -> dict[str, Any]:
+        """Build a deterministic, evidence-based repository health report."""
+        return build_health_report(
+            project=self.project,
+            repository_path=self.project.root_path,
+            metadata=metadata,
+            freshness=freshness,
             limit=limit,
         )
