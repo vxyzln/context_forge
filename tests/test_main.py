@@ -3557,3 +3557,110 @@ def test_impact_command_rejects_empty_target_or_invalid_limit(
     assert exc_info2.value.code == 1
     captured2 = capsys.readouterr()
     assert "positive integer" in captured2.err
+
+
+def test_impact_command_transitive_depth_text(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
+    (tmp_path / "c.py").write_text("import b\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "impact", "a.py", str(tmp_path), "--depth", "2"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Traversal depth: 2 (reached: 2)" in captured.out
+    assert "Impacted components: 2 (1 direct, 1 indirect)" in captured.out
+    assert "Direct impact:" in captured.out
+    assert "[incoming] imports: b.py [file]" in captured.out
+    assert "Indirect impact:" in captured.out
+    assert "[depth 2] [incoming] imports: c.py [file]" in captured.out
+    assert "Path: a.py -[imports]-> b.py -[imports]-> c.py" in captured.out
+
+
+def test_impact_command_transitive_depth_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("import a\n", encoding="utf-8")
+    (tmp_path / "c.py").write_text("import b\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Test with --max-depth alias in json mode
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "impact",
+            "a.py",
+            str(tmp_path),
+            "--max-depth",
+            "2",
+            "--format",
+            "json",
+        ],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["status"] == "resolved"
+    assert data["max_depth"] == 2
+    assert data["depth_reached"] == 2
+    assert data["direct_count"] == 1
+    assert data["indirect_count"] == 1
+    assert data["total"] == 2
+    assert len(data["items"]) == 2
+
+    direct_item = data["items"][0]
+    assert direct_item["related_name"] == "b.py"
+    assert direct_item["depth"] == 1
+    assert direct_item["classification"] == "direct"
+    assert len(direct_item["path"]) == 1
+
+    indirect_item = data["items"][1]
+    assert indirect_item["related_name"] == "c.py"
+    assert indirect_item["depth"] == 2
+    assert indirect_item["classification"] == "indirect"
+    assert len(indirect_item["path"]) == 2
+    assert indirect_item["path"][0]["to_name"] == "b.py"
+    assert indirect_item["path"][1]["to_name"] == "c.py"
+
+
+def test_impact_command_rejects_invalid_depth(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "impact", "a.py", str(tmp_path), "--depth", "0"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    assert "positive integer" in capsys.readouterr().err

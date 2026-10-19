@@ -9,8 +9,12 @@ from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship, RelationshipType
 from context_forge.models.symbol import Symbol
 from context_forge.query import (
+    DEFAULT_IMPACT_MAX_DEPTH,
+    ImpactPathStep,
     ProjectQuery,
     find_direct_impact,
+    find_impact,
+    find_transitive_impact,
     resolve_impact_target,
 )
 
@@ -809,3 +813,353 @@ def test_project_query_impact_methods(tmp_path: Path) -> None:
     impact_res = query.find_direct_impact("User", direction="both")
     assert impact_res.status == "resolved"
     assert impact_res.total == 3
+
+
+def test_find_impact_multi_hop_traversal(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+
+    # models.py is imported by service.py (depth 1), which is imported by client.py (depth 2)
+    result = find_impact(
+        project,
+        "src/pkg/models.py",
+        direction="incoming",
+        max_depth=3,
+    )
+
+    assert result.status == "resolved"
+    assert result.total == 2
+    assert result.direct_count == 1
+    assert result.indirect_count == 1
+    assert result.depth_reached == 2
+    assert result.max_depth == DEFAULT_IMPACT_MAX_DEPTH
+    assert result.truncated is False
+
+    service_item = next(it for it in result.items if it.related_name == "service.py")
+    client_item = next(it for it in result.items if it.related_name == "client.py")
+
+    # Direct item verification
+    assert service_item.depth == 1
+    assert service_item.classification == "direct"
+    assert len(service_item.path) == 1
+    step0 = service_item.path[0]
+    assert step0.from_name == "models.py"
+    assert step0.to_name == "service.py"
+    assert step0.relationship_type == "imports"
+    assert step0.direction == "incoming"
+    assert step0.from_id == result.target.id
+    assert step0.to_id == service_item.related_id
+
+    # Indirect item verification
+    assert client_item.depth == 2
+    assert client_item.classification == "indirect"
+    assert len(client_item.path) == 2
+    c_step0, c_step1 = client_item.path
+    assert c_step0.from_name == "models.py"
+    assert c_step0.to_name == "service.py"
+    assert c_step1.from_name == "service.py"
+    assert c_step1.to_name == "client.py"
+    assert c_step1.from_id == c_step0.to_id
+    assert c_step0.from_id == result.target.id
+    assert c_step1.to_id == client_item.related_id
+
+
+def test_find_impact_depth_limiting(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+
+    # max_depth=1 should only return direct impact
+    res_d1 = find_impact(
+        project,
+        "src/pkg/models.py",
+        direction="incoming",
+        max_depth=1,
+    )
+    assert res_d1.total == 1
+    assert res_d1.direct_count == 1
+    assert res_d1.indirect_count == 0
+    assert res_d1.depth_reached == 1
+    assert res_d1.items[0].related_name == "service.py"
+    assert any(
+        "Traversal depth was limited to 1 hop(s)" in lim for lim in res_d1.limitations
+    )
+
+    # max_depth=2 discovers both
+    res_d2 = find_impact(
+        project,
+        "src/pkg/models.py",
+        direction="incoming",
+        max_depth=2,
+    )
+    assert res_d2.total == 2
+    assert res_d2.direct_count == 1
+    assert res_d2.indirect_count == 1
+    assert res_d2.depth_reached == 2
+
+
+def test_find_impact_invalid_depth_rejection(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+
+    with pytest.raises(ValueError, match="positive integer"):
+        find_impact(project, "src/pkg/models.py", max_depth=0)
+
+    with pytest.raises(ValueError, match="positive integer"):
+        find_impact(project, "src/pkg/models.py", max_depth=-1)
+
+    with pytest.raises(ValueError, match="positive integer"):
+        find_impact(project, "src/pkg/models.py", max_depth=True)  # type: ignore[arg-type]
+
+
+def test_find_impact_cycle_and_self_loop_termination(tmp_path: Path) -> None:
+    project = Project(name="Cycle Test", root_path=tmp_path, analysis_status="analyzed")
+    f_a = File(project_id=project.id, path=Path("a.py"), name="a.py", extension=".py")
+    f_b = File(project_id=project.id, path=Path("b.py"), name="b.py", extension=".py")
+    f_c = File(project_id=project.id, path=Path("c.py"), name="c.py", extension=".py")
+    project.add_file(f_a)
+    project.add_file(f_b)
+    project.add_file(f_c)
+
+    # Cycle: a -> b -> c -> a
+    project.add_relationship(
+        Relationship(
+            source_id=f_a.id,
+            target_id=f_b.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=f_b.id,
+            target_id=f_c.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=f_c.id,
+            target_id=f_a.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+    # Self-loop: a -> a
+    project.add_relationship(
+        Relationship(
+            source_id=f_a.id,
+            target_id=f_a.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+
+    result = find_impact(project, "a.py", direction="outgoing", max_depth=10)
+
+    assert result.status == "resolved"
+    assert result.total == 2
+    names = [it.related_name for it in result.items]
+    assert names == ["b.py", "c.py"]
+    # Check deduplication: each node appears once
+    assert len(set(names)) == len(names)
+    assert result.depth_reached == 2
+
+
+def test_find_impact_shortest_path_selection(tmp_path: Path) -> None:
+    project = Project(name="Path Test", root_path=tmp_path, analysis_status="analyzed")
+    f_t = File(project_id=project.id, path=Path("t.py"), name="t.py", extension=".py")
+    f_a = File(project_id=project.id, path=Path("a.py"), name="a.py", extension=".py")
+    f_b = File(project_id=project.id, path=Path("b.py"), name="b.py", extension=".py")
+    f_c = File(project_id=project.id, path=Path("c.py"), name="c.py", extension=".py")
+    f_d = File(project_id=project.id, path=Path("d.py"), name="d.py", extension=".py")
+    for f in (f_t, f_a, f_b, f_c, f_d):
+        project.add_file(f)
+
+    # Long path: t -> a -> b -> d (depth 3)
+    project.add_relationship(
+        Relationship(
+            source_id=f_t.id,
+            target_id=f_a.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=f_a.id,
+            target_id=f_b.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=f_b.id,
+            target_id=f_d.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+
+    # Short path: t -> c -> d (depth 2)
+    project.add_relationship(
+        Relationship(
+            source_id=f_t.id,
+            target_id=f_c.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=f_c.id,
+            target_id=f_d.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+
+    result = find_impact(project, "t.py", direction="outgoing", max_depth=5)
+    d_item = next(it for it in result.items if it.related_name == "d.py")
+
+    assert d_item.depth == 2
+    assert d_item.classification == "indirect"
+    assert len(d_item.path) == 2
+    assert [step.to_name for step in d_item.path] == ["c.py", "d.py"]
+
+
+def test_find_impact_deterministic_tie_breaking(tmp_path: Path) -> None:
+    project = Project(name="Tie Test", root_path=tmp_path, analysis_status="analyzed")
+    f_t = File(project_id=project.id, path=Path("t.py"), name="t.py", extension=".py")
+    f_a = File(project_id=project.id, path=Path("a.py"), name="a.py", extension=".py")
+    f_b = File(project_id=project.id, path=Path("b.py"), name="b.py", extension=".py")
+    f_d = File(project_id=project.id, path=Path("d.py"), name="d.py", extension=".py")
+    for f in (f_t, f_a, f_b, f_d):
+        project.add_file(f)
+
+    # Path 1: t -> a -> d (depth 2)
+    project.add_relationship(
+        Relationship(
+            source_id=f_t.id,
+            target_id=f_a.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=f_a.id,
+            target_id=f_d.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+
+    # Path 2: t -> b -> d (depth 2)
+    project.add_relationship(
+        Relationship(
+            source_id=f_t.id,
+            target_id=f_b.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+    project.add_relationship(
+        Relationship(
+            source_id=f_b.id,
+            target_id=f_d.id,
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+
+    res1 = find_impact(project, "t.py", direction="outgoing", max_depth=3)
+
+    # Reverse relationships in project
+    project.relationships.reverse()
+    project.files.reverse()
+    res2 = find_impact(project, "t.py", direction="outgoing", max_depth=3)
+
+    assert res1.total == res2.total
+    d1 = next(it for it in res1.items if it.related_name == "d.py")
+    d2 = next(it for it in res2.items if it.related_name == "d.py")
+    assert [s.to_name for s in d1.path] == [s.to_name for s in d2.path]
+
+
+def test_find_impact_pagination_and_truncation(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+
+    result = find_impact(
+        project,
+        "src/pkg/models.py",
+        direction="incoming",
+        max_depth=3,
+        limit=1,
+    )
+
+    assert result.total == 2
+    assert len(result.items) == 1
+    assert result.truncated is True
+    assert result.limit == 1
+    assert any(
+        "Display was limited to 1 of 2 reachable components." in lim
+        for lim in result.limitations
+    )
+
+
+def test_find_impact_relationship_and_target_filters(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+
+    # Filter to only 'references' - models.py has no incoming 'references', only 'imports'
+    res_filtered = find_impact(
+        project,
+        "src/pkg/models.py",
+        direction="incoming",
+        relationship_types={"references"},
+        max_depth=3,
+    )
+    assert res_filtered.total == 0
+
+    # Target types filter: only 'symbol'
+    res_sym_only = find_impact(
+        project,
+        "src/pkg/models.py",
+        direction="both",
+        target_types={"symbol"},
+        max_depth=3,
+    )
+    for it in res_sym_only.items:
+        assert it.related_type == "symbol"
+
+
+def test_project_query_transitive_impact_methods(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+    query = ProjectQuery(project)
+
+    res1 = query.find_impact("src/pkg/models.py", direction="incoming", max_depth=2)
+    res2 = query.find_transitive_impact(
+        "src/pkg/models.py", direction="incoming", max_depth=2
+    )
+
+    assert res1.total == 2
+    assert res2.total == 2
+    assert res1.to_dict() == res2.to_dict()
+
+
+def test_impact_path_step_to_dict() -> None:
+    step = ImpactPathStep(
+        relationship_id=uuid4(),
+        relationship_type="imports",
+        direction="incoming",
+        source_id=uuid4(),
+        target_id=uuid4(),
+        from_id=uuid4(),
+        to_id=uuid4(),
+        from_name="models.py",
+        to_name="service.py",
+        from_path="src/models.py",
+        to_path="src/service.py",
+        from_kind="file",
+        to_kind="file",
+        confidence=0.9,
+        metadata={"line_number": "10"},
+    )
+    d = step.to_dict()
+    assert d["from_name"] == "models.py"
+    assert d["to_name"] == "service.py"
+    assert d["from_path"] == "src/models.py"
+    assert d["to_path"] == "src/service.py"
+    assert d["relationship_type"] == "imports"
+    assert d["direction"] == "incoming"
+    assert d["confidence"] == 0.9
+    assert d["metadata"] == {"line_number": "10"}
+    assert isinstance(d["relationship_id"], str)
+
+
+def test_find_transitive_impact_alias() -> None:
+    assert find_transitive_impact is find_impact
