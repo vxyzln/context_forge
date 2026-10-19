@@ -13,6 +13,10 @@ from context_forge.query.architecture_report import (
     DEFAULT_REPORT_LIMIT,
     build_architecture_report,
 )
+from context_forge.query.impact import (
+    DEFAULT_IMPACT_LIMIT,
+    find_direct_impact,
+)
 from context_forge.query.project import ProjectQuery
 from context_forge.storage.cache import RepositoryIdentity
 from context_forge.storage.database import Database
@@ -266,6 +270,42 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _add_output_format_argument(architecture_parser)
 
+    impact_parser = subparsers.add_parser(
+        "impact",
+        help="Analyze direct change impact for a file or symbol target.",
+    )
+    impact_parser.add_argument(
+        "target",
+        help="Repository-relative file path, symbol name, or qualified name.",
+    )
+    impact_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path.",
+    )
+    impact_parser.add_argument(
+        "--direction",
+        choices=("both", "incoming", "outgoing"),
+        default="both",
+        help="Relationship direction to analyze (default: both).",
+    )
+    impact_parser.add_argument(
+        "--type",
+        dest="relationship_type",
+        choices=("imports", "references", "inherits", "calls", "depends_on"),
+        default=None,
+        help="Filter by relationship type.",
+    )
+    impact_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_IMPACT_LIMIT,
+        help=f"Maximum number of items displayed (default: {DEFAULT_IMPACT_LIMIT}).",
+    )
+    _add_output_format_argument(impact_parser)
+
     return parser
 
 
@@ -284,6 +324,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "memory",
         "diagnostics",
         "architecture",
+        "impact",
         "-h",
         "--help",
     }:
@@ -1641,6 +1682,86 @@ def run_architecture(
             print(f"  - {error}")
 
 
+def run_impact(
+    target: str,
+    path: Path,
+    direction: str = "both",
+    relationship_type: str | None = None,
+    limit: int = DEFAULT_IMPACT_LIMIT,
+    output_format: str = "text",
+) -> None:
+    if not target or not target.strip():
+        raise ValueError("Target cannot be empty")
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("Report limit must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+
+    types_filter = {relationship_type} if relationship_type else None
+    result = find_direct_impact(
+        project,
+        target.strip(),
+        direction=direction,
+        relationship_types=types_filter,
+        limit=limit,
+    )
+
+    if output_format == "json":
+        _emit_json(result.to_dict())
+        return
+
+    print(f"Repository: {root_path}")
+    print(f"Target query: {target.strip()}")
+
+    if result.status == "not_found":
+        print("Status: Target not found.")
+        print(f"Message: {result.message}")
+        return
+
+    if result.status == "ambiguous":
+        print("Status: Ambiguous target.")
+        print(f"Message: {result.message}")
+        print(f"Candidates ({len(result.candidates)}):")
+        for candidate in result.candidates:
+            loc = (
+                f"{candidate.path}:{candidate.start_line}"
+                if candidate.path
+                else "unknown"
+            )
+            qual = f" ({candidate.qualified_name})" if candidate.qualified_name else ""
+            print(f"  - [{candidate.kind}] {candidate.name}{qual} at {loc}")
+        return
+
+    assert result.target is not None
+    tgt = result.target
+    qual = f" ({tgt.qualified_name})" if tgt.qualified_name else ""
+    print(f"Resolved target: [{tgt.kind}] {tgt.name}{qual} ({tgt.path})")
+    print(f"Direction: {result.direction}")
+    print(f"Relationships: {result.total}")
+    print()
+
+    if not result.items:
+        print("Direct impact:")
+        print("  None detected.")
+    else:
+        print("Direct impact:")
+        for item in result.items:
+            loc = f" ({item.related_path})" if item.related_path else ""
+            print(
+                f"  [{item.direction}] {item.relationship_type}: "
+                f"{item.related_name} [{item.related_kind}]{loc}"
+            )
+
+    if result.truncated:
+        print(f"  ... showing {len(result.items)} of {result.total} items")
+
+    print()
+    print("Limitations:")
+    for limitation in result.limitations:
+        print(f"  - {limitation}")
+
+
 def run_context(args: argparse.Namespace) -> None:
     from context_forge.application import build_context_service
     from context_forge.context.serialization import ContextPackageSerializer
@@ -1743,6 +1864,14 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.path,
             args.format,
             args.limit,
+        ),
+        "impact": lambda: run_impact(
+            args.target,
+            args.path,
+            args.direction,
+            args.relationship_type,
+            args.limit,
+            args.format,
         ),
     }
 

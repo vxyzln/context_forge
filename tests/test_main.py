@@ -42,6 +42,7 @@ def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> No
     assert "diagnostics" in captured.out
     assert "memory" in captured.out
     assert "architecture" in captured.out
+    assert "impact" in captured.out
     assert "generate" not in captured.out
     assert "runtime" not in captured.out
     assert "--provider" not in captured.out
@@ -3235,3 +3236,324 @@ def test_architecture_command_prints_cycle_truncation_notices(
     assert "Cycle 1:" in captured.out
     assert "... showing 1 of 3 modules" in captured.out
     assert "... showing 1 of 3 dependencies" in captured.out
+
+
+def test_impact_command_text_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "models.py").write_text("class User:\n    pass\n", encoding="utf-8")
+    (src_dir / "service.py").write_text(
+        "import models\n\ndef get_user():\n    return models.User()\n",
+        encoding="utf-8",
+    )
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Query models.py
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "impact", "src/models.py", str(tmp_path)],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert f"Repository: {tmp_path.resolve()}" in captured.out
+    assert "Target query: src/models.py" in captured.out
+    assert "Resolved target: [file] models.py (src/models.py)" in captured.out
+    assert "Direction: both" in captured.out
+    assert "Direct impact:" in captured.out
+    assert "[incoming]" in captured.out
+    assert "service.py [file]" in captured.out
+    assert "Limitations:" in captured.out
+
+
+def test_impact_command_json_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "models.py").write_text("class User:\n    pass\n", encoding="utf-8")
+    (src_dir / "service.py").write_text(
+        "import models\n",
+        encoding="utf-8",
+    )
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "impact", "src/models.py", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    data = json.loads(captured.out)
+    assert data["status"] == "resolved"
+    assert data["target"]["name"] == "models.py"
+    assert data["target"]["target_type"] == "file"
+    assert data["direction"] == "both"
+    assert data["total"] >= 1
+    assert data["truncated"] is False
+    assert len(data["items"]) >= 1
+    assert data["items"][0]["related_name"] == "service.py"
+    assert "limitations" in data
+
+
+def test_impact_command_missing_target(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Text format
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "impact", "nonexistent_target", str(tmp_path)],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Status: Target not found." in captured.out
+    assert "not found in repository" in captured.out
+
+    # JSON format
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "impact",
+            "nonexistent_target",
+            str(tmp_path),
+            "--format",
+            "json",
+        ],
+    ):
+        main()
+
+    json_captured = capsys.readouterr()
+    data = json.loads(json_captured.out)
+    assert data["status"] == "not_found"
+    assert data["target"] is None
+
+
+def test_impact_command_ambiguous_target(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "mod_a.py").write_text("class Config:\n    pass\n", encoding="utf-8")
+    (tmp_path / "mod_b.py").write_text("class Config:\n    pass\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Text format
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "impact", "Config", str(tmp_path)],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Status: Ambiguous target." in captured.out
+    assert "Candidates (2):" in captured.out
+    assert "[class] Config" in captured.out
+
+    # JSON format
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "impact", "Config", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    json_captured = capsys.readouterr()
+    data = json.loads(json_captured.out)
+    assert data["status"] == "ambiguous"
+    assert len(data["candidates"]) == 2
+
+
+def test_impact_command_direction_and_type_filters(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("import b\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("import c\n", encoding="utf-8")
+    (tmp_path / "c.py").write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Incoming only for b.py
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "impact",
+            "b.py",
+            str(tmp_path),
+            "--direction",
+            "incoming",
+            "--format",
+            "json",
+        ],
+    ):
+        main()
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["direction"] == "incoming"
+    assert data["total"] == 1
+    assert data["items"][0]["direction"] == "incoming"
+    assert data["items"][0]["related_name"] == "a.py"
+
+    # Outgoing only for b.py
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "impact",
+            "b.py",
+            str(tmp_path),
+            "--direction",
+            "outgoing",
+            "--format",
+            "json",
+        ],
+    ):
+        main()
+
+    data_out = json.loads(capsys.readouterr().out)
+    assert data_out["direction"] == "outgoing"
+    assert data_out["total"] == 1
+    assert data_out["items"][0]["direction"] == "outgoing"
+    assert data_out["items"][0]["related_name"] == "c.py"
+
+    # Type filter: references (none exist, only imports)
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "impact",
+            "b.py",
+            str(tmp_path),
+            "--type",
+            "references",
+            "--format",
+            "json",
+        ],
+    ):
+        main()
+
+    data_ref = json.loads(capsys.readouterr().out)
+    assert data_ref["total"] == 0
+    assert data_ref["items"] == []
+
+
+def test_impact_command_limit_truncation(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "core.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "u1.py").write_text("import core\n", encoding="utf-8")
+    (tmp_path / "u2.py").write_text("import core\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "impact", "core.py", str(tmp_path), "--limit", "1"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "... showing 1 of 2 items" in captured.out
+
+
+def test_impact_command_stale_cache_aborts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target_file = tmp_path / "a.py"
+    target_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Modify file so cache is stale
+    target_file.write_text("x = 2\n", encoding="utf-8")
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "impact", "a.py", str(tmp_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Repository analysis is stale" in captured.err
+
+
+def test_impact_command_rejects_empty_target_or_invalid_limit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "impact", "", str(tmp_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Target cannot be empty" in captured.err
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "impact", "a.py", str(tmp_path), "--limit", "0"],
+        ),
+        pytest.raises(SystemExit) as exc_info2,
+    ):
+        main()
+
+    assert exc_info2.value.code == 1
+    captured2 = capsys.readouterr()
+    assert "positive integer" in captured2.err
