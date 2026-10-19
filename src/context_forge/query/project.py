@@ -13,9 +13,13 @@ from context_forge.query.architecture import (
     UnresolvedImport,
 )
 from context_forge.query.impact import (
+    DEFAULT_IMPACT_LIMIT,
+    DEFAULT_IMPACT_MAX_DEPTH,
     DirectImpactResult,
+    ImpactResult,
     TargetResolution,
     find_direct_impact,
+    find_impact,
     resolve_impact_target,
 )
 from context_forge.query.result import SearchResult, SearchResultType
@@ -1080,5 +1084,44 @@ class ProjectQuery:
             direction=direction,
             relationship_types=relationship_types,
             target_types=target_types,
+            limit=limit,
+        )
+
+    def find_impact(
+        self,
+        target: str | File | Symbol,
+        direction: str = "both",
+        relationship_types: set[str] | None = None,
+        target_types: set[str] | None = None,
+        max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+        limit: int | None = DEFAULT_IMPACT_LIMIT,
+    ) -> ImpactResult:
+        """Identify directly and indirectly connected entities and evidence paths."""
+        return find_impact(
+            self.project,
+            target,
+            direction=direction,
+            relationship_types=relationship_types,
+            target_types=target_types,
+            max_depth=max_depth,
+            limit=limit,
+        )
+
+    def find_transitive_impact(
+        self,
+        target: str | File | Symbol,
+        direction: str = "both",
+        relationship_types: set[str] | None = None,
+        target_types: set[str] | None = None,
+        max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+        limit: int | None = DEFAULT_IMPACT_LIMIT,
+    ) -> ImpactResult:
+        """Alias for find_impact."""
+        return self.find_impact(
+            target,
+            direction=direction,
+            relationship_types=relationship_types,
+            target_types=target_types,
+            max_depth=max_depth,
             limit=limit,
         )

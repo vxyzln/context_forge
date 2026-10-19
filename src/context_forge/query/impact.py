@@ -9,6 +9,7 @@ from context_forge.models.relationship import Relationship, RelationshipType
 from context_forge.models.symbol import Symbol
 
 DEFAULT_IMPACT_LIMIT: int = 50
+DEFAULT_IMPACT_MAX_DEPTH: int = 3
 
 DEFAULT_IMPACT_RELATIONSHIP_TYPES: frozenset[str] = frozenset(
     {
@@ -106,8 +107,48 @@ class TargetResolution:
 
 
 @dataclass(frozen=True)
-class DirectImpactItem:
-    """A directly connected entity with its supporting relationship evidence."""
+class ImpactPathStep:
+    """A single relationship hop in an evidence path from target to discovered entity."""
+
+    relationship_id: UUID
+    relationship_type: str
+    direction: str  # "incoming" or "outgoing" relative to traversal hop
+    source_id: UUID
+    target_id: UUID
+    from_id: UUID
+    to_id: UUID
+    from_name: str
+    to_name: str
+    from_path: str | None = None
+    to_path: str | None = None
+    from_kind: str | None = None
+    to_kind: str | None = None
+    confidence: float = 1.0
+    metadata: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "relationship_id": str(self.relationship_id),
+            "relationship_type": self.relationship_type,
+            "direction": self.direction,
+            "source_id": str(self.source_id),
+            "target_id": str(self.target_id),
+            "from_id": str(self.from_id),
+            "to_id": str(self.to_id),
+            "from_name": self.from_name,
+            "to_name": self.to_name,
+            "from_path": self.from_path,
+            "to_path": self.to_path,
+            "from_kind": self.from_kind,
+            "to_kind": self.to_kind,
+            "confidence": self.confidence,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class ImpactItem:
+    """A connected component with its supporting relationship evidence and path."""
 
     relationship_id: UUID
     relationship_type: str
@@ -122,6 +163,9 @@ class DirectImpactItem:
     related_qualified_name: str | None = None
     confidence: float = 1.0
     metadata: dict[str, str] = field(default_factory=dict)
+    depth: int = 1
+    classification: str = "direct"  # "direct" or "indirect"
+    path: tuple[ImpactPathStep, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -138,21 +182,31 @@ class DirectImpactItem:
             "related_qualified_name": self.related_qualified_name,
             "confidence": self.confidence,
             "metadata": dict(self.metadata),
+            "depth": self.depth,
+            "classification": self.classification,
+            "path": [step.to_dict() for step in self.path],
         }
 
 
+DirectImpactItem = ImpactItem
+
+
 @dataclass(frozen=True)
-class DirectImpactResult:
-    """Complete result of a direct-impact analysis operation."""
+class ImpactResult:
+    """Complete result of an impact analysis operation (direct or transitive)."""
 
     status: str  # "resolved", "not_found", "ambiguous"
     target: ResolvedTarget | None
     direction: str  # "incoming", "outgoing", "both"
-    items: tuple[DirectImpactItem, ...]
+    items: tuple[ImpactItem, ...]
     total: int
     truncated: bool
     limit: int | None
     relationship_types: tuple[str, ...]
+    max_depth: int = DEFAULT_IMPACT_MAX_DEPTH
+    depth_reached: int = 0
+    direct_count: int = 0
+    indirect_count: int = 0
     candidates: tuple[TargetCandidate, ...] = ()
     limitations: tuple[str, ...] = ()
     message: str = ""
@@ -165,12 +219,19 @@ class DirectImpactResult:
             "direction": self.direction,
             "relationship_types": list(self.relationship_types),
             "total": self.total,
+            "direct_count": self.direct_count,
+            "indirect_count": self.indirect_count,
             "limit": self.limit,
+            "max_depth": self.max_depth,
+            "depth_reached": self.depth_reached,
             "truncated": self.truncated,
             "items": [item.to_dict() for item in self.items],
             "limitations": list(self.limitations),
             "message": self.message,
         }
+
+
+DirectImpactResult = ImpactResult
 
 
 def _module_parts(file: File) -> list[str]:
@@ -399,10 +460,17 @@ def resolve_impact_target(
     )
 
 
-def _build_limitations(project: Project) -> tuple[str, ...]:
+def _build_limitations(
+    project: Project,
+    depth_limited: bool = False,
+    max_depth: int | None = None,
+    truncated: bool = False,
+    limit: int | None = None,
+    total: int = 0,
+) -> tuple[str, ...]:
     limits = [
         (
-            "Direct impact describes observed structural connections in indexed "
+            "Impact analysis describes observed structural connections in indexed "
             "repository files; it does not establish or guarantee runtime behavior "
             "or execution failure."
         ),
@@ -420,6 +488,15 @@ def _build_limitations(project: Project) -> tuple[str, ...]:
         limits.append(
             "The persisted analysis contains errors; some relationships may be missing."
         )
+    if depth_limited and max_depth is not None:
+        limits.append(
+            f"Traversal depth was limited to {max_depth} hop(s); components beyond "
+            "this depth were not explored."
+        )
+    if truncated and limit is not None:
+        limits.append(
+            f"Display was limited to {limit} of {total} reachable components."
+        )
     return tuple(limits)
 
 
@@ -428,6 +505,23 @@ def _relationship_type_value(relationship: Relationship) -> str:
     if hasattr(rel_type, "value"):
         return str(rel_type.value).lower()
     return str(rel_type).lower()
+
+
+def _step_sort_key(step: ImpactPathStep) -> tuple[Any, ...]:
+    return (
+        0 if step.direction == "incoming" else 1,
+        step.relationship_type,
+        step.to_path or "",
+        step.to_name,
+        step.to_kind or "",
+        step.to_id.hex,
+        tuple(sorted(step.metadata.items())),
+        step.relationship_id.hex,
+    )
+
+
+def _path_sort_key(path: tuple[ImpactPathStep, ...]) -> tuple[tuple[Any, ...], ...]:
+    return tuple(_step_sort_key(step) for step in path)
 
 
 def find_direct_impact(
@@ -469,6 +563,10 @@ def find_direct_impact(
             truncated=False,
             limit=limit,
             relationship_types=tuple(sorted(types_filter)),
+            max_depth=1,
+            depth_reached=0,
+            direct_count=0,
+            indirect_count=0,
             candidates=resolution.candidates,
             limitations=_build_limitations(project),
             message=resolution.message,
@@ -514,6 +612,23 @@ def find_direct_impact(
                 rel_qual = None
 
             if allowed_target_types is None or rel_type_name in allowed_target_types:
+                step = ImpactPathStep(
+                    relationship_id=rel.id,
+                    relationship_type=rel_type,
+                    direction="incoming",
+                    source_id=rel.source_id,
+                    target_id=rel.target_id,
+                    from_id=target_id,
+                    to_id=related_id,
+                    from_name=resolved_target.name,
+                    to_name=rel_name,
+                    from_path=resolved_target.path,
+                    to_path=rel_path,
+                    from_kind=resolved_target.kind,
+                    to_kind=rel_kind,
+                    confidence=rel.confidence,
+                    metadata=dict(rel.metadata),
+                )
                 raw_items.append(
                     DirectImpactItem(
                         relationship_id=rel.id,
@@ -529,6 +644,9 @@ def find_direct_impact(
                         related_qualified_name=rel_qual,
                         confidence=rel.confidence,
                         metadata=dict(rel.metadata),
+                        depth=1,
+                        classification="direct",
+                        path=(step,),
                     )
                 )
 
@@ -558,6 +676,23 @@ def find_direct_impact(
                 rel_qual = None
 
             if allowed_target_types is None or rel_type_name in allowed_target_types:
+                step = ImpactPathStep(
+                    relationship_id=rel.id,
+                    relationship_type=rel_type,
+                    direction="outgoing",
+                    source_id=rel.source_id,
+                    target_id=rel.target_id,
+                    from_id=target_id,
+                    to_id=related_id,
+                    from_name=resolved_target.name,
+                    to_name=rel_name,
+                    from_path=resolved_target.path,
+                    to_path=rel_path,
+                    from_kind=resolved_target.kind,
+                    to_kind=rel_kind,
+                    confidence=rel.confidence,
+                    metadata=dict(rel.metadata),
+                )
                 raw_items.append(
                     DirectImpactItem(
                         relationship_id=rel.id,
@@ -573,6 +708,9 @@ def find_direct_impact(
                         related_qualified_name=rel_qual,
                         confidence=rel.confidence,
                         metadata=dict(rel.metadata),
+                        depth=1,
+                        classification="direct",
+                        path=(step,),
                     )
                 )
 
@@ -608,7 +746,285 @@ def find_direct_impact(
         truncated=truncated,
         limit=limit,
         relationship_types=tuple(sorted(types_filter)),
+        max_depth=1,
+        depth_reached=1 if displayed_items else 0,
+        direct_count=total,
+        indirect_count=0,
         candidates=(),
-        limitations=_build_limitations(project),
+        limitations=_build_limitations(
+            project,
+            truncated=truncated,
+            limit=limit,
+            total=total,
+        ),
         message="",
     )
+
+
+def find_impact(
+    project: Project,
+    target: str | File | Symbol,
+    direction: str = "both",
+    relationship_types: set[str] | None = None,
+    target_types: set[str] | None = None,
+    max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+    limit: int | None = DEFAULT_IMPACT_LIMIT,
+) -> ImpactResult:
+    """Identify directly and indirectly connected entities and evidence paths."""
+    if direction not in {"incoming", "outgoing", "both"}:
+        raise ValueError("Direction must be 'incoming', 'outgoing', or 'both'")
+
+    if isinstance(max_depth, bool) or not isinstance(max_depth, int) or max_depth < 1:
+        raise ValueError("Depth must be a positive integer")
+
+    if limit is not None and (
+        isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+    ):
+        raise ValueError("Limit must be a positive integer")
+
+    if relationship_types is None:
+        types_filter = DEFAULT_IMPACT_RELATIONSHIP_TYPES
+    else:
+        types_filter = frozenset(str(t).lower() for t in relationship_types)
+
+    allowed_target_types = (
+        frozenset(str(t).lower() for t in target_types)
+        if target_types is not None
+        else None
+    )
+
+    resolution = resolve_impact_target(project, target)
+    if not resolution.is_resolved:
+        return ImpactResult(
+            status=resolution.status,
+            target=None,
+            direction=direction,
+            items=(),
+            total=0,
+            truncated=False,
+            limit=limit,
+            relationship_types=tuple(sorted(types_filter)),
+            max_depth=max_depth,
+            depth_reached=0,
+            direct_count=0,
+            indirect_count=0,
+            candidates=resolution.candidates,
+            limitations=_build_limitations(project),
+            message=resolution.message,
+        )
+
+    resolved_target = resolution.target
+    assert resolved_target is not None
+    target_id = resolved_target.id
+
+    files_by_id = {f.id: f for f in project.files}
+    symbols_by_id = {s.id: s for s in project.symbols}
+
+    outgoing_by_id: dict[UUID, list[Relationship]] = {}
+    incoming_by_id: dict[UUID, list[Relationship]] = {}
+
+    for rel in project.relationships:
+        rel_type = _relationship_type_value(rel)
+        if rel_type not in types_filter:
+            continue
+        outgoing_by_id.setdefault(rel.source_id, []).append(rel)
+        incoming_by_id.setdefault(rel.target_id, []).append(rel)
+
+    def _entity_info(eid: UUID) -> tuple[str, str, str | None, str | None, str | None]:
+        if eid in files_by_id:
+            f = files_by_id[eid]
+            return ("file", f.name, f.path.as_posix(), "file", None)
+        if eid in symbols_by_id:
+            sym = symbols_by_id[eid]
+            sf = files_by_id.get(sym.file_id)
+            return (
+                "symbol",
+                sym.name,
+                sf.path.as_posix() if sf else None,
+                sym.kind,
+                sym.qualified_name,
+            )
+        return ("unknown", str(eid), None, None, None)
+
+    visited: set[UUID] = {target_id}
+    best_path_to: dict[UUID, tuple[ImpactPathStep, ...]] = {target_id: ()}
+    current_frontier: list[UUID] = [target_id]
+    discovered_items: list[ImpactItem] = []
+    depth_limited = False
+
+    for current_depth in range(1, max_depth + 1):
+        next_candidates: dict[UUID, list[tuple[ImpactPathStep, ...]]] = {}
+
+        # Process current_frontier in deterministic order
+        sorted_frontier = sorted(
+            current_frontier,
+            key=lambda uid: (_path_sort_key(best_path_to[uid]), uid.hex),
+        )
+
+        for u_id in sorted_frontier:
+            u_path = best_path_to[u_id]
+            _, from_name, from_path, from_kind, _ = _entity_info(u_id)
+
+            if direction in ("outgoing", "both"):
+                for rel in outgoing_by_id.get(u_id, []):
+                    v_id = rel.target_id
+                    if v_id in visited:
+                        continue
+                    _, to_name, to_path, to_kind, _ = _entity_info(v_id)
+                    step = ImpactPathStep(
+                        relationship_id=rel.id,
+                        relationship_type=_relationship_type_value(rel),
+                        direction="outgoing",
+                        source_id=rel.source_id,
+                        target_id=rel.target_id,
+                        from_id=u_id,
+                        to_id=v_id,
+                        from_name=from_name,
+                        to_name=to_name,
+                        from_path=from_path,
+                        to_path=to_path,
+                        from_kind=from_kind,
+                        to_kind=to_kind,
+                        confidence=rel.confidence,
+                        metadata=dict(rel.metadata),
+                    )
+                    next_candidates.setdefault(v_id, []).append(u_path + (step,))
+
+            if direction in ("incoming", "both"):
+                for rel in incoming_by_id.get(u_id, []):
+                    v_id = rel.source_id
+                    if v_id in visited:
+                        continue
+                    _, to_name, to_path, to_kind, _ = _entity_info(v_id)
+                    step = ImpactPathStep(
+                        relationship_id=rel.id,
+                        relationship_type=_relationship_type_value(rel),
+                        direction="incoming",
+                        source_id=rel.source_id,
+                        target_id=rel.target_id,
+                        from_id=u_id,
+                        to_id=v_id,
+                        from_name=from_name,
+                        to_name=to_name,
+                        from_path=from_path,
+                        to_path=to_path,
+                        from_kind=from_kind,
+                        to_kind=to_kind,
+                        confidence=rel.confidence,
+                        metadata=dict(rel.metadata),
+                    )
+                    next_candidates.setdefault(v_id, []).append(u_path + (step,))
+
+        if not next_candidates:
+            break
+
+        # Process newly discovered entities deterministically
+        next_frontier: list[UUID] = []
+        for v_id in sorted(
+            next_candidates.keys(),
+            key=lambda vid: (
+                min(_path_sort_key(p) for p in next_candidates[vid]),
+                vid.hex,
+            ),
+        ):
+            paths = next_candidates[v_id]
+            winning_path = min(paths, key=_path_sort_key)
+            best_path_to[v_id] = winning_path
+            visited.add(v_id)
+            next_frontier.append(v_id)
+
+            v_type, v_name, v_path, v_kind, v_qual = _entity_info(v_id)
+            last_step = winning_path[-1]
+
+            if allowed_target_types is None or v_type in allowed_target_types:
+                discovered_items.append(
+                    ImpactItem(
+                        relationship_id=last_step.relationship_id,
+                        relationship_type=last_step.relationship_type,
+                        direction=last_step.direction,
+                        source_id=last_step.source_id,
+                        target_id=last_step.target_id,
+                        related_id=v_id,
+                        related_type=v_type,
+                        related_name=v_name,
+                        related_path=v_path,
+                        related_kind=v_kind,
+                        related_qualified_name=v_qual,
+                        confidence=last_step.confidence,
+                        metadata=dict(last_step.metadata),
+                        depth=current_depth,
+                        classification="direct" if current_depth == 1 else "indirect",
+                        path=winning_path,
+                    )
+                )
+
+        if current_depth == max_depth:
+            for v_id in next_frontier:
+                if direction in ("outgoing", "both") and any(
+                    rel.target_id not in visited for rel in outgoing_by_id.get(v_id, [])
+                ):
+                    depth_limited = True
+                    break
+                if direction in ("incoming", "both") and any(
+                    rel.source_id not in visited for rel in incoming_by_id.get(v_id, [])
+                ):
+                    depth_limited = True
+                    break
+
+        current_frontier = next_frontier
+
+    sorted_items = sorted(
+        discovered_items,
+        key=lambda item: (
+            item.depth,
+            0 if item.classification == "direct" else 1,
+            0 if item.direction == "incoming" else 1,
+            item.related_path or "",
+            item.related_name,
+            item.related_kind or "",
+            item.related_id.hex,
+            _path_sort_key(item.path),
+        ),
+    )
+
+    total = len(sorted_items)
+    if limit is not None:
+        displayed_items = sorted_items[:limit]
+        truncated = total > limit
+    else:
+        displayed_items = sorted_items
+        truncated = False
+
+    direct_count = sum(1 for it in sorted_items if it.depth == 1)
+    indirect_count = sum(1 for it in sorted_items if it.depth > 1)
+    depth_reached = max((it.depth for it in sorted_items), default=0)
+
+    limitations = _build_limitations(
+        project,
+        depth_limited=depth_limited,
+        max_depth=max_depth,
+        truncated=truncated,
+        limit=limit,
+        total=total,
+    )
+
+    return ImpactResult(
+        status="resolved",
+        target=resolved_target,
+        direction=direction,
+        items=tuple(displayed_items),
+        total=total,
+        truncated=truncated,
+        limit=limit,
+        relationship_types=tuple(sorted(types_filter)),
+        max_depth=max_depth,
+        depth_reached=depth_reached,
+        direct_count=direct_count,
+        indirect_count=indirect_count,
+        candidates=(),
+        limitations=limitations,
+        message="",
+    )
+
+
+find_transitive_impact = find_impact

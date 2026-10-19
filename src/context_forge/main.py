@@ -15,7 +15,8 @@ from context_forge.query.architecture_report import (
 )
 from context_forge.query.impact import (
     DEFAULT_IMPACT_LIMIT,
-    find_direct_impact,
+    DEFAULT_IMPACT_MAX_DEPTH,
+    find_impact,
 )
 from context_forge.query.project import ProjectQuery
 from context_forge.storage.cache import RepositoryIdentity
@@ -272,7 +273,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     impact_parser = subparsers.add_parser(
         "impact",
-        help="Analyze direct change impact for a file or symbol target.",
+        help="Analyze direct and transitive change impact for a file or symbol target.",
     )
     impact_parser.add_argument(
         "target",
@@ -297,6 +298,14 @@ def create_parser() -> argparse.ArgumentParser:
         choices=("imports", "references", "inherits", "calls", "depends_on"),
         default=None,
         help="Filter by relationship type.",
+    )
+    impact_parser.add_argument(
+        "--depth",
+        "--max-depth",
+        dest="max_depth",
+        type=int,
+        default=DEFAULT_IMPACT_MAX_DEPTH,
+        help=f"Maximum traversal depth for impact analysis (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
     )
     impact_parser.add_argument(
         "--limit",
@@ -1689,21 +1698,25 @@ def run_impact(
     relationship_type: str | None = None,
     limit: int = DEFAULT_IMPACT_LIMIT,
     output_format: str = "text",
+    max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
 ) -> None:
     if not target or not target.strip():
         raise ValueError("Target cannot be empty")
     if isinstance(limit, bool) or limit < 1:
         raise ValueError("Report limit must be a positive integer")
+    if isinstance(max_depth, bool) or max_depth < 1:
+        raise ValueError("Traversal depth must be a positive integer")
 
     root_path = resolve_project_path(path)
     project, _ = load_fresh_project(root_path)
 
     types_filter = {relationship_type} if relationship_type else None
-    result = find_direct_impact(
+    result = find_impact(
         project,
         target.strip(),
         direction=direction,
         relationship_types=types_filter,
+        max_depth=max_depth,
         limit=limit,
     )
 
@@ -1738,20 +1751,64 @@ def run_impact(
     qual = f" ({tgt.qualified_name})" if tgt.qualified_name else ""
     print(f"Resolved target: [{tgt.kind}] {tgt.name}{qual} ({tgt.path})")
     print(f"Direction: {result.direction}")
-    print(f"Relationships: {result.total}")
+    print(f"Traversal depth: {result.max_depth} (reached: {result.depth_reached})")
+    print(
+        f"Impacted components: {result.total} "
+        f"({result.direct_count} direct, {result.indirect_count} indirect)"
+    )
     print()
 
-    if not result.items:
-        print("Direct impact:")
+    direct_items = [it for it in result.items if it.classification == "direct"]
+    indirect_items = [it for it in result.items if it.classification == "indirect"]
+
+    print("Direct impact:")
+    if not direct_items:
         print("  None detected.")
     else:
-        print("Direct impact:")
-        for item in result.items:
+        for item in direct_items:
             loc = f" ({item.related_path})" if item.related_path else ""
             print(
                 f"  [{item.direction}] {item.relationship_type}: "
                 f"{item.related_name} [{item.related_kind}]{loc}"
             )
+
+    if result.max_depth > 1:
+        print()
+        print("Indirect impact:")
+        if not indirect_items:
+            print("  None detected.")
+        else:
+            for item in indirect_items:
+                loc = f" ({item.related_path})" if item.related_path else ""
+                print(
+                    f"  [depth {item.depth}] [{item.direction}] {item.relationship_type}: "
+                    f"{item.related_name} [{item.related_kind}]{loc}"
+                )
+                if item.path:
+                    segments: list[str] = []
+                    for idx, step in enumerate(item.path):
+                        if idx == 0:
+                            start_label = (
+                                step.from_path
+                                if step.from_kind == "file" and step.from_path
+                                else (
+                                    f"{step.from_path}:{step.from_name}"
+                                    if step.from_path
+                                    else step.from_name
+                                )
+                            )
+                            segments.append(start_label)
+                        end_label = (
+                            step.to_path
+                            if step.to_kind == "file" and step.to_path
+                            else (
+                                f"{step.to_path}:{step.to_name}"
+                                if step.to_path
+                                else step.to_name
+                            )
+                        )
+                        segments.append(f"-[{step.relationship_type}]-> {end_label}")
+                    print(f"    Path: {' '.join(segments)}")
 
     if result.truncated:
         print(f"  ... showing {len(result.items)} of {result.total} items")
@@ -1872,6 +1929,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.relationship_type,
             args.limit,
             args.format,
+            args.max_depth,
         ),
     }
 
