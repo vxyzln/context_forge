@@ -21,7 +21,10 @@ from context_forge.storage.cache import (
     fingerprint_file,
 )
 from context_forge.storage.database import Database
-from context_forge.storage.repository import ProjectRepository
+from context_forge.storage.repository import (
+    ProjectRepository,
+    _is_missing_imports_table_error,
+)
 
 
 def parse_project(project: Project) -> None:
@@ -1926,3 +1929,154 @@ def test_import_reference_deleted_file_invalidation(tmp_path: Path) -> None:
         ).fetchall()
 
     assert [row["module_name"] for row in remaining] == ["mod_b"]
+
+
+def test_project_repository_loads_older_database_without_imports_table(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "legacy.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(name="Legacy Project", root_path=tmp_path)
+    file_a = File(
+        project_id=project.id,
+        path=Path("main.py"),
+        name="main.py",
+        extension=".py",
+    )
+    project.add_file(file_a)
+    project.add_import(ImportReference(file_id=file_a.id, module_name="sys"))
+    repository.save(project)
+
+    # Drop the imports table to simulate older schema
+    with database.connect() as connection:
+        connection.execute("DROP TABLE imports")
+
+    # Loading project must succeed without OperationalError
+    loaded = repository.load(project.id)
+    assert loaded is not None
+    assert loaded.id == project.id
+    assert len(loaded.files) == 1
+    assert loaded.imports == []
+
+    # Invalidation must succeed without OperationalError
+    repository.invalidate_cache(
+        str(tmp_path),
+        CacheInvalidation(
+            full=False,
+            paths=frozenset({Path("main.py")}),
+            reason="files_changed",
+        ),
+    )
+
+
+def test_project_repository_propagates_unrelated_sqlite_operational_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "test.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(name="Test Project", root_path=tmp_path)
+    file_a = File(
+        project_id=project.id,
+        path=Path("main.py"),
+        name="main.py",
+        extension=".py",
+    )
+    project.add_file(file_a)
+    repository.save(project)
+
+    real_connect = database.connect
+
+    class FailingConnectionProxy:
+        def __init__(self, conn: sqlite3.Connection) -> None:
+            self._conn = conn
+
+        def execute(self, sql: str, *args, **kwargs):
+            if "FROM imports" in sql or "DELETE FROM imports" in sql:
+                raise sqlite3.OperationalError("database is locked")
+            return self._conn.execute(sql, *args, **kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return self._conn.__exit__(exc_type, exc_val, exc_tb)
+
+        def __getattr__(self, name: str):
+            return getattr(self._conn, name)
+
+    monkeypatch.setattr(
+        database, "connect", lambda: FailingConnectionProxy(real_connect())
+    )
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        repository.load(project.id)
+
+
+def test_project_repository_propagates_missing_differently_named_table_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "test.db")
+    database.initialize()
+    repository = ProjectRepository(database)
+
+    project = Project(name="Test Project", root_path=tmp_path)
+    file_a = File(
+        project_id=project.id,
+        path=Path("main.py"),
+        name="main.py",
+        extension=".py",
+    )
+    project.add_file(file_a)
+    repository.save(project)
+
+    real_connect = database.connect
+
+    class FailingConnectionProxy:
+        def __init__(self, conn: sqlite3.Connection) -> None:
+            self._conn = conn
+
+        def execute(self, sql: str, *args, **kwargs):
+            if "FROM imports" in sql or "DELETE FROM imports" in sql:
+                raise sqlite3.OperationalError("no such table: user_imports")
+            return self._conn.execute(sql, *args, **kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return self._conn.__exit__(exc_type, exc_val, exc_tb)
+
+        def __getattr__(self, name: str):
+            return getattr(self._conn, name)
+
+    monkeypatch.setattr(
+        database, "connect", lambda: FailingConnectionProxy(real_connect())
+    )
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table: user_imports"):
+        repository.load(project.id)
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("no such table: imports", True),
+        ("no such table: main.imports", True),
+        ("NO SUCH TABLE: IMPORTS", True),
+        ("no such table: user_imports", False),
+        ("no such table: imports_v2", False),
+        ("no such table: other_imports", False),
+        ("no such table: files", False),
+        ("database is locked", False),
+        ("disk I/O error", False),
+    ],
+)
+def test_is_missing_imports_table_error_matches_exact_table_only(
+    message: str, expected: bool
+) -> None:
+    exc = sqlite3.OperationalError(message)
+    assert _is_missing_imports_table_error(exc) is expected

@@ -21,13 +21,18 @@ from context_forge.storage.repository import ProjectRepository
 def current_fingerprints(
     project: Project,
 ) -> dict[Path, object]:
-    return {
-        file.path: fingerprint_file(
+    fingerprints: dict[Path, object] = {}
+    for file in project.files:
+        absolute_path = (
+            file.path if file.path.is_absolute() else project.root_path / file.path
+        )
+        if not absolute_path.exists():
+            continue
+        fingerprints[file.path] = fingerprint_file(
             project.root_path,
             file.path,
         )
-        for file in project.files
-    }
+    return fingerprints
 
 
 class ProjectAnalyzer:

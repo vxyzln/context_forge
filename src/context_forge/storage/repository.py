@@ -25,6 +25,17 @@ from context_forge.storage.cache import (
 from context_forge.storage.database import Database
 
 
+def _is_missing_imports_table_error(exc: sqlite3.OperationalError) -> bool:
+    message = str(exc).strip().lower()
+    prefix = "no such table:"
+    if not message.startswith(prefix):
+        return False
+    table_name = message[len(prefix) :].strip()
+    if "." in table_name:
+        table_name = table_name.rsplit(".", 1)[1].strip()
+    return table_name == "imports"
+
+
 class ProjectRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -309,13 +320,17 @@ class ProjectRepository:
                     (project_id,),
                 )
 
-                connection.execute(
-                    """
-                    DELETE FROM imports
-                    WHERE project_id = ?
-                    """,
-                    (project_id,),
-                )
+                try:
+                    connection.execute(
+                        """
+                        DELETE FROM imports
+                        WHERE project_id = ?
+                        """,
+                        (project_id,),
+                    )
+                except sqlite3.OperationalError as exc:
+                    if not _is_missing_imports_table_error(exc):
+                        raise
 
                 connection.execute(
                     """
@@ -442,13 +457,17 @@ class ProjectRepository:
                     file_ids,
                 )
 
-                connection.execute(
-                    f"""
-                    DELETE FROM imports
-                    WHERE file_id IN ({file_placeholders})
-                    """,
-                    file_ids,
-                )
+                try:
+                    connection.execute(
+                        f"""
+                        DELETE FROM imports
+                        WHERE file_id IN ({file_placeholders})
+                        """,
+                        file_ids,
+                    )
+                except sqlite3.OperationalError as exc:
+                    if not _is_missing_imports_table_error(exc):
+                        raise
 
                 connection.execute(
                     f"""
@@ -468,6 +487,7 @@ class ProjectRepository:
             )
 
     def save(self, project: Project) -> None:
+        self.database.initialize()
         with self.database.connect() as connection:
             self._save_project(connection, project)
 
@@ -481,10 +501,14 @@ class ProjectRepository:
             (str(project.id),),
         )
 
-        connection.execute(
-            "DELETE FROM imports WHERE project_id = ?",
-            (str(project.id),),
-        )
+        try:
+            connection.execute(
+                "DELETE FROM imports WHERE project_id = ?",
+                (str(project.id),),
+            )
+        except sqlite3.OperationalError as exc:
+            if not _is_missing_imports_table_error(exc):
+                raise
 
         connection.execute(
             """
@@ -861,15 +885,20 @@ class ProjectRepository:
                 (str(project_id),),
             ).fetchall()
 
-            import_rows = connection.execute(
-                """
-                SELECT file_id, module_name, imported_name, alias, level
-                FROM imports
-                WHERE project_id = ?
-                ORDER BY id
-                """,
-                (str(project_id),),
-            ).fetchall()
+            try:
+                import_rows = connection.execute(
+                    """
+                    SELECT file_id, module_name, imported_name, alias, level
+                    FROM imports
+                    WHERE project_id = ?
+                    ORDER BY id
+                    """,
+                    (str(project_id),),
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                if not _is_missing_imports_table_error(exc):
+                    raise
+                import_rows = []
 
         git_activity = None
 
@@ -882,6 +911,18 @@ class ProjectRepository:
                 total_deletions=project_row["git_total_deletions"],
             )
 
+        row_keys = set(project_row.keys())
+        languages = (
+            json.loads(project_row["languages"])
+            if "languages" in row_keys and project_row["languages"]
+            else []
+        )
+        frameworks = (
+            json.loads(project_row["frameworks"])
+            if "frameworks" in row_keys and project_row["frameworks"]
+            else []
+        )
+
         project = Project(
             name=project_row["name"],
             root_path=Path(project_row["root_path"]),
@@ -890,8 +931,8 @@ class ProjectRepository:
             default_branch=project_row["default_branch"],
             project_type=project_row["project_type"],
             package_manager=project_row["package_manager"],
-            languages=json.loads(project_row["languages"]),
-            frameworks=json.loads(project_row["frameworks"]),
+            languages=languages,
+            frameworks=frameworks,
             analysis_status=project_row["analysis_status"],
             created_at=datetime.fromisoformat(project_row["created_at"]),
             updated_at=datetime.fromisoformat(project_row["updated_at"]),
