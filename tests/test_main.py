@@ -41,6 +41,7 @@ def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> No
     assert "inspect" in captured.out
     assert "diagnostics" in captured.out
     assert "memory" in captured.out
+    assert "architecture" in captured.out
     assert "generate" not in captured.out
     assert "runtime" not in captured.out
     assert "--provider" not in captured.out
@@ -2969,3 +2970,268 @@ def test_memory_dependencies_outputs_text(
     assert "  src/utils.py" in captured.out
     assert "Direct dependents: 1" in captured.out
     assert "  src/app.py" in captured.out
+
+
+def test_architecture_command_prints_text_report(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "app.py").write_text("import pkg.lib\n", encoding="utf-8")
+    (pkg / "lib.py").write_text("VALUE = 42\n", encoding="utf-8")
+
+    # Analyze first
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Run architecture command
+    with patch.object(sys, "argv", ["context-forge", "architecture", str(tmp_path)]):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert f"Repository: {tmp_path.resolve()}" in captured.out
+    assert "Analysis status: analyzed" in captured.out
+    assert "Packages:" in captured.out
+    assert "pkg (3 modules)" in captured.out
+    assert "Python modules:" in captured.out
+    assert "pkg/app.py" in captured.out
+    assert "imports -> pkg/lib.py" in captured.out
+    assert "Resolved dependencies:" in captured.out
+    assert "pkg/app.py -> pkg/lib.py" in captured.out
+    assert "Dependency cycles:" in captured.out
+    assert "None detected." in captured.out
+    assert "Limitations:" in captured.out
+
+
+def test_architecture_command_prints_json_report(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "mod.py").write_text("X = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "architecture", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["schema_version"] == 1
+    assert payload["repository"] == str(tmp_path.resolve())
+    assert payload["analysis"]["status"] == "analyzed"
+    assert payload["counts"]["python_modules"] == 2
+    assert payload["counts"]["packages"] == 1
+    assert isinstance(payload["modules"]["items"], list)
+    assert isinstance(payload["dependencies"]["items"], list)
+    assert isinstance(payload["cycles"]["items"], list)
+    assert isinstance(payload["limitations"], list)
+
+
+def test_architecture_command_respects_limit_option(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for index in range(5):
+        (tmp_path / f"mod_{index}.py").write_text(f"v = {index}\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "architecture", str(tmp_path), "--limit", "2"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "... showing 2 of 5 modules" in captured.out
+
+
+def test_architecture_command_rejects_invalid_limit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "architecture", str(tmp_path), "--limit", "0"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Error: Report limit must be a positive integer" in captured.err
+
+
+def test_architecture_command_fails_on_uninitialized_repository(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "architecture", str(tmp_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert (
+        "No persisted analysis found; run 'context-forge analyze' first" in captured.err
+    )
+
+
+def test_architecture_command_fails_on_stale_repository(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "file.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Modify file to make cache stale
+    source.write_text("x = 2\n", encoding="utf-8")
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "architecture", str(tmp_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Repository analysis is stale; run 'context-forge analyze" in captured.err
+
+
+def test_architecture_command_handles_schema_v1_database_without_crashing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "app.py"
+    source.write_text("import sys\n", encoding="utf-8")
+
+    # Analyze project
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Drop imports table and set cache_schema_version = 1 to simulate pre-v0.11 database
+    db_path = tmp_path / ".context_forge.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("DROP TABLE IF EXISTS imports")
+    conn.execute("UPDATE repository_cache SET cache_schema_version = 1")
+    conn.commit()
+    conn.close()
+
+    # status must not crash with "no such table: imports"
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "status", str(tmp_path), "--format", "json"],
+    ):
+        main()
+    status_captured = capsys.readouterr()
+    assert status_captured.err == ""
+    status_data = json.loads(status_captured.out)
+    assert status_data["cache_status"] == "stale"
+    assert status_data["cache_schema_version"] == 1
+
+    # cache command must also report stale with schema_version_mismatch
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "cache", str(tmp_path), "--format", "json"],
+    ):
+        main()
+    cache_captured = capsys.readouterr()
+    assert cache_captured.err == ""
+    cache_data = json.loads(cache_captured.out)
+    assert cache_data["cache_status"] == "stale"
+    assert cache_data["freshness_reason"] == "schema_version_mismatch"
+
+    # architecture must report stale analysis rather than crashing with "no such table: imports"
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "architecture", str(tmp_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    arch_captured = capsys.readouterr()
+    assert "no such table: imports" not in arch_captured.err
+    assert (
+        "Repository analysis is stale; run 'context-forge analyze" in arch_captured.err
+    )
+
+    # Re-analyzing updates database schema cleanly
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Now architecture succeeds
+    with patch.object(sys, "argv", ["context-forge", "architecture", str(tmp_path)]):
+        main()
+    final_captured = capsys.readouterr()
+    assert final_captured.err == ""
+    assert "Analysis status: analyzed" in final_captured.out
+
+
+def test_architecture_command_prints_cycle_truncation_notices(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("import b\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("import c\n", encoding="utf-8")
+    (tmp_path / "c.py").write_text("import a\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "architecture", str(tmp_path), "--limit", "1"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Dependency cycles:" in captured.out
+    assert "Cycle 1:" in captured.out
+    assert "... showing 1 of 3 modules" in captured.out
+    assert "... showing 1 of 3 dependencies" in captured.out

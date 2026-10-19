@@ -5,10 +5,15 @@ from context_forge.query.architecture import (
     StructuralIntegrityFinding,
     UnresolvedImport,
 )
+from context_forge.query.architecture_report import (
+    DEFAULT_REPORT_LIMIT,
+    build_architecture_report,
+)
 from context_forge.query.project import ProjectQuery
 from context_forge.query.result import SearchResult, SearchResultType
 
 __all__ = [
+    "DEFAULT_REPORT_LIMIT",
     "ArchitectureInventory",
     "ContainmentEdge",
     "ProjectQuery",
@@ -17,4 +22,5 @@ __all__ = [
     "StructuralFinding",
     "StructuralIntegrityFinding",
     "UnresolvedImport",
+    "build_architecture_report",
 ]

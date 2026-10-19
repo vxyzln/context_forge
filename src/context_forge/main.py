@@ -9,6 +9,10 @@ from context_forge.pipeline.analyzer import (
     ProjectAnalyzer,
     current_fingerprints,
 )
+from context_forge.query.architecture_report import (
+    DEFAULT_REPORT_LIMIT,
+    build_architecture_report,
+)
 from context_forge.query.project import ProjectQuery
 from context_forge.storage.cache import RepositoryIdentity
 from context_forge.storage.database import Database
@@ -240,6 +244,28 @@ def create_parser() -> argparse.ArgumentParser:
     diagnostics_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
     _add_output_format_argument(diagnostics_parser)
 
+    architecture_parser = subparsers.add_parser(
+        "architecture",
+        help="Report repository architecture and structural findings.",
+    )
+    architecture_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path.",
+    )
+    architecture_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_REPORT_LIMIT,
+        help=(
+            "Maximum number of items displayed per report section "
+            f"(default: {DEFAULT_REPORT_LIMIT})."
+        ),
+    )
+    _add_output_format_argument(architecture_parser)
+
     return parser
 
 
@@ -257,6 +283,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "inspect",
         "memory",
         "diagnostics",
+        "architecture",
         "-h",
         "--help",
     }:
@@ -1437,6 +1464,183 @@ def run_diagnostics(path: Path, output_format: str = "text") -> None:
     print_diagnostics_summary(project, output_format)
 
 
+def run_architecture(
+    path: Path,
+    output_format: str = "text",
+    limit: int = DEFAULT_REPORT_LIMIT,
+) -> None:
+    """Print a deterministic architecture report for a fresh analysis."""
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("Report limit must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+
+    inventory = ProjectQuery(project).get_architecture_inventory()
+    report = build_architecture_report(
+        inventory,
+        repository_path=root_path,
+        limit=limit,
+    )
+
+    if output_format == "json":
+        _emit_json(report)
+        return
+
+    print(f"Repository: {report['repository']}")
+    print(f"Analysis status: {report['analysis']['status']}")
+    print()
+    print("Summary:")
+
+    for name, count in report["counts"].items():
+        print(f"  {name.replace('_', ' ').capitalize()}: {count}")
+
+    print()
+    print("Packages:")
+
+    package_items = report["packages"]["items"]
+    if not package_items:
+        print("  None found.")
+    else:
+        for package in package_items:
+            print(f"  {package['path']} ({package['module_count']} modules)")
+
+            for module_path in package["modules"]:
+                print(f"    - {module_path}")
+
+            if package["modules_truncated"]:
+                print("    ... package module list truncated")
+
+    if report["packages"]["truncated"]:
+        print(
+            f"  ... showing {len(package_items)} of "
+            f"{report['packages']['total']} packages"
+        )
+
+    print()
+    print("Python modules:")
+
+    module_items = report["modules"]["items"]
+    if not module_items:
+        print("  None found.")
+    else:
+        for module in module_items:
+            print(
+                f"  {module['path']} "
+                f"(dependencies: {module['direct_dependency_count']}, "
+                f"dependents: {module['direct_dependent_count']})"
+            )
+
+            for dependency in module["direct_dependencies"]:
+                print(f"    imports -> {dependency}")
+
+            if module["direct_dependencies_truncated"]:
+                print("    ... dependency list truncated")
+
+            for dependent in module["direct_dependents"]:
+                print(f"    imported by <- {dependent}")
+
+            if module["direct_dependents_truncated"]:
+                print("    ... dependent list truncated")
+
+    if report["modules"]["truncated"]:
+        print(
+            f"  ... showing {len(module_items)} of {report['modules']['total']} modules"
+        )
+
+    print()
+    print("Resolved dependencies:")
+
+    dependency_items = report["dependencies"]["items"]
+    if not dependency_items:
+        print("  None found.")
+    else:
+        for dependency in dependency_items:
+            print(f"  {dependency['source']} -> {dependency['target']}")
+
+    if report["dependencies"]["truncated"]:
+        print(
+            f"  ... showing {len(dependency_items)} of "
+            f"{report['dependencies']['total']} dependencies"
+        )
+
+    print()
+    print("Dependency cycles:")
+
+    cycle_items = report["cycles"]["items"]
+    if not cycle_items:
+        print("  None detected.")
+    else:
+        for index, cycle in enumerate(cycle_items, start=1):
+            print(f"  Cycle {index}:")
+            for module_path in cycle["modules"]:
+                print(f"    Module: {module_path}")
+            if cycle.get("modules_truncated"):
+                print(
+                    f"    ... showing {len(cycle['modules'])} of "
+                    f"{cycle['module_count']} modules"
+                )
+            for dependency in cycle["dependencies"]:
+                print(f"    Evidence: {dependency['source']} -> {dependency['target']}")
+            if cycle.get("dependencies_truncated"):
+                print(
+                    f"    ... showing {len(cycle['dependencies'])} of "
+                    f"{cycle['dependency_count']} dependencies"
+                )
+
+    if report["cycles"]["truncated"]:
+        print(f"  ... showing {len(cycle_items)} of {report['cycles']['total']} cycles")
+
+    print()
+    print("Unresolved imports:")
+
+    unresolved_items = report["unresolved_imports"]["items"]
+    if not unresolved_items:
+        print("  None recorded.")
+    else:
+        for item in unresolved_items:
+            imported_name = (
+                f" (name: {item['imported_name']})" if item["imported_name"] else ""
+            )
+            source = item["source_path"] or "unknown source"
+            print(f"  {source}: {item['module_name']}{imported_name}")
+
+    if report["unresolved_imports"]["truncated"]:
+        print(
+            f"  ... showing {len(unresolved_items)} of "
+            f"{report['unresolved_imports']['total']} unresolved imports"
+        )
+
+    print()
+    print("Structural findings:")
+
+    finding_items = report["findings"]["items"]
+    if not finding_items:
+        print("  None recorded.")
+    else:
+        for finding in finding_items:
+            location = finding["source_path"] or "unknown location"
+            print(f"  [{finding['type']}] {location}: {finding['message']}")
+
+    if report["findings"]["truncated"]:
+        print(
+            f"  ... showing {len(finding_items)} of "
+            f"{report['findings']['total']} findings"
+        )
+
+    print()
+    print("Limitations:")
+
+    for limitation in report["limitations"]:
+        print(f"  - {limitation}")
+
+    if report["analysis"]["errors"]:
+        print()
+        print("Analysis errors:")
+        for error in report["analysis"]["errors"]:
+            print(f"  - {error}")
+
+
 def run_context(args: argparse.Namespace) -> None:
     from context_forge.application import build_context_service
     from context_forge.context.serialization import ContextPackageSerializer
@@ -1535,6 +1739,11 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.format,
         ),
         "context": lambda: run_context(args),
+        "architecture": lambda: run_architecture(
+            args.path,
+            args.format,
+            args.limit,
+        ),
     }
 
     if args.command == "memory":
