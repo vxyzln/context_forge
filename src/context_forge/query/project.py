@@ -12,6 +12,12 @@ from context_forge.query.architecture import (
     StructuralIntegrityFinding,
     UnresolvedImport,
 )
+from context_forge.query.impact import (
+    DirectImpactResult,
+    TargetResolution,
+    find_direct_impact,
+    resolve_impact_target,
+)
 from context_forge.query.result import SearchResult, SearchResultType
 
 
@@ -1051,3 +1057,28 @@ class ProjectQuery:
             return relationship_type.value
 
         return relationship_type
+
+    def resolve_target(
+        self,
+        target: str | File | Symbol,
+    ) -> TargetResolution:
+        """Resolve a file path, symbol name, or entity instance to a TargetResolution."""
+        return resolve_impact_target(self.project, target)
+
+    def find_direct_impact(
+        self,
+        target: str | File | Symbol,
+        direction: str = "both",
+        relationship_types: set[str] | None = None,
+        target_types: set[str] | None = None,
+        limit: int | None = None,
+    ) -> DirectImpactResult:
+        """Identify directly connected entities and evidence for a target."""
+        return find_direct_impact(
+            self.project,
+            target,
+            direction=direction,
+            relationship_types=relationship_types,
+            target_types=target_types,
+            limit=limit,
+        )
