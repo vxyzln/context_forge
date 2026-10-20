@@ -138,8 +138,8 @@ def test_build_health_report_populated_project(tmp_path: Path) -> None:
 
     assert report["cache"]["status"] == "fresh"
     assert report["cache"]["reason"] == "fresh"
-    assert report["cache"]["cache_schema_version"] == 2
-    assert report["cache"]["analyzer_version"] == "0.1.0"
+    assert "cache_schema_version" not in report["cache"]
+    assert "analyzer_version" not in report["cache"]
 
     inv = report["inventory"]
     assert inv["directories"] == 2

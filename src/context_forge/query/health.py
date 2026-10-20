@@ -55,8 +55,6 @@ def build_health_report(
             "cache": {
                 "status": "unavailable",
                 "reason": "missing_analysis",
-                "cache_schema_version": None,
-                "analyzer_version": None,
             },
             "inventory": {
                 "directories": None,
@@ -112,12 +110,6 @@ def build_health_report(
     cache_payload = {
         "status": cache_status,
         "reason": freshness_reason,
-        "cache_schema_version": (
-            metadata.cache_schema_version if metadata is not None else None
-        ),
-        "analyzer_version": (
-            metadata.analyzer_version if metadata is not None else None
-        ),
     }
 
     # 4. Inventory metrics and findings

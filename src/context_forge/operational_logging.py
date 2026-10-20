@@ -60,7 +60,7 @@ def _log_event(
     try:
         get_logger().log(level, message, *args)
     except OSError:
-        # Operational logging must not interrupt application beihaviour
+        # Operational logging must not interrupt application behaviour
         pass
 
 

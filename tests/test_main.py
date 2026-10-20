@@ -43,6 +43,7 @@ def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> No
     assert "memory" in captured.out
     assert "architecture" in captured.out
     assert "impact" in captured.out
+    assert "health" in captured.out
     assert "generate" not in captured.out
     assert "runtime" not in captured.out
     assert "--provider" not in captured.out
@@ -342,6 +343,8 @@ def test_run_status_does_not_analyze(
         assert "Repository: " in captured.out
         assert "Project: sample-repo" in captured.out
         assert "Cache status: fresh" in captured.out
+        assert "Cache schema version:" not in captured.out
+        assert "Analyzer version:" not in captured.out
 
 
 def test_run_cache_summary(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -398,6 +401,8 @@ def test_run_cache_summary(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -
     captured = capsys.readouterr()
     assert "Repository: sample-key" in captured.out
     assert "Cache status: stale" in captured.out
+    assert "Cache schema version:" not in captured.out
+    assert "Analyzer version:" not in captured.out
     assert "Added paths: 1" in captured.out
     assert "Modified paths: 1" in captured.out
     assert "Deleted paths: 1" in captured.out
@@ -721,6 +726,10 @@ def test_cli_entry_points_share_the_same_application() -> None:
         ["memory", "unknown"],
         ["status", "--unknown"],
         ["context", "--unknown"],
+        ["architecture", "--unknown"],
+        ["impact", "tgt", "--unknown"],
+        ["health", "--unknown"],
+        ["memory", "dependencies", "main.py", "--unknown"],
     ],
 )
 def test_main_rejects_invalid_arguments_before_dispatch(
@@ -755,6 +764,12 @@ def test_main_rejects_invalid_arguments_before_dispatch(
             ["memory", "relationships", "Calculator", "."],
             "run_memory_relationships",
         ),
+        (
+            ["memory", "dependencies", "main.py", "."],
+            "run_memory_dependencies",
+        ),
+        (["architecture", "."], "run_architecture"),
+        (["impact", "Calculator", "."], "run_impact"),
         (["health", "."], "run_health"),
     ],
 )
@@ -1815,8 +1830,8 @@ def test_status_command_outputs_json(
     assert payload["symbols"] == 2
     assert payload["relationships"] == 0
     assert payload["analysis_errors"] == 0
-    assert payload["cache_schema_version"] == 1
-    assert payload["analyzer_version"] == "0.1.0"
+    assert "cache_schema_version" not in payload
+    assert "analyzer_version" not in payload
 
 
 def test_cache_command_outputs_json_with_sorted_change_paths(
@@ -1871,8 +1886,6 @@ def test_cache_command_outputs_json_with_sorted_change_paths(
 
     assert json.loads(captured.out) == {
         "added_paths": ["a.py", "z.py"],
-        "analyzer_version": "0.1.0",
-        "cache_schema_version": 1,
         "cache_status": "stale",
         "deleted_paths": ["c.py", "y.py"],
         "freshness_reason": "Files were modified",
@@ -3166,7 +3179,8 @@ def test_architecture_command_handles_schema_v1_database_without_crashing(
     assert status_captured.err == ""
     status_data = json.loads(status_captured.out)
     assert status_data["cache_status"] == "stale"
-    assert status_data["cache_schema_version"] == 1
+    assert "cache_schema_version" not in status_data
+    assert "analyzer_version" not in status_data
 
     # cache command must also report stale with schema_version_mismatch
     with patch.object(
@@ -3692,6 +3706,8 @@ def test_health_command_text_output(
     assert "Python modules: 2" in captured.out
     assert "Findings summary:" in captured.out
     assert "Limitations:" in captured.out
+    assert "Cache schema version" not in captured.out
+    assert "Analyzer version" not in captured.out
 
 
 def test_health_command_json_output(
@@ -3718,6 +3734,8 @@ def test_health_command_json_output(
     assert data["analysis"]["status"] == "analyzed"
     assert data["analysis"]["error_count"] == 0
     assert data["cache"]["status"] == "fresh"
+    assert "cache_schema_version" not in data["cache"]
+    assert "analyzer_version" not in data["cache"]
     assert data["inventory"]["files"] == 1
     assert isinstance(data["inventory"]["files"], int)
     assert data["findings"]["summary"]["total_findings"] == 0
@@ -3811,3 +3829,311 @@ def test_health_command_empty_analyzed_repository(
     assert data["inventory"]["files"] == 0
     assert data["inventory"]["symbols"] == 0
     assert data["findings"]["summary"]["total_findings"] == 0
+
+
+def test_cf_entry_point_displays_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with (
+        patch.object(sys, "argv", ["cf", "--help"]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: context-forge" in captured.out
+    assert "architecture" in captured.out
+    assert "impact" in captured.out
+    assert "health" in captured.out
+    assert captured.err == ""
+
+
+def test_cf_entry_point_dispatches_status(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    with patch.object(sys, "argv", ["cf", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(sys, "argv", ["cf", "status", str(tmp_path)]):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Analysis status: analyzed" in captured.out
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["architecture"],
+        ["health"],
+        ["impact", "a.py"],
+        ["memory", "dependencies", "a.py"],
+        ["memory", "relationships", "a.py"],
+        ["status"],
+        ["diagnostics"],
+        ["inspect"],
+        ["cache"],
+    ],
+)
+def test_unanalyzed_repository_read_only_invariance(
+    tmp_path: Path,
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_file = tmp_path / ".context_forge.db"
+    assert not db_file.exists()
+
+    with (
+        patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert (
+        "No persisted analysis found; run 'context-forge analyze' first" in captured.err
+    )
+    # Invariant: running read-only query commands must not create .context_forge.db
+    assert not db_file.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_unanalyzed_directory_missing_db_avoids_database_connection(
+    tmp_path: Path,
+) -> None:
+    db_file = tmp_path / ".context_forge.db"
+    assert not db_file.exists()
+
+    with patch("context_forge.main.Database") as database_mock:
+        with pytest.raises(
+            ValueError,
+            match="No persisted analysis found; run 'context-forge analyze' first",
+        ):
+            load_project_analysis(tmp_path)
+
+        database_mock.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("argv", "must_abort"),
+    [
+        (["architecture"], True),
+        (["impact", "a.py"], True),
+        (["memory", "dependencies", "a.py"], True),
+        (["memory", "relationships", "a.py"], True),
+        (["health"], False),
+        (["status"], False),
+        (["cache"], False),
+        (["diagnostics"], False),
+        (["inspect"], False),
+    ],
+)
+def test_freshness_policy_matrix(
+    tmp_path: Path,
+    argv: list[str],
+    must_abort: bool,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target_file = tmp_path / "a.py"
+    target_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Make analysis stale by modifying file
+    target_file.write_text("x = 2\n", encoding="utf-8")
+
+    if must_abort:
+        with (
+            patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert (
+            "Repository analysis is stale; run 'context-forge analyze" in captured.err
+        )
+    else:
+        with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
+            main()
+
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        assert captured.out != ""
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["architecture", "--format", "json"],
+        ["health", "--format", "json"],
+        ["impact", "a.py", "--format", "json"],
+        ["memory", "dependencies", "a.py", "--format", "json"],
+        ["memory", "relationships", "a.py", "--format", "json"],
+        ["status", "--format", "json"],
+        ["cache", "--format", "json"],
+        ["diagnostics", "--format", "json"],
+        ["inspect", "--format", "json"],
+    ],
+)
+def test_deterministic_json_output_across_queries(
+    tmp_path: Path,
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("import b\ndef fn(): return 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("def helper(): return 2\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # First invocation
+    with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
+        main()
+    first_out = capsys.readouterr().out
+
+    # Second invocation
+    with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
+        main()
+    second_out = capsys.readouterr().out
+
+    assert first_out == second_out
+    # Must be valid json
+    parsed = json.loads(first_out)
+    assert isinstance(parsed, dict)
+
+
+def test_output_channel_separation_on_handled_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # 1. Invalid limit error
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "architecture", str(tmp_path), "--limit", "0"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Error: Report limit must be a positive integer\n"
+
+    # 2. Non-existent path error
+    missing_dir = tmp_path / "non_existent"
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "health", str(missing_dir)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("Error: Project path does not exist:")
+    assert "Traceback" not in captured.err
+
+
+def test_cli_output_omits_internal_version_metadata(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "mod.py").write_text("x = 42\n", encoding="utf-8")
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Text output checks
+    for cmd in (["status"], ["cache"], ["health"]):
+        with patch.object(sys, "argv", ["context-forge", *cmd, str(tmp_path)]):
+            main()
+        captured = capsys.readouterr()
+        assert "Cache schema version" not in captured.out
+        assert "Analyzer version" not in captured.out
+
+    # JSON output checks
+    for cmd in (["status"], ["cache"]):
+        with patch.object(
+            sys, "argv", ["context-forge", *cmd, str(tmp_path), "--format", "json"]
+        ):
+            main()
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert "cache_schema_version" not in data
+        assert "analyzer_version" not in data
+
+    with patch.object(
+        sys, "argv", ["context-forge", "health", str(tmp_path), "--format", "json"]
+    ):
+        main()
+    captured = capsys.readouterr()
+    health_data = json.loads(captured.out)
+    assert "cache_schema_version" not in health_data["cache"]
+    assert "analyzer_version" not in health_data["cache"]
+
+
+def test_internal_cache_version_mismatch_preserves_freshness_invalidation(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "mod.py").write_text("x = 42\n", encoding="utf-8")
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    db_path = tmp_path / ".context_forge.db"
+
+    # 1. Test analyzer version mismatch
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE repository_cache SET analyzer_version = 'old_analyzer'")
+    conn.commit()
+    conn.close()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "cache", str(tmp_path), "--format", "json"],
+    ):
+        main()
+    cache_data = json.loads(capsys.readouterr().out)
+    assert cache_data["cache_status"] == "stale"
+    assert cache_data["freshness_reason"] == "analyzer_version_mismatch"
+
+    # 2. Test schema version mismatch
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE repository_cache SET cache_schema_version = 0")
+    conn.commit()
+    conn.close()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "cache", str(tmp_path), "--format", "json"],
+    ):
+        main()
+    cache_data = json.loads(capsys.readouterr().out)
+    assert cache_data["cache_status"] == "stale"
+    assert cache_data["freshness_reason"] == "schema_version_mismatch"

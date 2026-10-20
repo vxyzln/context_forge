@@ -14,7 +14,10 @@ from context_forge.query.architecture_report import (
     DEFAULT_REPORT_LIMIT,
     build_architecture_report,
 )
-from context_forge.query.health import build_health_report
+from context_forge.query.health import (
+    DEFAULT_HEALTH_LIMIT,
+    build_health_report,
+)
 from context_forge.query.impact import (
     DEFAULT_IMPACT_LIMIT,
     DEFAULT_IMPACT_MAX_DEPTH,
@@ -331,10 +334,10 @@ def create_parser() -> argparse.ArgumentParser:
     health_parser.add_argument(
         "--limit",
         type=int,
-        default=DEFAULT_REPORT_LIMIT,
+        default=DEFAULT_HEALTH_LIMIT,
         help=(
             "Maximum number of findings displayed per category "
-            f"(default: {DEFAULT_REPORT_LIMIT})."
+            f"(default: {DEFAULT_HEALTH_LIMIT})."
         ),
     )
     _add_output_format_argument(health_parser)
@@ -390,6 +393,11 @@ def analyze_project(root_path: Path):
 
 def load_project_analysis(root_path: Path):
     database_path = root_path / ".context_forge.db"
+    if not database_path.exists():
+        raise ValueError(
+            "No persisted analysis found; run 'context-forge analyze' first"
+        )
+
     repository = ProjectRepository(Database(database_path))
     repository_key = RepositoryIdentity(root_path).key
 
@@ -463,8 +471,6 @@ def print_status_summary(
     payload = {
         "analysis_errors": len(project.errors),
         "analysis_status": str(project.analysis_status),
-        "analyzer_version": metadata.analyzer_version,
-        "cache_schema_version": metadata.cache_schema_version,
         "cache_status": "fresh" if freshness.is_fresh else "stale",
         "files": len(project.files),
         "project": project.name,
@@ -488,8 +494,6 @@ def print_status_summary(
     print(f"Analysis errors: {len(project.errors)}")
     print()
     print(f"Cache status: {'fresh' if freshness.is_fresh else 'stale'}")
-    print(f"Cache schema version: {metadata.cache_schema_version}")
-    print(f"Analyzer version: {metadata.analyzer_version}")
 
 
 def print_cache_summary(
@@ -507,8 +511,6 @@ def print_cache_summary(
 
     payload = {
         "added_paths": added,
-        "analyzer_version": metadata.analyzer_version,
-        "cache_schema_version": metadata.cache_schema_version,
         "cache_status": "fresh" if freshness.is_fresh else "stale",
         "deleted_paths": deleted,
         "freshness_reason": freshness.reason,
@@ -523,8 +525,6 @@ def print_cache_summary(
 
     print(f"Repository: {repository_key}")
     print(f"Cache status: {'fresh' if freshness.is_fresh else 'stale'}")
-    print(f"Cache schema version: {metadata.cache_schema_version}")
-    print(f"Analyzer version: {metadata.analyzer_version}")
     print(f"Tracked files: {len(fingerprints)}")
     print(f"Freshness reason: {freshness.reason}")
     print(f"Added paths: {len(added)}")
@@ -570,7 +570,11 @@ def print_inspection_summary(
             {
                 "files": [
                     {
-                        "path": item.path,
+                        "path": (
+                            item.path.as_posix()
+                            if hasattr(item.path, "as_posix")
+                            else str(item.path)
+                        ),
                     }
                     for item in files
                 ],
@@ -1731,10 +1735,6 @@ def print_health_summary(report: dict[str, Any]) -> None:
     print(f"  Cache status: {cache['status']}")
     if cache.get("reason"):
         print(f"  Freshness reason: {cache['reason']}")
-    if cache.get("cache_schema_version") is not None:
-        print(f"  Cache schema version: {cache['cache_schema_version']}")
-    if cache.get("analyzer_version") is not None:
-        print(f"  Analyzer version: {cache['analyzer_version']}")
     print(f"  Analysis errors: {report['analysis']['error_count']}")
 
     print()
@@ -1811,7 +1811,7 @@ def print_health_summary(report: dict[str, Any]) -> None:
 def run_health(
     path: Path,
     output_format: str = "text",
-    limit: int = DEFAULT_REPORT_LIMIT,
+    limit: int = DEFAULT_HEALTH_LIMIT,
 ) -> None:
     """Print an evidence-based repository health report."""
     if isinstance(limit, bool) or limit < 1:
