@@ -10,6 +10,10 @@ from context_forge.pipeline.analyzer import (
     ProjectAnalyzer,
     current_fingerprints,
 )
+from context_forge.preflight import (
+    build_preflight_report,
+    format_preflight_summary,
+)
 from context_forge.query.architecture_report import (
     DEFAULT_REPORT_LIMIT,
     build_architecture_report,
@@ -350,6 +354,19 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _add_output_format_argument(health_parser)
 
+    preflight_parser = subparsers.add_parser(
+        "preflight",
+        help="Perform read-only repository preflight readiness and configuration audit.",
+    )
+    preflight_parser.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        type=Path,
+        help="Repository root path (default: current directory).",
+    )
+    _add_output_format_argument(preflight_parser)
+
     return parser
 
 
@@ -370,6 +387,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "architecture",
         "impact",
         "health",
+        "preflight",
         "-h",
         "--help",
     }:
@@ -1853,6 +1871,26 @@ def run_health(
     print_health_summary(report)
 
 
+def print_preflight_summary(report: dict[str, Any]) -> None:
+    for line in format_preflight_summary(report):
+        print(line)
+
+
+def run_preflight(
+    path: Path,
+    output_format: str = "text",
+) -> None:
+    report = build_preflight_report(path)
+
+    if output_format == "json":
+        _emit_json(report)
+    else:
+        print_preflight_summary(report)
+
+    if report["readiness"] == "blocked":
+        raise SystemExit(1)
+
+
 def run_impact(
     target: str,
     path: Path,
@@ -2097,6 +2135,10 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.path,
             args.format,
             args.limit,
+        ),
+        "preflight": lambda: run_preflight(
+            args.path,
+            args.format,
         ),
     }
 

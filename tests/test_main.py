@@ -4261,3 +4261,106 @@ def test_cli_text_mode_regression_preserves_stderr_format(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "Error: Report limit must be a positive integer\n"
+
+
+def test_preflight_command_text_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "app.py").write_text("def fn(): pass\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "preflight", str(tmp_path)]):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert f"Repository: {tmp_path.resolve()}" in captured.out
+    assert "Readiness: READY" in captured.out
+    assert "Repository status:" in captured.out
+    assert "Configuration:" in captured.out
+    assert "Inventory:" in captured.out
+    assert "Analysis readiness:" in captured.out
+
+
+def test_preflight_command_json_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "preflight", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["schema_version"] == 1
+    assert payload["repository"] == tmp_path.resolve().as_posix()
+    assert payload["readiness"] in ("ready", "ready_with_limitations")
+    assert payload["outcome"]["is_success"] is True
+    assert payload["inventory"]["files"] == 1
+    assert payload["configuration"]["status"] == "default"
+
+
+def test_preflight_command_blocked_on_nonexistent_directory(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    missing_dir = tmp_path / "nonexistent_repo"
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "preflight", str(missing_dir)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Readiness: BLOCKED" in captured.out
+    assert "REPOSITORY_NOT_FOUND" in captured.out
+
+
+def test_preflight_command_json_blocked_exits_1(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    missing_dir = tmp_path / "nonexistent_repo"
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "preflight", str(missing_dir), "--format", "json"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["readiness"] == "blocked"
+    assert payload["outcome"]["is_success"] is False
+    assert payload["outcome"]["status"] == "blocked"
+
+
+def test_preflight_command_read_only_invariance(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_file = tmp_path / ".context_forge.db"
+    assert not db_file.exists()
+
+    with patch.object(sys, "argv", ["context-forge", "preflight", str(tmp_path)]):
+        main()
+
+    capsys.readouterr()
+    assert not db_file.exists(), "Preflight must not create .context_forge.db"
