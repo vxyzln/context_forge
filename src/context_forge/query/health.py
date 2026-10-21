@@ -15,6 +15,11 @@ from context_forge.query.architecture_report import (
     _path,
     _unresolved_import_payload,
 )
+from context_forge.reporting.contract import (
+    DiagnosticItem,
+    OperationOutcome,
+    OperationStatus,
+)
 from context_forge.storage.cache import CacheFreshness, RepositoryCacheMetadata
 
 DEFAULT_HEALTH_LIMIT = DEFAULT_REPORT_LIMIT
@@ -43,6 +48,21 @@ def build_health_report(
 
     # 1. Unanalyzed or unavailable project state
     if project is None:
+        missing_limitation = (
+            "No persisted analysis found for repository; inventory metrics "
+            "and structural findings are unavailable."
+        )
+        outcome = OperationOutcome.incomplete(
+            message=missing_limitation,
+            diagnostics=[
+                DiagnosticItem.blocker(
+                    "No persisted analysis found for repository",
+                    code="MISSING_ANALYSIS",
+                    source="storage",
+                )
+            ],
+            limitations=[missing_limitation],
+        )
         return {
             "schema_version": 1,
             "repository": resolved_path,
@@ -77,12 +97,8 @@ def build_health_report(
                 "dependency_cycles": _limited_section([], limit),
                 "structural_integrity": _limited_section([], limit),
             },
-            "limitations": [
-                (
-                    "No persisted analysis found for repository; inventory metrics "
-                    "and structural findings are unavailable."
-                )
-            ],
+            "limitations": [missing_limitation],
+            "outcome": outcome.to_dict(),
         }
 
     # 2. Project metadata and analysis state
@@ -248,6 +264,64 @@ def build_health_report(
             f"Findings display was limited to {limit} items per category."
         )
 
+    # 7. Structured outcome semantics
+    diagnostics: list[DiagnosticItem] = []
+    for err in analysis_errors:
+        diagnostics.append(
+            DiagnosticItem.error(
+                str(err),
+                code="ANALYSIS_ERROR",
+                source="analyzer",
+            )
+        )
+
+    if freshness is not None and not freshness.is_fresh:
+        diagnostics.append(
+            DiagnosticItem.warning(
+                f"Cached analysis is stale ({freshness.reason})",
+                code="STALE_CACHE",
+                source="cache",
+            )
+        )
+    elif freshness is None:
+        diagnostics.append(
+            DiagnosticItem.info(
+                "Cache freshness was not verified",
+                code="UNVERIFIED_CACHE",
+                source="cache",
+            )
+        )
+
+    for item in integrity_findings:
+        diagnostics.append(
+            DiagnosticItem.warning(
+                item["message"],
+                code=item["type"],
+                path=item.get("source_path"),
+                source="integrity",
+            )
+        )
+
+    if analysis_status == "failed":
+        status = OperationStatus.FAILED
+        message = "Repository analysis failed"
+    elif analysis_status != "analyzed" or analysis_errors:
+        status = OperationStatus.PARTIAL
+        message = "Repository health report generated with analysis warnings or errors"
+    elif freshness is not None and not freshness.is_fresh:
+        status = OperationStatus.PARTIAL
+        message = "Repository health report generated from stale cache"
+    else:
+        status = OperationStatus.SUCCESS
+        message = "Repository health report generated successfully"
+
+    outcome = OperationOutcome(
+        status=status,
+        message=message,
+        diagnostics=tuple(diagnostics),
+        limitations=tuple(limitations),
+    )
+
     return {
         "schema_version": 1,
         "repository": resolved_path,
@@ -257,4 +331,5 @@ def build_health_report(
         "inventory": inventory_payload,
         "findings": findings_payload,
         "limitations": limitations,
+        "outcome": outcome.to_dict(),
     }

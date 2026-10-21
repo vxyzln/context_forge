@@ -417,3 +417,55 @@ def test_project_query_get_health_report(tmp_path: Path) -> None:
     assert report["schema_version"] == 1
     assert report["project"]["name"] == "Health Test Project"
     assert report["inventory"]["files"] == 3
+
+
+def test_health_report_outcome_contract_states(tmp_path: Path) -> None:
+    # 1. Unavailable project -> INCOMPLETE
+    unavail_rep = build_health_report(project=None, repository_path=tmp_path)
+    assert "outcome" in unavail_rep
+    assert unavail_rep["outcome"]["status"] == "incomplete"
+    assert unavail_rep["outcome"]["is_success"] is False
+    assert unavail_rep["outcome"]["summary"]["blockers"] == 1
+    assert unavail_rep["outcome"]["diagnostics"][0]["code"] == "MISSING_ANALYSIS"
+
+    # 2. Fresh clean project -> SUCCESS
+    project = _create_sample_project(tmp_path)
+    freshness = CacheFreshness(is_fresh=True, reason="clean")
+    fresh_rep = build_health_report(
+        project=project,
+        repository_path=tmp_path,
+        freshness=freshness,
+    )
+    assert fresh_rep["outcome"]["status"] == "success"
+    assert fresh_rep["outcome"]["is_success"] is True
+    assert fresh_rep["outcome"]["summary"]["errors"] == 0
+    assert fresh_rep["outcome"]["summary"]["blockers"] == 0
+
+    # 3. Stale cache -> PARTIAL with warning
+    stale_freshness = CacheFreshness(is_fresh=False, reason="files_changed")
+    stale_rep = build_health_report(
+        project=project,
+        repository_path=tmp_path,
+        freshness=stale_freshness,
+    )
+    assert stale_rep["outcome"]["status"] == "partial"
+    assert stale_rep["outcome"]["is_success"] is False
+    assert any(
+        d["code"] == "STALE_CACHE" and d["severity"] == "warning"
+        for d in stale_rep["outcome"]["diagnostics"]
+    )
+
+    # 4. Failed analysis -> FAILED with error diagnostic
+    failed_project = _create_sample_project(tmp_path)
+    failed_project.analysis_status = "failed"
+    failed_project.errors = ["Syntax error in bad.py"]
+    failed_rep = build_health_report(
+        project=failed_project,
+        repository_path=tmp_path,
+    )
+    assert failed_rep["outcome"]["status"] == "failed"
+    assert failed_rep["outcome"]["is_success"] is False
+    assert any(
+        d["code"] == "ANALYSIS_ERROR" and d["severity"] == "error"
+        for d in failed_rep["outcome"]["diagnostics"]
+    )

@@ -569,3 +569,24 @@ def test_report_limitations_document_scc_semantics_and_conventional_packages() -
         "conventional Python packages" in item and "__init__.py" in item
         for item in limitations
     )
+
+
+def test_architecture_report_outcome_contract() -> None:
+    # 1. Clean report -> SUCCESS
+    clean_report = build_architecture_report(_inventory(), ".")
+    assert "outcome" in clean_report
+    assert clean_report["outcome"]["status"] == "success"
+    assert clean_report["outcome"]["is_success"] is True
+
+    # 2. Incomplete / errors -> PARTIAL with error diagnostics
+    error_inv = _inventory(
+        analysis_status="partial",
+        errors=("Syntax error in foo.py",),
+    )
+    error_report = build_architecture_report(error_inv, ".")
+    assert error_report["outcome"]["status"] == "partial"
+    assert error_report["outcome"]["is_success"] is False
+    assert any(
+        d["code"] == "ANALYSIS_ERROR" and d["severity"] == "error"
+        for d in error_report["outcome"]["diagnostics"]
+    )

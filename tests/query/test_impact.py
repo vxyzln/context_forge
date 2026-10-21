@@ -1163,3 +1163,36 @@ def test_impact_path_step_to_dict() -> None:
 
 def test_find_transitive_impact_alias() -> None:
     assert find_transitive_impact is find_impact
+
+
+def test_impact_result_outcome_contract(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+
+    # 1. Clean resolved outcome -> SUCCESS
+    res = find_impact(project, "User", direction="incoming")
+    assert res.outcome.is_success
+    assert res.outcome.status == "success"
+    assert "outcome" in res.to_dict()
+    assert res.to_dict()["outcome"]["status"] == "success"
+
+    # 2. Ambiguous target -> BLOCKED with blocker diagnostic
+    amb_res = find_impact(project, "Config", direction="both")
+    assert amb_res.outcome.is_blocked
+    assert amb_res.outcome.status == "blocked"
+    assert amb_res.outcome.has_blockers
+    assert amb_res.outcome.blockers[0].code == "TARGET_AMBIGUOUS"
+    assert len(amb_res.candidates) == 2
+
+    # 3. Not found target -> BLOCKED with blocker diagnostic
+    nf_res = find_impact(project, "nonexistent_symbol_123", direction="both")
+    assert nf_res.outcome.is_blocked
+    assert nf_res.outcome.status == "blocked"
+    assert nf_res.outcome.has_blockers
+    assert nf_res.outcome.blockers[0].code == "TARGET_NOT_FOUND"
+
+    # 4. Truncated result -> PARTIAL with warning diagnostic
+    trunc_res = find_impact(project, "User", direction="both", limit=1)
+    assert trunc_res.outcome.is_partial
+    assert trunc_res.outcome.status == "partial"
+    assert trunc_res.outcome.has_warnings
+    assert trunc_res.outcome.warnings[0].code == "RESULTS_TRUNCATED"

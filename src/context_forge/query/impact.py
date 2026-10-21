@@ -7,6 +7,11 @@ from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship, RelationshipType
 from context_forge.models.symbol import Symbol
+from context_forge.reporting.contract import (
+    DiagnosticItem,
+    OperationOutcome,
+    OperationStatus,
+)
 
 DEFAULT_IMPACT_LIMIT: int = 50
 DEFAULT_IMPACT_MAX_DEPTH: int = 3
@@ -97,12 +102,43 @@ class TargetResolution:
     def is_not_found(self) -> bool:
         return self.status == "not_found"
 
+    @property
+    def outcome(self) -> OperationOutcome:
+        """Derive shared OperationOutcome representation from TargetResolution."""
+        if self.status == "not_found":
+            return OperationOutcome.blocked(
+                self.message or "Target query not found",
+                diagnostics=[
+                    DiagnosticItem.blocker(
+                        self.message or "Target query not found",
+                        code="TARGET_NOT_FOUND",
+                        source="impact",
+                    )
+                ],
+            )
+        if self.status == "ambiguous":
+            return OperationOutcome.blocked(
+                self.message or "Ambiguous target query",
+                diagnostics=[
+                    DiagnosticItem.blocker(
+                        self.message or "Ambiguous target query",
+                        code="TARGET_AMBIGUOUS",
+                        source="impact",
+                        details={"candidate_count": len(self.candidates)},
+                    )
+                ],
+            )
+        return OperationOutcome.success(
+            self.message or "Target resolved successfully",
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "target": self.target.to_dict() if self.target is not None else None,
             "candidates": [c.to_dict() for c in self.candidates],
             "message": self.message,
+            "outcome": self.outcome.to_dict(),
         }
 
 
@@ -211,6 +247,50 @@ class ImpactResult:
     limitations: tuple[str, ...] = ()
     message: str = ""
 
+    @property
+    def outcome(self) -> OperationOutcome:
+        """Derive shared OperationOutcome representation from ImpactResult."""
+        diagnostics: list[DiagnosticItem] = []
+
+        if self.status == "not_found":
+            status = OperationStatus.BLOCKED
+            diagnostics.append(
+                DiagnosticItem.blocker(
+                    self.message or "Target query not found",
+                    code="TARGET_NOT_FOUND",
+                    source="impact",
+                )
+            )
+        elif self.status == "ambiguous":
+            status = OperationStatus.BLOCKED
+            diagnostics.append(
+                DiagnosticItem.blocker(
+                    self.message or "Ambiguous target query",
+                    code="TARGET_AMBIGUOUS",
+                    source="impact",
+                    details={"candidate_count": len(self.candidates)},
+                )
+            )
+        elif self.truncated:
+            status = OperationStatus.PARTIAL
+            diagnostics.append(
+                DiagnosticItem.warning(
+                    f"Impact results truncated to limit {self.limit}",
+                    code="RESULTS_TRUNCATED",
+                    source="impact",
+                    details={"limit": self.limit, "total": self.total},
+                )
+            )
+        else:
+            status = OperationStatus.SUCCESS
+
+        return OperationOutcome(
+            status=status,
+            message=self.message,
+            diagnostics=tuple(diagnostics),
+            limitations=self.limitations,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
@@ -228,6 +308,7 @@ class ImpactResult:
             "items": [item.to_dict() for item in self.items],
             "limitations": list(self.limitations),
             "message": self.message,
+            "outcome": self.outcome.to_dict(),
         }
 
 

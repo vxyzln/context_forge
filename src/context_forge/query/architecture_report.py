@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from context_forge.reporting.contract import (
+    DiagnosticItem,
+    OperationOutcome,
+    OperationStatus,
+)
+
 DEFAULT_REPORT_LIMIT = 50
 
 
@@ -354,6 +360,53 @@ def build_architecture_report(
     symbol_count = len(inventory.symbols)
     containment_count = len(inventory.containment)
 
+    # Structured outcome semantics
+    diagnostics: list[DiagnosticItem] = []
+    for err in analysis_errors:
+        diagnostics.append(
+            DiagnosticItem.error(
+                str(err),
+                code="ANALYSIS_ERROR",
+                source="analyzer",
+            )
+        )
+
+    for finding in findings:
+        diagnostics.append(
+            DiagnosticItem.warning(
+                finding["message"],
+                code=finding["type"],
+                path=finding.get("source_path"),
+                source="integrity",
+            )
+        )
+
+    for cycle in cycles:
+        diagnostics.append(
+            DiagnosticItem.warning(
+                f"Dependency cycle detected among {cycle['module_count']} modules",
+                code="DEPENDENCY_CYCLE",
+                source="graph",
+            )
+        )
+
+    if analysis_status == "failed":
+        status = OperationStatus.FAILED
+        message = "Architecture analysis failed"
+    elif analysis_status != "analyzed" or analysis_errors:
+        status = OperationStatus.PARTIAL
+        message = "Architecture report generated with analysis warnings or errors"
+    else:
+        status = OperationStatus.SUCCESS
+        message = "Architecture report generated successfully"
+
+    outcome = OperationOutcome(
+        status=status,
+        message=message,
+        diagnostics=tuple(diagnostics),
+        limitations=tuple(limitations),
+    )
+
     return {
         "schema_version": 1,
         "repository": _path(repository_path),
@@ -387,4 +440,5 @@ def build_architecture_report(
         "unresolved_imports": _limited_section(unresolved_imports, limit),
         "findings": _limited_section(findings, limit),
         "limitations": limitations,
+        "outcome": outcome.to_dict(),
     }
