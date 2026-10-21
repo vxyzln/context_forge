@@ -24,6 +24,13 @@ from context_forge.query.impact import (
     find_impact,
 )
 from context_forge.query.project import ProjectQuery
+from context_forge.reporting import (
+    ContextForgeError,
+    DiagnosticItem,
+    MissingAnalysisError,
+    OperationOutcome,
+    StaleAnalysisError,
+)
 from context_forge.storage.cache import RepositoryIdentity
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
@@ -40,8 +47,9 @@ def _add_output_format_argument(
     )
 
 
-def _emit_json(payload: dict) -> None:
-    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+def _emit_json(payload: dict, file: Any = None) -> None:
+    target = file if file is not None else sys.stdout
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")), file=target)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -394,8 +402,9 @@ def analyze_project(root_path: Path):
 def load_project_analysis(root_path: Path):
     database_path = root_path / ".context_forge.db"
     if not database_path.exists():
-        raise ValueError(
-            "No persisted analysis found; run 'context-forge analyze' first"
+        raise MissingAnalysisError(
+            "No persisted analysis found; run 'context-forge analyze' first",
+            path=str(database_path),
         )
 
     repository = ProjectRepository(Database(database_path))
@@ -407,13 +416,15 @@ def load_project_analysis(root_path: Path):
         if "no such table: repository_cache" not in str(exc):
             raise
 
-        raise ValueError(
-            "No persisted analysis found; run 'context-forge analyze' first"
+        raise MissingAnalysisError(
+            "No persisted analysis found; run 'context-forge analyze' first",
+            path=str(database_path),
         ) from None
 
     if loaded is None:
-        raise ValueError(
-            "No persisted analysis found; run 'context-forge analyze' first"
+        raise MissingAnalysisError(
+            "No persisted analysis found; run 'context-forge analyze' first",
+            path=str(database_path),
         )
 
     project, metadata = loaded
@@ -431,9 +442,10 @@ def load_fresh_project(root_path: Path):
     )
 
     if not freshness.is_fresh:
-        raise ValueError(
+        raise StaleAnalysisError(
             f"Repository analysis is stale; run "
-            f"'context-forge analyze {root_path}' first"
+            f"'context-forge analyze {root_path}' first",
+            path=str(root_path),
         )
     return project, metadata
 
@@ -2114,11 +2126,27 @@ def main() -> None:
         print(file=sys.stderr)
         raise SystemExit(130) from None
     except (
+        ContextForgeError,
         OSError,
         RuntimeError,
         sqlite3.Error,
         TypeError,
         ValueError,
     ) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        output_format = getattr(args, "format", "text")
+        if output_format == "json":
+            if isinstance(exc, ContextForgeError):
+                outcome = exc.outcome
+            else:
+                diag = DiagnosticItem.error(
+                    str(exc),
+                    code="OPERATIONAL_ERROR",
+                )
+                outcome = OperationOutcome.failed(
+                    str(exc),
+                    diagnostics=(diag,),
+                )
+            _emit_json(outcome.to_dict(), file=sys.stderr)
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from None

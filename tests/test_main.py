@@ -4137,3 +4137,127 @@ def test_internal_cache_version_mismatch_preserves_freshness_invalidation(
     cache_data = json.loads(capsys.readouterr().out)
     assert cache_data["cache_status"] == "stale"
     assert cache_data["freshness_reason"] == "schema_version_mismatch"
+
+
+def test_cli_json_mode_reports_blocked_operation_on_missing_analysis(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "architecture", str(tmp_path), "--format", "json"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error_payload = json.loads(captured.err)
+    assert error_payload["status"] == "blocked"
+    assert error_payload["is_success"] is False
+    assert (
+        "No persisted analysis found; run 'context-forge analyze' first"
+        in error_payload["message"]
+    )
+    assert error_payload["summary"]["blockers"] == 1
+    assert error_payload["diagnostics"][0]["code"] == "MISSING_ANALYSIS"
+    assert error_payload["diagnostics"][0]["severity"] == "blocker"
+
+
+def test_cli_json_mode_reports_blocked_operation_on_stale_analysis(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_file = tmp_path / "mod.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Make cache stale
+    source_file.write_text("x = 2\n", encoding="utf-8")
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "architecture", str(tmp_path), "--format", "json"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error_payload = json.loads(captured.err)
+    assert error_payload["status"] == "blocked"
+    assert error_payload["is_success"] is False
+    assert "Repository analysis is stale" in error_payload["message"]
+    assert error_payload["summary"]["blockers"] == 1
+    assert error_payload["diagnostics"][0]["code"] == "STALE_ANALYSIS"
+    assert error_payload["diagnostics"][0]["severity"] == "blocker"
+
+
+def test_cli_json_mode_reports_operational_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "architecture",
+                str(tmp_path),
+                "--limit",
+                "0",
+                "--format",
+                "json",
+            ],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error_payload = json.loads(captured.err)
+    assert error_payload["status"] == "failed"
+    assert error_payload["is_success"] is False
+    assert error_payload["message"] == "Report limit must be a positive integer"
+    assert error_payload["summary"]["errors"] == 1
+    assert error_payload["diagnostics"][0]["severity"] == "error"
+
+
+def test_cli_text_mode_regression_preserves_stderr_format(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "architecture",
+                str(tmp_path),
+                "--limit",
+                "0",
+            ],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Error: Report limit must be a positive integer\n"
