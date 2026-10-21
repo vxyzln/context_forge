@@ -1,3 +1,7 @@
+from context_forge.config.audit import (
+    ConfigurationAuditResult,
+    audit_configuration,
+)
 from context_forge.config.defaults import DEFAULTS, ConfigurationDefaults
 from context_forge.config.global_config import (
     APPLICATION_NAME,
@@ -32,12 +36,14 @@ __all__ = [
     "DEFAULTS",
     "GLOBAL_CONFIG_FILENAME",
     "PROJECT_CONFIG_FILENAME",
+    "ConfigurationAuditResult",
     "ConfigurationDefaults",
     "ConfigurationLoadError",
     "ConfigurationValidationError",
     "ProjectAnalysisConfiguration",
     "ProjectConfiguration",
     "ProjectStorageConfiguration",
+    "audit_configuration",
     "global_config_directory",
     "global_config_path",
     "load_global_config",

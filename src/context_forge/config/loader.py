@@ -46,8 +46,9 @@ def load_project_config(project_root: Path) -> dict[str, Any]:
     return data
 
 
-def load_global_config() -> dict[str, Any]:
-    config_path = global_config_path()
+def load_global_config(config_path: Path | None = None) -> dict[str, Any]:
+    if config_path is None:
+        config_path = global_config_path()
 
     if not config_path.exists():
         return {}
