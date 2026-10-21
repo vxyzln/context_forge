@@ -103,6 +103,10 @@ class TargetResolution:
         return self.status == "not_found"
 
     @property
+    def is_invalid(self) -> bool:
+        return self.status == "invalid"
+
+    @property
     def outcome(self) -> OperationOutcome:
         """Derive shared OperationOutcome representation from TargetResolution."""
         if self.status == "not_found":
@@ -125,6 +129,28 @@ class TargetResolution:
                         code="TARGET_AMBIGUOUS",
                         source="impact",
                         details={"candidate_count": len(self.candidates)},
+                    )
+                ],
+            )
+        if self.status == "invalid":
+            return OperationOutcome.blocked(
+                self.message or "Invalid target query",
+                diagnostics=[
+                    DiagnosticItem.blocker(
+                        self.message or "Invalid target query",
+                        code="TARGET_INVALID",
+                        source="impact",
+                    )
+                ],
+            )
+        if self.status == "insufficient_metadata":
+            return OperationOutcome.blocked(
+                self.message or "Insufficient repository metadata",
+                diagnostics=[
+                    DiagnosticItem.blocker(
+                        self.message or "Insufficient repository metadata",
+                        code="INSUFFICIENT_METADATA",
+                        source="impact",
                     )
                 ],
             )

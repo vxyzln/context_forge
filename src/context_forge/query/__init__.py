@@ -30,10 +30,18 @@ from context_forge.query.impact import (
     find_transitive_impact,
     resolve_impact_target,
 )
+from context_forge.query.locator import (
+    DEFAULT_EXCERPT_MAX_LINES,
+    SourceExcerpt,
+    get_source_evidence,
+    locate_and_get_evidence,
+    locate_symbol,
+)
 from context_forge.query.project import ProjectQuery
 from context_forge.query.result import SearchResult, SearchResultType
 
 __all__ = [
+    "DEFAULT_EXCERPT_MAX_LINES",
     "DEFAULT_HEALTH_LIMIT",
     "DEFAULT_IMPACT_LIMIT",
     "DEFAULT_IMPACT_MAX_DEPTH",
@@ -50,6 +58,7 @@ __all__ = [
     "ResolvedTarget",
     "SearchResult",
     "SearchResultType",
+    "SourceExcerpt",
     "StructuralFinding",
     "StructuralIntegrityFinding",
     "TargetCandidate",
@@ -60,5 +69,8 @@ __all__ = [
     "find_direct_impact",
     "find_impact",
     "find_transitive_impact",
+    "get_source_evidence",
+    "locate_and_get_evidence",
+    "locate_symbol",
     "resolve_impact_target",
 ]

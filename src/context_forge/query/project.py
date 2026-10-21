@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -19,10 +20,18 @@ from context_forge.query.impact import (
     DEFAULT_IMPACT_MAX_DEPTH,
     DirectImpactResult,
     ImpactResult,
+    ResolvedTarget,
     TargetResolution,
     find_direct_impact,
     find_impact,
     resolve_impact_target,
+)
+from context_forge.query.locator import (
+    DEFAULT_EXCERPT_MAX_LINES,
+    SourceExcerpt,
+    get_source_evidence,
+    locate_and_get_evidence,
+    locate_symbol,
 )
 from context_forge.query.result import SearchResult, SearchResultType
 from context_forge.storage.cache import CacheFreshness, RepositoryCacheMetadata
@@ -1142,4 +1151,57 @@ class ProjectQuery:
             metadata=metadata,
             freshness=freshness,
             limit=limit,
+        )
+
+    def locate_symbol(
+        self,
+        name: str,
+        *,
+        file_path: str | Path | None = None,
+        symbol_type: str | None = None,
+        qualified_name: str | None = None,
+    ) -> TargetResolution:
+        """Resolve a repository symbol using supported identifiers and filters."""
+        return locate_symbol(
+            self.project,
+            name,
+            file_path=file_path,
+            symbol_type=symbol_type,
+            qualified_name=qualified_name,
+        )
+
+    def get_source_evidence(
+        self,
+        target: ResolvedTarget | Symbol,
+        *,
+        root_path: Path | None = None,
+        max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
+    ) -> SourceExcerpt:
+        """Read bounded source evidence from the working tree for a resolved target."""
+        return get_source_evidence(
+            self.project,
+            target,
+            root_path=root_path,
+            max_lines=max_lines,
+        )
+
+    def locate_and_get_evidence(
+        self,
+        name: str,
+        *,
+        file_path: str | Path | None = None,
+        symbol_type: str | None = None,
+        qualified_name: str | None = None,
+        root_path: Path | None = None,
+        max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
+    ) -> tuple[TargetResolution, SourceExcerpt | None]:
+        """Resolve a symbol and retrieve bounded source evidence if uniquely resolved."""
+        return locate_and_get_evidence(
+            self.project,
+            name,
+            file_path=file_path,
+            symbol_type=symbol_type,
+            qualified_name=qualified_name,
+            root_path=root_path,
+            max_lines=max_lines,
         )
