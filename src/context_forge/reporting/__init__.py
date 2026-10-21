@@ -9,6 +9,8 @@ from context_forge.reporting.contract import (
 from context_forge.reporting.errors import (
     BlockedOperationError,
     ContextForgeError,
+    IncompleteAnalysisError,
+    IndeterminateFreshnessError,
     MissingAnalysisError,
     OperationalError,
     StaleAnalysisError,
@@ -23,6 +25,8 @@ __all__ = [
     "ContextForgeError",
     "DiagnosticItem",
     "DiagnosticSeverity",
+    "IncompleteAnalysisError",
+    "IndeterminateFreshnessError",
     "MissingAnalysisError",
     "OperationOutcome",
     "OperationStatus",

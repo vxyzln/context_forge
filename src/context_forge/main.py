@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 import sqlite3
@@ -6,9 +8,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+from context_forge.models.project import Project
 from context_forge.pipeline.analyzer import (
     ProjectAnalyzer,
     current_fingerprints,
+)
+from context_forge.pipeline.freshness import (
+    WorkflowFreshness,
+    WorkflowFreshnessGuard,
 )
 from context_forge.preflight import (
     build_preflight_report,
@@ -36,11 +43,16 @@ from context_forge.query.project import ProjectQuery
 from context_forge.reporting import (
     ContextForgeError,
     DiagnosticItem,
+    IncompleteAnalysisError,
+    IndeterminateFreshnessError,
     MissingAnalysisError,
     OperationOutcome,
     StaleAnalysisError,
 )
-from context_forge.storage.cache import RepositoryIdentity
+from context_forge.storage.cache import (
+    RepositoryCacheMetadata,
+    RepositoryIdentity,
+)
 from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
 
@@ -537,6 +549,55 @@ def load_fresh_project(root_path: Path):
             path=str(root_path),
         )
     return project, metadata
+
+
+def load_guarded_project(
+    root_path: Path,
+    *,
+    allow_refresh: bool = False,
+    database_path: Path | None = None,
+) -> tuple[Project, RepositoryCacheMetadata, WorkflowFreshness]:
+    """Load project analysis guarded by WorkflowFreshnessGuard.
+
+    If allow_refresh is True, attempts refresh when analysis is stale or incomplete.
+    Raises ContextForgeError (MissingAnalysisError, StaleAnalysisError,
+    IncompleteAnalysisError, or IndeterminateFreshnessError) if freshness
+    is not current after guard execution.
+    """
+    guard = WorkflowFreshnessGuard(root_path, database_path=database_path)
+    freshness = guard.guard(allow_refresh=allow_refresh)
+
+    if (
+        freshness.is_current
+        and freshness.project is not None
+        and freshness.metadata is not None
+    ):
+        return freshness.project, freshness.metadata, freshness
+
+    if freshness.is_stale:
+        raise StaleAnalysisError(
+            f"Repository analysis is stale; run 'context-forge analyze {root_path}' first",
+            path=str(root_path),
+            details={"changes": freshness.to_dict().get("changes")},
+        )
+    if freshness.is_incomplete:
+        raise IncompleteAnalysisError(
+            f"Repository analysis is incomplete ({freshness.reason}); run 'context-forge analyze {root_path}' first",
+            path=str(root_path),
+            details={
+                "errors": list(freshness.analysis_errors),
+                "status": freshness.analysis_status,
+            },
+        )
+    if freshness.reason == "missing_analysis":
+        raise MissingAnalysisError(
+            f"No persisted analysis found; run 'context-forge analyze {root_path}' first",
+            path=str(root_path),
+        )
+    raise IndeterminateFreshnessError(
+        f"Repository analysis freshness is indeterminate ({freshness.reason}); reanalysis is required",
+        path=str(root_path),
+    )
 
 
 # Backward compatibility alias for any existing callers

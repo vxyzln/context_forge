@@ -8,6 +8,11 @@ from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship, RelationshipType
 from context_forge.models.symbol import Symbol
+from context_forge.pipeline.freshness import (
+    FreshnessState,
+    WorkflowFreshness,
+    WorkflowFreshnessGuard,
+)
 from context_forge.query.architecture import (
     ArchitectureInventory,
     ContainmentEdge,
@@ -34,7 +39,12 @@ from context_forge.query.locator import (
     locate_symbol,
 )
 from context_forge.query.result import SearchResult, SearchResultType
-from context_forge.storage.cache import CacheFreshness, RepositoryCacheMetadata
+from context_forge.reporting.contract import DiagnosticItem, OperationOutcome
+from context_forge.storage.cache import (
+    CacheFreshness,
+    FileFingerprint,
+    RepositoryCacheMetadata,
+)
 
 
 class ProjectQuery:
@@ -1204,4 +1214,44 @@ class ProjectQuery:
             qualified_name=qualified_name,
             root_path=root_path,
             max_lines=max_lines,
+        )
+
+    def assess_freshness(
+        self,
+        *,
+        metadata: RepositoryCacheMetadata | None = None,
+        current_fingerprints: dict[Path, FileFingerprint] | None = None,
+        database_path: Path | None = None,
+    ) -> WorkflowFreshness:
+        """Assess repository analysis freshness for this project."""
+        root = self.project.root_path
+        if root is None:
+            diag = DiagnosticItem.blocker(
+                "Project has no root_path configured; cannot assess freshness",
+                code="MISSING_ROOT_PATH",
+                source="project",
+            )
+            return WorkflowFreshness(
+                state=FreshnessState.INDETERMINATE,
+                reason="missing_root_path",
+                project=self.project,
+                metadata=metadata,
+                diagnostics=(diag,),
+                limitations=(
+                    "Project has no root_path; freshness cannot be assessed.",
+                ),
+                outcome=OperationOutcome.blocked(
+                    "Project has no root_path configured",
+                    diagnostics=(diag,),
+                    limitations=(
+                        "Project has no root_path; freshness cannot be assessed.",
+                    ),
+                ),
+            )
+
+        guard = WorkflowFreshnessGuard(root, database_path=database_path)
+        return guard.assess_freshness(
+            project=self.project,
+            metadata=metadata,
+            current_fingerprints=current_fingerprints,
         )

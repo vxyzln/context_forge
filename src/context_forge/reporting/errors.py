@@ -183,3 +183,45 @@ class StaleAnalysisError(BlockedOperationError):
             source="cache",
             details=details,
         )
+
+
+class IncompleteAnalysisError(BlockedOperationError):
+    """Raised when analysis is incomplete, failed, or contains recorded errors."""
+
+    def __init__(
+        self,
+        message: str = (
+            "Repository analysis is incomplete; run 'context-forge analyze' to complete analysis"
+        ),
+        *,
+        path: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            code="INCOMPLETE_ANALYSIS",
+            path=path,
+            source="analyzer",
+            details=details,
+        )
+
+
+class IndeterminateFreshnessError(BlockedOperationError):
+    """Raised when repository analysis freshness cannot be determined reliably."""
+
+    def __init__(
+        self,
+        message: str = (
+            "Repository analysis freshness is indeterminate; reanalysis is required"
+        ),
+        *,
+        path: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            code="INDETERMINATE_FRESHNESS",
+            path=path,
+            source="storage",
+            details=details,
+        )
