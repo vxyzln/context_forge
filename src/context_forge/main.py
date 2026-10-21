@@ -27,6 +27,11 @@ from context_forge.query.impact import (
     DEFAULT_IMPACT_MAX_DEPTH,
     find_impact,
 )
+from context_forge.query.locator import (
+    DEFAULT_EXCERPT_MAX_LINES,
+    get_source_evidence,
+    locate_and_get_evidence,
+)
 from context_forge.query.project import ProjectQuery
 from context_forge.reporting import (
     ContextForgeError,
@@ -183,6 +188,30 @@ def create_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("."),
         help="Repository root path.",
+    )
+    memory_symbol_parser.add_argument(
+        "--file",
+        dest="file_path",
+        default=None,
+        help="Filter symbol by file path.",
+    )
+    memory_symbol_parser.add_argument(
+        "--type",
+        dest="symbol_type",
+        default=None,
+        help="Filter symbol by type/kind (e.g., class, function, method).",
+    )
+    memory_symbol_parser.add_argument(
+        "--excerpt",
+        action="store_true",
+        default=False,
+        help="Include bounded source evidence excerpt from current source file.",
+    )
+    memory_symbol_parser.add_argument(
+        "--max-lines",
+        type=int,
+        default=DEFAULT_EXCERPT_MAX_LINES,
+        help="Maximum lines for source excerpt (default: 50).",
     )
     _add_output_format_argument(memory_symbol_parser)
 
@@ -367,6 +396,47 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _add_output_format_argument(preflight_parser)
 
+    locate_parser = subparsers.add_parser(
+        "locate",
+        help="Locate repository symbols precisely with optional source evidence.",
+    )
+    locate_parser.add_argument(
+        "symbol_name",
+        help="Symbol name or qualified name to locate.",
+    )
+    locate_parser.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        type=Path,
+        help="Repository root path (default: current directory).",
+    )
+    locate_parser.add_argument(
+        "--file",
+        dest="file_path",
+        default=None,
+        help="Filter symbol by file path.",
+    )
+    locate_parser.add_argument(
+        "--type",
+        dest="symbol_type",
+        default=None,
+        help="Filter symbol by type/kind (e.g., class, function, method).",
+    )
+    locate_parser.add_argument(
+        "--excerpt",
+        action="store_true",
+        default=False,
+        help="Include bounded source evidence excerpt from current source file.",
+    )
+    locate_parser.add_argument(
+        "--max-lines",
+        type=int,
+        default=DEFAULT_EXCERPT_MAX_LINES,
+        help="Maximum lines for source excerpt (default: 50).",
+    )
+    _add_output_format_argument(locate_parser)
+
     return parser
 
 
@@ -388,6 +458,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "impact",
         "health",
         "preflight",
+        "locate",
         "-h",
         "--help",
     }:
@@ -936,6 +1007,10 @@ def run_memory_symbol(
     symbol_name: str,
     path: Path,
     output_format: str = "text",
+    file_path: str | None = None,
+    symbol_type: str | None = None,
+    excerpt: bool = False,
+    max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
 ) -> None:
     normalized_name = symbol_name.strip()
     if not normalized_name:
@@ -954,6 +1029,32 @@ def run_memory_symbol(
 
     files_by_id = {file.id: file for file in project.files}
 
+    # Apply file filter if specified
+    if file_path is not None:
+        raw_fp = file_path.strip().replace("\\", "/").removeprefix("./")
+        if project.root_path is not None:
+            as_p = Path(raw_fp)
+            if as_p.is_absolute():
+                try:
+                    raw_fp = as_p.relative_to(project.root_path).as_posix()
+                except ValueError:
+                    pass
+        is_basename = "/" not in raw_fp
+        symbols = [
+            s
+            for s in symbols
+            if s.file_id in files_by_id
+            and (
+                files_by_id[s.file_id].path.as_posix() == raw_fp
+                or (is_basename and files_by_id[s.file_id].name == raw_fp)
+            )
+        ]
+
+    # Apply symbol type filter if specified
+    if symbol_type is not None:
+        target_kind = symbol_type.strip().lower()
+        symbols = [s for s in symbols if s.kind.lower() == target_kind]
+
     symbols = sorted(
         symbols,
         key=lambda symbol: (
@@ -963,29 +1064,35 @@ def run_memory_symbol(
         ),
     )
 
+    evidence_dict = None
+    if excerpt and symbols:
+        evidence = get_source_evidence(project, symbols[0], max_lines=max_lines)
+        evidence_dict = evidence.to_dict()
+
     if output_format == "json":
-        _emit_json(
-            {
-                "matches": [
-                    {
-                        "end_line": int(symbol.end_line),
-                        "kind": getattr(symbol.kind, "value", symbol.kind),
-                        "name": symbol.name,
-                        "path": (
-                            str(files_by_id[symbol.file_id].path)
-                            if symbol.file_id in files_by_id
-                            else None
-                        ),
-                        "qualified_name": (symbol.qualified_name or symbol.name),
-                        "signature": symbol.signature,
-                        "start_line": int(symbol.start_line),
-                    }
-                    for symbol in symbols
-                ],
-                "query": normalized_name,
-                "repository": str(root),
-            }
-        )
+        payload: dict[str, Any] = {
+            "matches": [
+                {
+                    "end_line": int(symbol.end_line),
+                    "kind": getattr(symbol.kind, "value", symbol.kind),
+                    "name": symbol.name,
+                    "path": (
+                        str(files_by_id[symbol.file_id].path)
+                        if symbol.file_id in files_by_id
+                        else None
+                    ),
+                    "qualified_name": (symbol.qualified_name or symbol.name),
+                    "signature": symbol.signature,
+                    "start_line": int(symbol.start_line),
+                }
+                for symbol in symbols
+            ],
+            "query": normalized_name,
+            "repository": str(root),
+        }
+        if excerpt:
+            payload["excerpt"] = evidence_dict
+        _emit_json(payload)
         return
 
     print(f"Repository: {root}")
@@ -1009,6 +1116,96 @@ def run_memory_symbol(
 
         if symbol.signature:
             print(f"  Signature: {symbol.signature}")
+
+        if excerpt and evidence_dict is not None and symbol == symbols[0]:
+            print(
+                f"  Source excerpt (lines {evidence_dict['start_line']}-{evidence_dict['end_line']}):"
+            )
+            for line in evidence_dict["content"].splitlines():
+                print(f"    {line}")
+            if evidence_dict.get("is_truncated"):
+                print(f"    [Truncated to {evidence_dict['total_lines']} lines]")
+            if evidence_dict.get("status") == "stale_location":
+                print(f"    Warning: {evidence_dict['message']}")
+
+
+def run_locate(
+    symbol_name: str,
+    path: Path,
+    output_format: str = "text",
+    file_path: str | None = None,
+    symbol_type: str | None = None,
+    excerpt: bool = False,
+    max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
+) -> None:
+    root = resolve_project_path(path)
+    project, _ = load_fresh_project(root)
+
+    resolution, evidence = locate_and_get_evidence(
+        project,
+        symbol_name,
+        file_path=file_path,
+        symbol_type=symbol_type,
+        max_lines=max_lines,
+    )
+
+    if output_format == "json":
+        payload = {
+            "schema_version": 1,
+            "repository": str(root),
+            "query": symbol_name,
+            "status": resolution.status,
+            "target": resolution.target.to_dict()
+            if resolution.target is not None
+            else None,
+            "candidates": [c.to_dict() for c in resolution.candidates],
+            "excerpt": evidence.to_dict()
+            if (excerpt and evidence is not None)
+            else None,
+            "outcome": resolution.outcome.to_dict(),
+        }
+        _emit_json(payload)
+        if not resolution.is_resolved:
+            raise SystemExit(1)
+        return
+
+    print(f"Repository: {root}")
+    print(f"Symbol query: {symbol_name}")
+    print(f"Status: {resolution.status.upper()}")
+
+    if resolution.is_resolved and resolution.target is not None:
+        t = resolution.target
+        print(f"Target: [{t.kind}] {t.qualified_name or t.name}")
+        print(f"  File: {t.path}")
+        print(f"  Lines: {t.start_line}-{t.end_line}")
+        if t.signature:
+            print(f"  Signature: {t.signature}")
+
+        if excerpt:
+            print()
+            if evidence is not None and evidence.is_success:
+                print(
+                    f"Source excerpt ({evidence.path}:{evidence.start_line}-{evidence.end_line}):"
+                )
+                for line in evidence.content.splitlines():
+                    print(f"  {line}")
+                if evidence.is_truncated:
+                    print(f"  [Truncated: showing {evidence.total_lines} lines]")
+                if evidence.status == "stale_location":
+                    print(f"  Warning: {evidence.message}")
+            elif evidence is not None:
+                print(f"Source excerpt unavailable: {evidence.message}")
+    elif resolution.is_ambiguous:
+        print(f"Message: {resolution.message}")
+        print("Candidates:")
+        for c in resolution.candidates:
+            print(
+                f"  - [{c.kind}] {c.qualified_name or c.name} ({c.path}:{c.start_line}-{c.end_line})"
+            )
+        raise SystemExit(1)
+    else:
+        print(f"Message: {resolution.message}")
+        raise SystemExit(1)
 
 
 def _find_memory_symbols(query: ProjectQuery, name: str):
@@ -2077,10 +2274,14 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             if args.format == "json"
             else run_memory_file(args.file_path, args.path)
         ),
-        ("memory", "symbol"): lambda: (
-            run_memory_symbol(args.symbol_name, args.path, args.format)
-            if args.format == "json"
-            else run_memory_symbol(args.symbol_name, args.path)
+        ("memory", "symbol"): lambda: run_memory_symbol(
+            args.symbol_name,
+            args.path,
+            args.format,
+            getattr(args, "file_path", None),
+            getattr(args, "symbol_type", None),
+            getattr(args, "excerpt", False),
+            getattr(args, "max_lines", DEFAULT_EXCERPT_MAX_LINES),
         ),
         ("memory", "references"): lambda: (
             run_memory_references(
@@ -2139,6 +2340,15 @@ def _dispatch_command(args: argparse.Namespace) -> None:
         "preflight": lambda: run_preflight(
             args.path,
             args.format,
+        ),
+        "locate": lambda: run_locate(
+            args.symbol_name,
+            args.path,
+            args.format,
+            getattr(args, "file_path", None),
+            getattr(args, "symbol_type", None),
+            getattr(args, "excerpt", False),
+            getattr(args, "max_lines", DEFAULT_EXCERPT_MAX_LINES),
         ),
     }
 

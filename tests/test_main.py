@@ -771,6 +771,7 @@ def test_main_rejects_invalid_arguments_before_dispatch(
         (["architecture", "."], "run_architecture"),
         (["impact", "Calculator", "."], "run_impact"),
         (["health", "."], "run_health"),
+        (["locate", "Calculator", "."], "run_locate"),
     ],
 )
 def test_command_dispatch_reports_execution_errors(
@@ -1694,6 +1695,7 @@ def test_output_format_defaults_to_text() -> None:
         ["memory", "relationships", "src/calculator.py"],
         ["memory", "dependencies", "src/calculator.py"],
         ["diagnostics"],
+        ["locate", "Calculator"],
     ]
 
     for command in commands:
@@ -1718,6 +1720,7 @@ def test_output_format_accepts_json() -> None:
         ["memory", "relationships", "src/calculator.py"],
         ["memory", "dependencies", "src/calculator.py"],
         ["diagnostics"],
+        ["locate", "Calculator"],
     ]
 
     for command in commands:
@@ -4364,3 +4367,376 @@ def test_preflight_command_read_only_invariance(
 
     capsys.readouterr()
     assert not db_file.exists(), "Preflight must not create .context_forge.db"
+
+
+def test_parse_locate_command() -> None:
+    from context_forge.main import parse_args
+
+    args = parse_args(["locate", "Calculator"])
+    assert args.command == "locate"
+    assert args.symbol_name == "Calculator"
+    assert args.path == Path(".")
+    assert args.file_path is None
+    assert args.symbol_type is None
+    assert args.excerpt is False
+    assert args.max_lines == 50
+
+    args = parse_args(
+        [
+            "locate",
+            "calculate",
+            "/tmp/project",
+            "--file",
+            "src/calc.py",
+            "--type",
+            "method",
+            "--excerpt",
+            "--max-lines",
+            "20",
+        ]
+    )
+    assert args.command == "locate"
+    assert args.symbol_name == "calculate"
+    assert args.path == Path("/tmp/project")
+    assert args.file_path == "src/calc.py"
+    assert args.symbol_type == "method"
+    assert args.excerpt is True
+    assert args.max_lines == 20
+
+
+def test_locate_command_unique_match_text_and_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calc_path = tmp_path / "src" / "calc.py"
+    calc_path.parent.mkdir(parents=True, exist_ok=True)
+    calc_path.write_text("class Calculator:\n    pass\n", encoding="utf-8")
+
+    file_id = UUID(int=1)
+    file_one = type("File", (), {"id": file_id, "path": Path("src/calc.py")})()
+    symbol_one = type(
+        "Symbol",
+        (),
+        {
+            "id": UUID(int=10),
+            "file_id": file_id,
+            "name": "Calculator",
+            "qualified_name": "calc.Calculator",
+            "kind": "class",
+            "start_line": 1,
+            "end_line": 2,
+            "signature": "class Calculator:",
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "id": UUID(int=100),
+            "root_path": tmp_path.resolve(),
+            "files": [file_one],
+            "symbols": [symbol_one],
+            "relationships": [],
+        },
+    )()
+    metadata = type("Metadata", (), {})()
+
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch.object(
+            sys, "argv", ["context-forge", "locate", "Calculator", str(tmp_path)]
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert "Status: RESOLVED" in captured.out
+    assert "Target: [class] calc.Calculator" in captured.out
+    assert "File: src/calc.py" in captured.out
+    assert "Lines: 1-2" in captured.out
+
+    # JSON output
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "locate",
+                "Calculator",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+    ):
+        main()
+
+    captured_json = capsys.readouterr()
+    data = json.loads(captured_json.out)
+    assert data["schema_version"] == 1
+    assert data["status"] == "resolved"
+    assert data["target"]["name"] == "Calculator"
+    assert data["target"]["path"] == "src/calc.py"
+    assert data["outcome"]["is_success"] is True
+
+
+def test_locate_command_with_excerpt(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calc_path = tmp_path / "src" / "calc.py"
+    calc_path.parent.mkdir(parents=True, exist_ok=True)
+    calc_path.write_text(
+        "class Calculator:\n    def add(self, x, y):\n        return x + y\n",
+        encoding="utf-8",
+    )
+
+    file_id = UUID(int=1)
+    file_one = type("File", (), {"id": file_id, "path": Path("src/calc.py")})()
+    symbol_one = type(
+        "Symbol",
+        (),
+        {
+            "id": UUID(int=10),
+            "file_id": file_id,
+            "name": "Calculator",
+            "qualified_name": "calc.Calculator",
+            "kind": "class",
+            "start_line": 1,
+            "end_line": 3,
+            "signature": "class Calculator:",
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "id": UUID(int=100),
+            "root_path": tmp_path.resolve(),
+            "files": [file_one],
+            "symbols": [symbol_one],
+            "relationships": [],
+        },
+    )()
+    metadata = type("Metadata", (), {})()
+
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "locate", "Calculator", str(tmp_path), "--excerpt"],
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert "Source excerpt (src/calc.py:1-3):" in captured.out
+    assert "class Calculator:" in captured.out
+    assert "def add(self, x, y):" in captured.out
+
+    # JSON format with excerpt
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "locate",
+                "Calculator",
+                str(tmp_path),
+                "--excerpt",
+                "--format",
+                "json",
+            ],
+        ),
+    ):
+        main()
+
+    captured_json = capsys.readouterr()
+    data = json.loads(captured_json.out)
+    assert data["excerpt"] is not None
+    assert data["excerpt"]["is_success"] is True
+    assert "class Calculator:" in data["excerpt"]["content"]
+
+
+def test_locate_command_ambiguous_exit_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    file_1 = type("File", (), {"id": UUID(int=1), "path": Path("src/one.py")})()
+    file_2 = type("File", (), {"id": UUID(int=2), "path": Path("src/two.py")})()
+    sym_1 = type(
+        "Symbol",
+        (),
+        {
+            "id": UUID(int=10),
+            "file_id": file_1.id,
+            "name": "render",
+            "qualified_name": "one.render",
+            "kind": "function",
+            "start_line": 1,
+            "end_line": 2,
+            "signature": "def render():",
+        },
+    )()
+    sym_2 = type(
+        "Symbol",
+        (),
+        {
+            "id": UUID(int=20),
+            "file_id": file_2.id,
+            "name": "render",
+            "qualified_name": "two.render",
+            "kind": "function",
+            "start_line": 1,
+            "end_line": 2,
+            "signature": "def render():",
+        },
+    )()
+    project = type(
+        "Project",
+        (),
+        {
+            "id": UUID(int=100),
+            "root_path": tmp_path.resolve(),
+            "files": [file_1, file_2],
+            "symbols": [sym_1, sym_2],
+            "relationships": [],
+        },
+    )()
+    metadata = type("Metadata", (), {})()
+
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch.object(sys, "argv", ["context-forge", "locate", "render", str(tmp_path)]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Status: AMBIGUOUS" in captured.out
+    assert "Candidates:" in captured.out
+    assert "one.render" in captured.out
+    assert "two.render" in captured.out
+
+
+def test_locate_command_not_found_exit_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {
+            "id": UUID(int=100),
+            "root_path": tmp_path.resolve(),
+            "files": [],
+            "symbols": [],
+            "relationships": [],
+        },
+    )()
+    metadata = type("Metadata", (), {})()
+
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch.object(
+            sys, "argv", ["context-forge", "locate", "UnknownSymbol", str(tmp_path)]
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Status: NOT_FOUND" in captured.out
+    assert "Symbol 'UnknownSymbol' not found" in captured.out
+
+
+def test_memory_symbol_with_filters_and_excerpt(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    view_path = tmp_path / "src" / "view.py"
+    view_path.parent.mkdir(parents=True, exist_ok=True)
+    view_path.write_text(
+        "class View:\n    def display(self):\n        pass\n", encoding="utf-8"
+    )
+
+    file_id = UUID(int=1)
+    file_one = type("File", (), {"id": file_id, "path": Path("src/view.py")})()
+    symbol_one = type(
+        "Symbol",
+        (),
+        {
+            "id": UUID(int=10),
+            "file_id": file_id,
+            "name": "display",
+            "qualified_name": "view.View.display",
+            "kind": "method",
+            "start_line": 2,
+            "end_line": 3,
+            "signature": "def display(self):",
+        },
+    )()
+
+    project = type(
+        "Project",
+        (),
+        {
+            "id": UUID(int=100),
+            "root_path": tmp_path.resolve(),
+            "files": [file_one],
+            "symbols": [symbol_one],
+            "relationships": [],
+        },
+    )()
+    metadata = type("Metadata", (), {})()
+
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "memory",
+                "symbol",
+                "display",
+                str(tmp_path),
+                "--file",
+                "src/view.py",
+                "--type",
+                "method",
+                "--excerpt",
+            ],
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert "Symbol: display" in captured.out
+    assert "- [method] view.View.display" in captured.out
+    assert "Path: src/view.py" in captured.out
+    assert "Source excerpt (lines 2-3):" in captured.out
+    assert "def display(self):" in captured.out
