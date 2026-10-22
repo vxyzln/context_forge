@@ -87,9 +87,9 @@ def inspect_pre_change(
     all_limitations: list[str] = []
 
     repo_path = Path(repository_path).expanduser()
-    norm_repo_str = str(
-        repo_path.resolve() if repo_path.exists() else repo_path
-    ).replace("\\", "/")
+    if repo_path.exists():
+        repo_path = repo_path.resolve()
+    norm_repo_str = str(repo_path).replace("\\", "/")
 
     query_str = target.strip() if isinstance(target, str) else str(target)
     is_query_empty = not bool(query_str)

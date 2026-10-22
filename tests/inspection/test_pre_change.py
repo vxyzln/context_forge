@@ -574,3 +574,17 @@ def test_indeterminate_freshness_blocked(tmp_path: Path) -> None:
     assert result.is_blocked is True
     assert result.outcome.status == OperationStatus.BLOCKED
     assert any(d.code == "SCHEMA_VERSION_MISMATCH" for d in result.diagnostics)
+
+
+def test_relative_repository_path_inspection(
+    sample_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(sample_repo)
+    result = inspect_pre_change(Path("."), "AuthService")
+    assert result.is_success is True
+    assert result.git_context is not None
+    assert result.git_context.is_git_repository is True
+    assert not any(
+        "Git repository root path must be absolute" in d.message
+        for d in result.diagnostics
+    )
