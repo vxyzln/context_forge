@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from context_forge.graph.builder import RelationshipBuilder
@@ -13,6 +15,9 @@ from context_forge.pipeline.freshness import (
     WorkflowFreshness,
     WorkflowFreshnessGuard,
 )
+
+if TYPE_CHECKING:
+    from context_forge.inspection.models import PreChangeInspectionResult
 from context_forge.query.architecture import (
     ArchitectureInventory,
     ContainmentEdge,
@@ -1307,3 +1312,35 @@ class ProjectQuery:
             timeout_seconds=timeout_seconds,
         )
         return map_changed_paths(self.project, status_result)
+
+    def inspect_pre_change(
+        self,
+        target: str,
+        *,
+        file_path: str | Path | None = None,
+        symbol_type: str | None = None,
+        direction: str = "both",
+        max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+        max_excerpt_lines: int = DEFAULT_EXCERPT_MAX_LINES,
+        include_git: bool = True,
+        guard: WorkflowFreshnessGuard | None = None,
+        git_repository: Any | None = None,
+        metadata: RepositoryCacheMetadata | None = None,
+    ) -> PreChangeInspectionResult:
+        from context_forge.inspection import inspect_pre_change
+
+        root = self.project.root_path or Path(".")
+        return inspect_pre_change(
+            repository_path=root,
+            target=target,
+            file_path=file_path,
+            symbol_type=symbol_type,
+            direction=direction,
+            max_depth=max_depth,
+            max_excerpt_lines=max_excerpt_lines,
+            include_git=include_git,
+            guard=guard,
+            git_repository=git_repository,
+            project=self.project,
+            metadata=metadata,
+        )
