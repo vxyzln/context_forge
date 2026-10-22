@@ -27,8 +27,6 @@ class SelectionEvaluationResult:
 
 
 class SelectionEvaluator:
-    """Evaluate intelligent context selection against repository ground truth."""
-
     def evaluate(
         self,
         project: Project,

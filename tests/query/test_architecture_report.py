@@ -323,8 +323,6 @@ def test_report_is_deterministic_regardless_of_inventory_order() -> None:
     first_report = build_architecture_report(first_inventory, "/repo")
     second_report = build_architecture_report(second_inventory, "/repo")
 
-    # The fixture entities have different IDs, but report output uses paths,
-    # not those IDs, for module and dependency identity.
     assert first_report["counts"] == second_report["counts"]
     assert first_report["modules"] == second_report["modules"]
     assert first_report["dependencies"] == second_report["dependencies"]
@@ -339,9 +337,6 @@ def test_report_detects_multiple_independent_cycles() -> None:
     mod_e = _file("e.py")
     mod_f = _file("f.py")
 
-    # Cycle 1: a <-> b
-    # Cycle 2: c <-> d
-    # Disconnected path: e -> f
     inventory = _inventory(
         files=(mod_a, mod_b, mod_c, mod_d, mod_e, mod_f),
         dependencies=(
@@ -387,7 +382,6 @@ def test_report_detects_overlapping_cycles_as_strongly_connected_component() -> 
     mod_c = _file("c.py")
     mod_d = _file("d.py")
 
-    # a -> b -> c -> a and b <-> d (shared node b between cycles)
     inventory = _inventory(
         files=(mod_a, mod_b, mod_c, mod_d),
         dependencies=(
@@ -572,13 +566,12 @@ def test_report_limitations_document_scc_semantics_and_conventional_packages() -
 
 
 def test_architecture_report_outcome_contract() -> None:
-    # 1. Clean report -> SUCCESS
+
     clean_report = build_architecture_report(_inventory(), ".")
     assert "outcome" in clean_report
     assert clean_report["outcome"]["status"] == "success"
     assert clean_report["outcome"]["is_success"] is True
 
-    # 2. Incomplete / errors -> PARTIAL with error diagnostics
     error_inv = _inventory(
         analysis_status="partial",
         errors=("Syntax error in foo.py",),

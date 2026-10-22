@@ -1,5 +1,3 @@
-"""Audit and inspect configuration layers, precedence, and validity."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -28,9 +26,7 @@ from context_forge.reporting.contract import (
 
 @dataclass(frozen=True)
 class ConfigurationAuditResult:
-    """Detailed audit of configuration sources, validity, resolved values, and precedence."""
-
-    status: str  # "valid", "invalid", "default"
+    status: str
     resolved: ConfigurationDefaults | None
     precedence: dict[str, str] = field(default_factory=dict)
     project_config_path: Path | None = None
@@ -43,13 +39,11 @@ class ConfigurationAuditResult:
 
     @property
     def is_valid(self) -> bool:
-        """True if configuration is syntactically and semantically valid."""
         return self.status != "invalid" and not any(
             d.severity == DiagnosticSeverity.BLOCKER for d in self.diagnostics
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize configuration audit to a deterministic dictionary."""
         resolved_payload = (
             {
                 "database_path": self.resolved.database_path,
@@ -88,12 +82,6 @@ def audit_configuration(
     *,
     global_config_path_override: Path | None = None,
 ) -> ConfigurationAuditResult:
-    """Inspect and validate global and project configuration without mutating files.
-
-    Preserves configuration precedence (project > global > default) and reports
-    diagnostics for malformed files, invalid structures, or invalid values.
-    Missing optional configuration files are treated as normal default sources.
-    """
     p_path: Path | None = None
     if project_root is not None:
         p_path = project_config_path(project_root)
@@ -111,7 +99,6 @@ def audit_configuration(
     g_config = ProjectConfiguration()
     has_blocker = False
 
-    # 1. Audit project configuration
     if p_path is not None and p_path.exists():
         p_present = True
         if not p_path.is_file():
@@ -159,7 +146,6 @@ def audit_configuration(
                     )
                 )
 
-    # 2. Audit global configuration
     if g_path.exists():
         g_present = True
         if not g_path.is_file():
@@ -207,7 +193,6 @@ def audit_configuration(
                     )
                 )
 
-    # 3. Determine status and precedence resolution
     if has_blocker:
         status = "invalid"
         resolved = None
@@ -239,6 +224,7 @@ def audit_configuration(
         }
         status = "valid" if (p_present or g_present) else "default"
 
+    # TODO: add validation for custom configuration schema extensions
     return ConfigurationAuditResult(
         status=status,
         resolved=resolved,

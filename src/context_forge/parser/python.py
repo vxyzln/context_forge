@@ -139,6 +139,8 @@ class SymbolVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._visit_function(node)
 
+    # TODO: consider supporting pattern matching syntax nodes in python 3.10+
+
     def _visit_function(
         self,
         node: ast.FunctionDef | ast.AsyncFunctionDef,

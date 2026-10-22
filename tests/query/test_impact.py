@@ -20,7 +20,6 @@ from context_forge.query import (
 
 
 def create_impact_test_project(tmp_path: Path) -> Project:
-    """Create a structured test project with files, symbols, and relationships."""
     project = Project(
         name="Impact Test Project",
         root_path=tmp_path,
@@ -42,7 +41,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
     project.add_directory(src_dir)
     project.add_directory(pkg_dir)
 
-    # Files
     init_file = File(
         project_id=project.id,
         path=Path("src/pkg/__init__.py"),
@@ -85,8 +83,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
     project.add_file(client_file)
     project.add_file(standalone_file)
 
-    # Symbols
-    # In models.py: User (class), BaseEntity (class)
     base_entity = Symbol(
         file_id=models_file.id,
         name="BaseEntity",
@@ -103,7 +99,7 @@ def create_impact_test_project(tmp_path: Path) -> Project:
         start_line=12,
         end_line=30,
     )
-    # Ambiguous symbol: Config in models.py and Config in client.py
+
     config_models = Symbol(
         file_id=models_file.id,
         name="Config",
@@ -121,7 +117,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
         end_line=15,
     )
 
-    # In service.py: UserService (class), get_user (function), User (nested helper class to test ambiguity)
     user_service = Symbol(
         file_id=service_file.id,
         name="UserService",
@@ -157,8 +152,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
     project.add_symbol(get_user)
     project.add_symbol(user_service_method)
 
-    # Relationships
-    # 1. Containment (DEFINES & CONTAINS) - should be excluded from impact by default
     project.add_relationship(
         Relationship(
             source_id=models_file.id,
@@ -176,7 +169,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
         )
     )
 
-    # 2. File-to-file IMPORTS: service.py imports models.py
     project.add_relationship(
         Relationship(
             source_id=service_file.id,
@@ -186,7 +178,7 @@ def create_impact_test_project(tmp_path: Path) -> Project:
             metadata={"imported_module": "pkg.models", "line_number": "2"},
         )
     )
-    # client.py imports service.py
+
     project.add_relationship(
         Relationship(
             source_id=client_file.id,
@@ -197,7 +189,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
         )
     )
 
-    # 3. Symbol-to-symbol INHERITS: User inherits BaseEntity
     project.add_relationship(
         Relationship(
             source_id=user_model.id,
@@ -207,7 +198,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
         )
     )
 
-    # 4. Symbol-to-symbol REFERENCES: UserService references User
     project.add_relationship(
         Relationship(
             source_id=user_service.id,
@@ -218,7 +208,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
         )
     )
 
-    # 5. Symbol-to-symbol CALLS: UserService.fetch calls get_user
     project.add_relationship(
         Relationship(
             source_id=user_service_method.id,
@@ -228,8 +217,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
         )
     )
 
-    # 6. Second distinct relationship between same entities (multiple edges preserved):
-    # UserService also references User on line 25
     project.add_relationship(
         Relationship(
             source_id=user_service.id,
@@ -241,11 +228,6 @@ def create_impact_test_project(tmp_path: Path) -> Project:
     )
 
     return project
-
-
-# ==============================================================================
-# TARGET RESOLUTION TESTS
-# ==============================================================================
 
 
 def test_resolve_file_by_exact_relative_path(tmp_path: Path) -> None:
@@ -304,7 +286,7 @@ def test_resolve_file_missing(tmp_path: Path) -> None:
 
 def test_resolve_module_target(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # pkg.models resolves to src/pkg/models.py
+
     res = resolve_impact_target(project, "pkg.models")
 
     assert res.is_resolved
@@ -368,7 +350,6 @@ def test_resolve_ambiguous_symbol(tmp_path: Path) -> None:
     assert res.target is None
     assert len(res.candidates) == 2
 
-    # Verify deterministic ordering: sorted by (path, start_line, name, qualified_name, id.hex)
     assert res.candidates[0].path == "src/pkg/client.py"
     assert res.candidates[0].start_line == 5
     assert res.candidates[0].qualified_name == "pkg.client.Config"
@@ -454,14 +435,9 @@ def test_resolve_rejects_invalid_type(tmp_path: Path) -> None:
         resolve_impact_target(project, 123)  # type: ignore[arg-type]
 
 
-# ==============================================================================
-# DIRECT IMPACT ANALYSIS TESTS
-# ==============================================================================
-
-
 def test_find_direct_impact_file_incoming(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # models.py is imported by service.py
+
     result = find_direct_impact(
         project,
         "src/pkg/models.py",
@@ -488,7 +464,7 @@ def test_find_direct_impact_file_incoming(tmp_path: Path) -> None:
 
 def test_find_direct_impact_file_outgoing(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # service.py imports models.py
+
     result = find_direct_impact(
         project,
         "src/pkg/service.py",
@@ -510,7 +486,7 @@ def test_find_direct_impact_file_outgoing(tmp_path: Path) -> None:
 
 def test_find_direct_impact_file_both_directions(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # service.py: incoming from client.py (client imports service), outgoing to models.py (service imports models)
+
     result = find_direct_impact(
         project,
         "src/pkg/service.py",
@@ -522,7 +498,6 @@ def test_find_direct_impact_file_both_directions(tmp_path: Path) -> None:
     assert result.total == 2
     assert len(result.items) == 2
 
-    # Deterministic sort: incoming first, then outgoing
     incoming = result.items[0]
     assert incoming.direction == "incoming"
     assert incoming.related_name == "client.py"
@@ -534,10 +509,7 @@ def test_find_direct_impact_file_both_directions(tmp_path: Path) -> None:
 
 def test_find_direct_impact_symbol_both_directions(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # User model:
-    # Incoming: UserService references User (2 edges)
-    # Outgoing: User inherits BaseEntity (1 edge)
-    # DEFINES from models.py should be excluded by default
+
     result = find_direct_impact(
         project,
         "User",
@@ -550,7 +522,6 @@ def test_find_direct_impact_symbol_both_directions(tmp_path: Path) -> None:
     assert result.total == 3
     assert len(result.items) == 3
 
-    # Check incoming (references from UserService)
     incoming_items = [it for it in result.items if it.direction == "incoming"]
     assert len(incoming_items) == 2
     for it in incoming_items:
@@ -559,11 +530,9 @@ def test_find_direct_impact_symbol_both_directions(tmp_path: Path) -> None:
         assert it.related_name == "UserService"
         assert it.related_path == "src/pkg/service.py"
 
-    # Distinct relationships: both references preserved with their unique metadata
     lines = {it.metadata.get("line") for it in incoming_items}
     assert lines == {"6", "25"}
 
-    # Check outgoing (inherits BaseEntity)
     outgoing_items = [it for it in result.items if it.direction == "outgoing"]
     assert len(outgoing_items) == 1
     assert outgoing_items[0].relationship_type == "inherits"
@@ -573,14 +542,12 @@ def test_find_direct_impact_symbol_both_directions(tmp_path: Path) -> None:
 
 def test_find_direct_impact_excludes_containment_by_default(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # models_file DEFINES User, UserService CONTAINS UserService.fetch
-    # When querying models.py, DEFINES should not appear
+
     res_file = find_direct_impact(project, "src/pkg/models.py", direction="both")
     for it in res_file.items:
         assert it.relationship_type != "defines"
         assert it.relationship_type != "contains"
 
-    # When querying UserService, CONTAINS should not appear
     res_sym = find_direct_impact(project, "UserService", direction="both")
     for it in res_sym.items:
         assert it.relationship_type != "defines"
@@ -602,7 +569,7 @@ def test_find_direct_impact_includes_containment_when_requested(tmp_path: Path) 
 
 def test_find_direct_impact_relationship_filtering(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # Query User with relationship_types={"inherits"}
+
     result = find_direct_impact(
         project,
         "User",
@@ -616,15 +583,15 @@ def test_find_direct_impact_relationship_filtering(tmp_path: Path) -> None:
 
 def test_find_direct_impact_target_type_filtering(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # Add a relationship from file to symbol
+
     project.add_relationship(
         Relationship(
-            source_id=project.files[2].id,  # service_file
-            target_id=project.symbols[1].id,  # user_model
+            source_id=project.files[2].id,
+            target_id=project.symbols[1].id,
             relationship_type=RelationshipType.REFERENCES,
         )
     )
-    # Query User with target_types={"file"} vs target_types={"symbol"}
+
     res_files = find_direct_impact(
         project,
         "User",
@@ -646,7 +613,7 @@ def test_find_direct_impact_target_type_filtering(tmp_path: Path) -> None:
 
 def test_find_direct_impact_empty_results_on_valid_target(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # standalone.py has no relationships
+
     result = find_direct_impact(
         project,
         "src/pkg/standalone.py",
@@ -692,7 +659,7 @@ def test_find_direct_impact_on_ambiguous_target(tmp_path: Path) -> None:
 
 def test_find_direct_impact_limit_and_truncation(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # User has 3 direct relationships (2 incoming references, 1 outgoing inherits)
+
     result = find_direct_impact(
         project,
         "User",
@@ -728,7 +695,6 @@ def test_find_direct_impact_determinism_across_permutations(tmp_path: Path) -> N
 
     res1 = find_direct_impact(project, "User", direction="both")
 
-    # Reverse symbols and relationships in-place
     project.symbols.reverse()
     project.relationships.reverse()
 
@@ -760,11 +726,9 @@ def test_find_direct_impact_repository_isolation(tmp_path: Path) -> None:
     )
     project_b.add_file(secret_file)
 
-    # Project A cannot resolve entities from Project B
     res_a = resolve_impact_target(project_a, "secret.py")
     assert res_a.is_not_found
 
-    # Direct entity from B passed to A returns not found
     res_cross = resolve_impact_target(project_a, secret_file)
     assert res_cross.is_not_found
 
@@ -803,13 +767,11 @@ def test_project_query_impact_methods(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
     query = ProjectQuery(project)
 
-    # resolve_target
     res = query.resolve_target("User")
     assert res.is_resolved
     assert res.target is not None
     assert res.target.name == "User"
 
-    # find_direct_impact
     impact_res = query.find_direct_impact("User", direction="both")
     assert impact_res.status == "resolved"
     assert impact_res.total == 3
@@ -818,7 +780,6 @@ def test_project_query_impact_methods(tmp_path: Path) -> None:
 def test_find_impact_multi_hop_traversal(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
 
-    # models.py is imported by service.py (depth 1), which is imported by client.py (depth 2)
     result = find_impact(
         project,
         "src/pkg/models.py",
@@ -837,7 +798,6 @@ def test_find_impact_multi_hop_traversal(tmp_path: Path) -> None:
     service_item = next(it for it in result.items if it.related_name == "service.py")
     client_item = next(it for it in result.items if it.related_name == "client.py")
 
-    # Direct item verification
     assert service_item.depth == 1
     assert service_item.classification == "direct"
     assert len(service_item.path) == 1
@@ -849,7 +809,6 @@ def test_find_impact_multi_hop_traversal(tmp_path: Path) -> None:
     assert step0.from_id == result.target.id
     assert step0.to_id == service_item.related_id
 
-    # Indirect item verification
     assert client_item.depth == 2
     assert client_item.classification == "indirect"
     assert len(client_item.path) == 2
@@ -866,7 +825,6 @@ def test_find_impact_multi_hop_traversal(tmp_path: Path) -> None:
 def test_find_impact_depth_limiting(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
 
-    # max_depth=1 should only return direct impact
     res_d1 = find_impact(
         project,
         "src/pkg/models.py",
@@ -882,7 +840,6 @@ def test_find_impact_depth_limiting(tmp_path: Path) -> None:
         "Traversal depth was limited to 1 hop(s)" in lim for lim in res_d1.limitations
     )
 
-    # max_depth=2 discovers both
     res_d2 = find_impact(
         project,
         "src/pkg/models.py",
@@ -908,6 +865,7 @@ def test_find_impact_invalid_depth_rejection(tmp_path: Path) -> None:
         find_impact(project, "src/pkg/models.py", max_depth=True)  # type: ignore[arg-type]
 
 
+# TODO: expand test cases for circular dependency graph traversal depths
 def test_find_impact_cycle_and_self_loop_termination(tmp_path: Path) -> None:
     project = Project(name="Cycle Test", root_path=tmp_path, analysis_status="analyzed")
     f_a = File(project_id=project.id, path=Path("a.py"), name="a.py", extension=".py")
@@ -917,7 +875,6 @@ def test_find_impact_cycle_and_self_loop_termination(tmp_path: Path) -> None:
     project.add_file(f_b)
     project.add_file(f_c)
 
-    # Cycle: a -> b -> c -> a
     project.add_relationship(
         Relationship(
             source_id=f_a.id,
@@ -939,7 +896,7 @@ def test_find_impact_cycle_and_self_loop_termination(tmp_path: Path) -> None:
             relationship_type=RelationshipType.IMPORTS,
         )
     )
-    # Self-loop: a -> a
+
     project.add_relationship(
         Relationship(
             source_id=f_a.id,
@@ -954,7 +911,7 @@ def test_find_impact_cycle_and_self_loop_termination(tmp_path: Path) -> None:
     assert result.total == 2
     names = [it.related_name for it in result.items]
     assert names == ["b.py", "c.py"]
-    # Check deduplication: each node appears once
+
     assert len(set(names)) == len(names)
     assert result.depth_reached == 2
 
@@ -969,7 +926,6 @@ def test_find_impact_shortest_path_selection(tmp_path: Path) -> None:
     for f in (f_t, f_a, f_b, f_c, f_d):
         project.add_file(f)
 
-    # Long path: t -> a -> b -> d (depth 3)
     project.add_relationship(
         Relationship(
             source_id=f_t.id,
@@ -992,7 +948,6 @@ def test_find_impact_shortest_path_selection(tmp_path: Path) -> None:
         )
     )
 
-    # Short path: t -> c -> d (depth 2)
     project.add_relationship(
         Relationship(
             source_id=f_t.id,
@@ -1026,7 +981,6 @@ def test_find_impact_deterministic_tie_breaking(tmp_path: Path) -> None:
     for f in (f_t, f_a, f_b, f_d):
         project.add_file(f)
 
-    # Path 1: t -> a -> d (depth 2)
     project.add_relationship(
         Relationship(
             source_id=f_t.id,
@@ -1042,7 +996,6 @@ def test_find_impact_deterministic_tie_breaking(tmp_path: Path) -> None:
         )
     )
 
-    # Path 2: t -> b -> d (depth 2)
     project.add_relationship(
         Relationship(
             source_id=f_t.id,
@@ -1060,7 +1013,6 @@ def test_find_impact_deterministic_tie_breaking(tmp_path: Path) -> None:
 
     res1 = find_impact(project, "t.py", direction="outgoing", max_depth=3)
 
-    # Reverse relationships in project
     project.relationships.reverse()
     project.files.reverse()
     res2 = find_impact(project, "t.py", direction="outgoing", max_depth=3)
@@ -1095,7 +1047,6 @@ def test_find_impact_pagination_and_truncation(tmp_path: Path) -> None:
 def test_find_impact_relationship_and_target_filters(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
 
-    # Filter to only 'references' - models.py has no incoming 'references', only 'imports'
     res_filtered = find_impact(
         project,
         "src/pkg/models.py",
@@ -1105,7 +1056,6 @@ def test_find_impact_relationship_and_target_filters(tmp_path: Path) -> None:
     )
     assert res_filtered.total == 0
 
-    # Target types filter: only 'symbol'
     res_sym_only = find_impact(
         project,
         "src/pkg/models.py",
@@ -1168,14 +1118,12 @@ def test_find_transitive_impact_alias() -> None:
 def test_impact_result_outcome_contract(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
 
-    # 1. Clean resolved outcome -> SUCCESS
     res = find_impact(project, "User", direction="incoming")
     assert res.outcome.is_success
     assert res.outcome.status == "success"
     assert "outcome" in res.to_dict()
     assert res.to_dict()["outcome"]["status"] == "success"
 
-    # 2. Ambiguous target -> BLOCKED with blocker diagnostic
     amb_res = find_impact(project, "Config", direction="both")
     assert amb_res.outcome.is_blocked
     assert amb_res.outcome.status == "blocked"
@@ -1183,14 +1131,12 @@ def test_impact_result_outcome_contract(tmp_path: Path) -> None:
     assert amb_res.outcome.blockers[0].code == "TARGET_AMBIGUOUS"
     assert len(amb_res.candidates) == 2
 
-    # 3. Not found target -> BLOCKED with blocker diagnostic
     nf_res = find_impact(project, "nonexistent_symbol_123", direction="both")
     assert nf_res.outcome.is_blocked
     assert nf_res.outcome.status == "blocked"
     assert nf_res.outcome.has_blockers
     assert nf_res.outcome.blockers[0].code == "TARGET_NOT_FOUND"
 
-    # 4. Truncated result -> PARTIAL with warning diagnostic
     trunc_res = find_impact(project, "User", direction="both", limit=1)
     assert trunc_res.outcome.is_partial
     assert trunc_res.outcome.status == "partial"

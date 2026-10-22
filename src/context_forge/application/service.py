@@ -12,8 +12,6 @@ from context_forge.task import (
 
 
 class RepositoryContextService:
-    """Orchestrates deterministic repository context retrieval for development tasks."""
-
     def __init__(
         self,
         engine: ContextEngine,

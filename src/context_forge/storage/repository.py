@@ -120,6 +120,7 @@ class ProjectRepository:
             (repository_key,),
         )
 
+        # TODO: evaluate batch insertion performance for repositories with >10k files
         for fingerprint in fingerprints:
             connection.execute(
                 """

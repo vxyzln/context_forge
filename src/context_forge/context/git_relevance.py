@@ -6,8 +6,6 @@ from context_forge.models.file import File
 
 
 class GitRelevance:
-    """Calculate deterministic Git-history relevance for project files."""
-
     def __init__(self, commits: list[GitCommit]) -> None:
         self._change_counts = self._build_change_counts(commits)
 

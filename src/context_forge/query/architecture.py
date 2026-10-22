@@ -10,8 +10,6 @@ from context_forge.models.symbol import Symbol
 
 @dataclass(frozen=True)
 class ContainmentEdge:
-    """Represent a structural parent-child relationship."""
-
     source_type: str
     source_id: UUID
     target_type: str
@@ -20,8 +18,6 @@ class ContainmentEdge:
 
 @dataclass(frozen=True)
 class UnresolvedImport:
-    """Represent an import reference that could not be resolved against repository files."""
-
     file_id: UUID
     module_name: str
     imported_name: str | None = None
@@ -36,8 +32,6 @@ class UnresolvedImport:
 
 @dataclass(frozen=True)
 class StructuralIntegrityFinding:
-    """Represent an issue with repository structural references."""
-
     finding_type: str
     message: str
     source_type: str | None = None
@@ -60,8 +54,6 @@ StructuralFinding = StructuralIntegrityFinding
 
 @dataclass(frozen=True)
 class ArchitectureInventory:
-    """Provide a deterministic view of the analyzed repository structure."""
-
     project_id: UUID
     analysis_status: str
     errors: tuple[str, ...]

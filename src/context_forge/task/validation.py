@@ -17,8 +17,6 @@ class TaskValidation:
 
 
 class TaskValidator:
-    """Validate whether a structured task is sufficiently clear."""
-
     def validate(
         self,
         interpretation: TaskInterpretation,

@@ -1,13 +1,3 @@
-"""Workflow Freshness Guard for Context Forge inspection workflows.
-
-Implements Context Forge v0.12 Section 4:
-- Part 1: Establish the Workflow Freshness Assessment distinguishing current, stale,
-  incomplete, and indeterminate evidence states using actual repository evidence.
-- Part 2: Integrate the Freshness Guard into inspection workflows, enforcing read-only
-  guarantees, coordinating refresh policies, and preventing silent treatment of stale
-  or incomplete analysis as current.
-"""
-
 from __future__ import annotations
 
 import sqlite3
@@ -38,8 +28,6 @@ from context_forge.storage.repository import ProjectRepository
 
 
 class FreshnessState(str, Enum):
-    """Semantic states for repository workflow analysis freshness."""
-
     CURRENT = "current"
     STALE = "stale"
     INCOMPLETE = "incomplete"
@@ -47,29 +35,23 @@ class FreshnessState(str, Enum):
 
     @property
     def is_current(self) -> bool:
-        """True only if analysis matches current source state and completed sufficiently."""
         return self is FreshnessState.CURRENT
 
     @property
     def is_stale(self) -> bool:
-        """True if source files have been modified, added, deleted, or invalidated."""
         return self is FreshnessState.STALE
 
     @property
     def is_incomplete(self) -> bool:
-        """True if analysis is partially completed, failed, or contains blocking errors."""
         return self is FreshnessState.INCOMPLETE
 
     @property
     def is_indeterminate(self) -> bool:
-        """True if evidence is insufficient to verify freshness."""
         return self is FreshnessState.INDETERMINATE
 
 
 @dataclass(frozen=True)
 class WorkflowFreshness:
-    """Comprehensive freshness assessment result for inspection workflows."""
-
     state: FreshnessState
     reason: str
     changes: FileChangeSet | None = None
@@ -112,7 +94,6 @@ class WorkflowFreshness:
         return self.state == FreshnessState.INDETERMINATE
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize freshness assessment to a deterministic dictionary."""
         changes_dict: dict[str, Any] | None = None
         if self.changes is not None:
             changes_dict = {
@@ -138,7 +119,6 @@ class WorkflowFreshness:
 
 
 def _compute_current_fingerprints(root_path: Path) -> dict[Path, FileFingerprint]:
-    """Discover current repository files on disk and compute their fingerprints."""
     scanned_project = RepositoryScanner(root_path).scan()
     fingerprints: dict[Path, FileFingerprint] = {}
     for file in scanned_project.files:
@@ -149,8 +129,6 @@ def _compute_current_fingerprints(root_path: Path) -> dict[Path, FileFingerprint
 
 
 class WorkflowFreshnessGuard:
-    """Evaluates and guards repository analysis freshness for inspection workflows."""
-
     def __init__(
         self,
         root_path: Path | str,
@@ -173,13 +151,11 @@ class WorkflowFreshnessGuard:
         cached_fingerprints: dict[Path, FileFingerprint] | None = None,
         current_fingerprints: dict[Path, FileFingerprint] | None = None,
     ) -> WorkflowFreshness:
-        """Perform a strictly read-only freshness assessment using actual evidence."""
         root = self.root_path
         db_path = self.database_path or (root / ".context_forge.db")
         identity = RepositoryIdentity(root)
         repo = self.repository or ProjectRepository(Database(db_path))
 
-        # 1. Database and persisted analysis check
         loaded_project: Project | None = project
         loaded_metadata: RepositoryCacheMetadata | None = metadata
 
@@ -282,7 +258,6 @@ class WorkflowFreshnessGuard:
                     ),
                 )
 
-        # 2. Schema and analyzer version validation
         if loaded_metadata.cache_schema_version != CACHE_SCHEMA_VERSION:
             diag = DiagnosticItem.blocker(
                 f"Cache schema version mismatch (found {loaded_metadata.cache_schema_version}, "
@@ -327,7 +302,6 @@ class WorkflowFreshnessGuard:
                 ),
             )
 
-        # 3. Load cached file fingerprints
         cf_map = cached_fingerprints
         if cf_map is None:
             try:
@@ -384,7 +358,6 @@ class WorkflowFreshnessGuard:
                 ),
             )
 
-        # 4. Discover current working tree fingerprints
         cur_fingerprints = current_fingerprints
         if cur_fingerprints is None:
             try:
@@ -409,11 +382,9 @@ class WorkflowFreshnessGuard:
                     ),
                 )
 
-        # 5. File change detection
         changes = detect_file_changes(cf_map, cur_fingerprints)
         has_file_changes = not changes.is_unchanged
 
-        # 6. Analysis completeness and error detection
         analysis_status = getattr(loaded_project, "analysis_status", "not_analyzed")
         raw_errors = getattr(loaded_project, "errors", [])
         analysis_errors = tuple(str(e) for e in raw_errors)
@@ -422,8 +393,6 @@ class WorkflowFreshnessGuard:
             or len(analysis_errors) > 0
         )
 
-        # 7. Deterministic precedence:
-        # Precedence 1: Known staleness (file changes)
         if has_file_changes:
             change_parts: list[str] = []
             if changes.modified:
@@ -471,7 +440,6 @@ class WorkflowFreshnessGuard:
                 metadata=loaded_metadata,
             )
 
-        # Precedence 2: Known incompleteness
         if is_incomplete:
             if analysis_status == "failed":
                 reason = "analysis_failed"
@@ -522,7 +490,6 @@ class WorkflowFreshnessGuard:
                 metadata=loaded_metadata,
             )
 
-        # Precedence 3: Current
         return WorkflowFreshness(
             state=FreshnessState.CURRENT,
             reason="fresh",
@@ -537,22 +504,18 @@ class WorkflowFreshnessGuard:
         )
 
     def guard(self, *, allow_refresh: bool = False) -> WorkflowFreshness:
-        """Guard inspection workflow, assessing freshness and executing refresh only if authorized."""
         assessment = self.assess_freshness()
 
-        # If already current, no refresh needed
         if assessment.is_current:
             return assessment
 
-        # If read-only mode, strictly preserve read-only guarantees
         if not allow_refresh:
             return assessment
 
-        # Indeterminate states cannot be verified and must not trigger automatic refresh
+        # Keep indeterminate states from triggering automatic refresh.
         if assessment.is_indeterminate:
             return assessment
 
-        # Avoid repeated refresh inside the same guard instance
         if self._refresh_attempted:
             return assessment
 
@@ -592,7 +555,6 @@ class WorkflowFreshnessGuard:
                 metadata=assessment.metadata,
             )
 
-        # Re-assess freshness using the actual updated evidence from storage
         post_assessment = self.assess_freshness()
         return WorkflowFreshness(
             state=post_assessment.state,

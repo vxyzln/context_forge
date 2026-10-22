@@ -151,7 +151,6 @@ class ProjectQuery:
         )
 
     def get_direct_dependencies(self, file_id: UUID) -> list[File]:
-        """Return files directly imported by the specified file."""
         dependency_ids = {
             relationship.target_id
             for relationship in self.get_outgoing_relationships(
@@ -166,7 +165,6 @@ class ProjectQuery:
         )
 
     def get_direct_dependents(self, file_id: UUID) -> list[File]:
-        """Return files that directly import the specified file."""
         dependent_ids = {
             relationship.source_id
             for relationship in self.get_incoming_relationships(
@@ -476,11 +474,6 @@ class ProjectQuery:
         self,
         entity_types: set[str] | None = None,
     ) -> ArchitectureInventory:
-        """Return a deterministic inventory of repository structure.
-
-        Supported entity types are ``directory``, ``file``, and ``symbol``.
-        Containment and dependency relationships are returned separately.
-        """
         supported_types = {"directory", "file", "symbol"}
 
         if entity_types is not None:
@@ -1093,7 +1086,6 @@ class ProjectQuery:
         self,
         target: str | File | Symbol,
     ) -> TargetResolution:
-        """Resolve a file path, symbol name, or entity instance to a TargetResolution."""
         return resolve_impact_target(self.project, target)
 
     def find_direct_impact(
@@ -1104,7 +1096,6 @@ class ProjectQuery:
         target_types: set[str] | None = None,
         limit: int | None = None,
     ) -> DirectImpactResult:
-        """Identify directly connected entities and evidence for a target."""
         return find_direct_impact(
             self.project,
             target,
@@ -1123,7 +1114,6 @@ class ProjectQuery:
         max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
         limit: int | None = DEFAULT_IMPACT_LIMIT,
     ) -> ImpactResult:
-        """Identify directly and indirectly connected entities and evidence paths."""
         return find_impact(
             self.project,
             target,
@@ -1143,7 +1133,6 @@ class ProjectQuery:
         max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
         limit: int | None = DEFAULT_IMPACT_LIMIT,
     ) -> ImpactResult:
-        """Alias for find_impact."""
         return self.find_impact(
             target,
             direction=direction,
@@ -1159,7 +1148,6 @@ class ProjectQuery:
         freshness: CacheFreshness | None = None,
         limit: int = DEFAULT_HEALTH_LIMIT,
     ) -> dict[str, Any]:
-        """Build a deterministic, evidence-based repository health report."""
         return build_health_report(
             project=self.project,
             repository_path=self.project.root_path,
@@ -1176,7 +1164,6 @@ class ProjectQuery:
         symbol_type: str | None = None,
         qualified_name: str | None = None,
     ) -> TargetResolution:
-        """Resolve a repository symbol using supported identifiers and filters."""
         return locate_symbol(
             self.project,
             name,
@@ -1192,7 +1179,6 @@ class ProjectQuery:
         root_path: Path | None = None,
         max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
     ) -> SourceExcerpt:
-        """Read bounded source evidence from the working tree for a resolved target."""
         return get_source_evidence(
             self.project,
             target,
@@ -1210,7 +1196,6 @@ class ProjectQuery:
         root_path: Path | None = None,
         max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
     ) -> tuple[TargetResolution, SourceExcerpt | None]:
-        """Resolve a symbol and retrieve bounded source evidence if uniquely resolved."""
         return locate_and_get_evidence(
             self.project,
             name,
@@ -1228,7 +1213,6 @@ class ProjectQuery:
         current_fingerprints: dict[Path, FileFingerprint] | None = None,
         database_path: Path | None = None,
     ) -> WorkflowFreshness:
-        """Assess repository analysis freshness for this project."""
         root = self.project.root_path
         if root is None:
             diag = DiagnosticItem.blocker(

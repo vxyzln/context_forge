@@ -48,8 +48,6 @@ class RegressionResult:
 
 
 class RegressionEvaluator:
-    """Aggregate evaluation results and detect metric regressions."""
-
     def summarize(
         self,
         results: tuple[EvaluationCaseResult, ...],

@@ -4,8 +4,6 @@ from context_forge.context.priority import ContextPriority
 
 
 class ContextPriorityOrdering:
-    """Order context units deterministically by calculated prioroity"""
-
     def __init__(
         self,
         prioritizer: DeterministicPrioritizer,

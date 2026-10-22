@@ -159,8 +159,6 @@ class RelationshipBuilder:
         symbols_by_qualified_name: dict[str, list[Symbol]] = {}
 
         for symbol in project.symbols:
-            # Import symbols represent bindings, not definitions. They
-            # should not win local symbol resolution.
             if symbol.kind != "import":
                 symbols_by_file_and_name.setdefault(
                     (symbol.file_id, symbol.name),

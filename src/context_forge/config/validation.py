@@ -8,7 +8,7 @@ from context_forge.config.project import (
 
 
 class ConfigurationValidationError(ValueError):
-    """Raised when project configuration has an invalid structure or value."""
+    pass
 
 
 def validate_project_config(

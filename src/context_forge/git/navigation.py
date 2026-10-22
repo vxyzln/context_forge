@@ -387,6 +387,7 @@ def map_changed_paths(
 
     assert git_root is not None
 
+    # TODO: support mapping submodule paths when repository contains submodules
     try:
         project_root.relative_to(git_root.resolve())
         roots_compatible = True

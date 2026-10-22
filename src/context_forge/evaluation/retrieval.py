@@ -12,8 +12,6 @@ from context_forge.task.repository_grounding import RepositoryGrounding
 
 @dataclass(frozen=True)
 class RetrievalEvaluationResult:
-    """Evaluation result for retrieval and repository task grounding."""
-
     retrieval: MetricResult
     grounding: MetricResult
 
@@ -46,8 +44,6 @@ class RetrievalEvaluationResult:
 
 
 class RetrievalEvaluator:
-    """Evaluate repository retrieval and task-grounding quality."""
-
     def evaluate(
         self,
         project: Project,

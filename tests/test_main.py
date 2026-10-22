@@ -3001,12 +3001,10 @@ def test_architecture_command_prints_text_report(
     (pkg / "app.py").write_text("import pkg.lib\n", encoding="utf-8")
     (pkg / "lib.py").write_text("VALUE = 42\n", encoding="utf-8")
 
-    # Analyze first
     with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
         main()
     capsys.readouterr()
 
-    # Run architecture command
     with patch.object(sys, "argv", ["context-forge", "architecture", str(tmp_path)]):
         main()
 
@@ -3134,7 +3132,6 @@ def test_architecture_command_fails_on_stale_repository(
         main()
     capsys.readouterr()
 
-    # Modify file to make cache stale
     source.write_text("x = 2\n", encoding="utf-8")
 
     with (
@@ -3159,12 +3156,10 @@ def test_architecture_command_handles_schema_v1_database_without_crashing(
     source = tmp_path / "app.py"
     source.write_text("import sys\n", encoding="utf-8")
 
-    # Analyze project
     with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
         main()
     capsys.readouterr()
 
-    # Drop imports table and set cache_schema_version = 1 to simulate pre-v0.11 database
     db_path = tmp_path / ".context_forge.db"
     conn = sqlite3.connect(db_path)
     conn.execute("DROP TABLE IF EXISTS imports")
@@ -3172,7 +3167,6 @@ def test_architecture_command_handles_schema_v1_database_without_crashing(
     conn.commit()
     conn.close()
 
-    # status must not crash with "no such table: imports"
     with patch.object(
         sys,
         "argv",
@@ -3186,7 +3180,6 @@ def test_architecture_command_handles_schema_v1_database_without_crashing(
     assert "cache_schema_version" not in status_data
     assert "analyzer_version" not in status_data
 
-    # cache command must also report stale with schema_version_mismatch
     with patch.object(
         sys,
         "argv",
@@ -3199,7 +3192,6 @@ def test_architecture_command_handles_schema_v1_database_without_crashing(
     assert cache_data["cache_status"] == "stale"
     assert cache_data["freshness_reason"] == "schema_version_mismatch"
 
-    # architecture must report stale analysis rather than crashing with "no such table: imports"
     with (
         patch.object(
             sys,
@@ -3217,12 +3209,10 @@ def test_architecture_command_handles_schema_v1_database_without_crashing(
         "Repository analysis is stale; run 'context-forge analyze" in arch_captured.err
     )
 
-    # Re-analyzing updates database schema cleanly
     with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
         main()
     capsys.readouterr()
 
-    # Now architecture succeeds
     with patch.object(sys, "argv", ["context-forge", "architecture", str(tmp_path)]):
         main()
     final_captured = capsys.readouterr()
@@ -3273,7 +3263,6 @@ def test_impact_command_text_output(
         main()
     capsys.readouterr()
 
-    # Query models.py
     with patch.object(
         sys,
         "argv",
@@ -3339,7 +3328,6 @@ def test_impact_command_missing_target(
         main()
     capsys.readouterr()
 
-    # Text format
     with patch.object(
         sys,
         "argv",
@@ -3352,7 +3340,6 @@ def test_impact_command_missing_target(
     assert "Status: Target not found." in captured.out
     assert "not found in repository" in captured.out
 
-    # JSON format
     with patch.object(
         sys,
         "argv",
@@ -3384,7 +3371,6 @@ def test_impact_command_ambiguous_target(
         main()
     capsys.readouterr()
 
-    # Text format
     with patch.object(
         sys,
         "argv",
@@ -3398,7 +3384,6 @@ def test_impact_command_ambiguous_target(
     assert "Candidates (2):" in captured.out
     assert "[class] Config" in captured.out
 
-    # JSON format
     with patch.object(
         sys,
         "argv",
@@ -3424,7 +3409,6 @@ def test_impact_command_direction_and_type_filters(
         main()
     capsys.readouterr()
 
-    # Incoming only for b.py
     with patch.object(
         sys,
         "argv",
@@ -3447,7 +3431,6 @@ def test_impact_command_direction_and_type_filters(
     assert data["items"][0]["direction"] == "incoming"
     assert data["items"][0]["related_name"] == "a.py"
 
-    # Outgoing only for b.py
     with patch.object(
         sys,
         "argv",
@@ -3470,7 +3453,6 @@ def test_impact_command_direction_and_type_filters(
     assert data_out["items"][0]["direction"] == "outgoing"
     assert data_out["items"][0]["related_name"] == "c.py"
 
-    # Type filter: references (none exist, only imports)
     with patch.object(
         sys,
         "argv",
@@ -3527,7 +3509,6 @@ def test_impact_command_stale_cache_aborts(
         main()
     capsys.readouterr()
 
-    # Modify file so cache is stale
     target_file.write_text("x = 2\n", encoding="utf-8")
 
     with (
@@ -3620,7 +3601,6 @@ def test_impact_command_transitive_depth_json(
         main()
     capsys.readouterr()
 
-    # Test with --max-depth alias in json mode
     with patch.object(
         sys,
         "argv",
@@ -3757,10 +3737,8 @@ def test_health_command_stale_cache_does_not_abort(
         main()
     capsys.readouterr()
 
-    # Modify file so cache is stale
     target_file.write_text("x = 2\n", encoding="utf-8")
 
-    # health should succeed and report stale cache, rather than aborting
     with patch.object(
         sys,
         "argv",
@@ -3815,7 +3793,7 @@ def test_health_command_empty_analyzed_repository(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # Analyze an empty directory
+
     with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
         main()
     capsys.readouterr()
@@ -3902,7 +3880,7 @@ def test_unanalyzed_repository_read_only_invariance(
     assert (
         "No persisted analysis found; run 'context-forge analyze' first" in captured.err
     )
-    # Invariant: running read-only query commands must not create .context_forge.db
+
     assert not db_file.exists()
     assert list(tmp_path.iterdir()) == []
 
@@ -3950,7 +3928,6 @@ def test_freshness_policy_matrix(
         main()
     capsys.readouterr()
 
-    # Make analysis stale by modifying file
     target_file.write_text("x = 2\n", encoding="utf-8")
 
     if must_abort:
@@ -4001,18 +3978,16 @@ def test_deterministic_json_output_across_queries(
         main()
     capsys.readouterr()
 
-    # First invocation
     with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
         main()
     first_out = capsys.readouterr().out
 
-    # Second invocation
     with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
         main()
     second_out = capsys.readouterr().out
 
     assert first_out == second_out
-    # Must be valid json
+
     parsed = json.loads(first_out)
     assert isinstance(parsed, dict)
 
@@ -4026,7 +4001,6 @@ def test_output_channel_separation_on_handled_error(
         main()
     capsys.readouterr()
 
-    # 1. Invalid limit error
     with (
         patch.object(
             sys,
@@ -4042,7 +4016,6 @@ def test_output_channel_separation_on_handled_error(
     assert captured.out == ""
     assert captured.err == "Error: Report limit must be a positive integer\n"
 
-    # 2. Non-existent path error
     missing_dir = tmp_path / "non_existent"
     with (
         patch.object(
@@ -4070,7 +4043,6 @@ def test_cli_output_omits_internal_version_metadata(
         main()
     capsys.readouterr()
 
-    # Text output checks
     for cmd in (["status"], ["cache"], ["health"]):
         with patch.object(sys, "argv", ["context-forge", *cmd, str(tmp_path)]):
             main()
@@ -4078,7 +4050,6 @@ def test_cli_output_omits_internal_version_metadata(
         assert "Cache schema version" not in captured.out
         assert "Analyzer version" not in captured.out
 
-    # JSON output checks
     for cmd in (["status"], ["cache"]):
         with patch.object(
             sys, "argv", ["context-forge", *cmd, str(tmp_path), "--format", "json"]
@@ -4110,7 +4081,6 @@ def test_internal_cache_version_mismatch_preserves_freshness_invalidation(
 
     db_path = tmp_path / ".context_forge.db"
 
-    # 1. Test analyzer version mismatch
     conn = sqlite3.connect(db_path)
     conn.execute("UPDATE repository_cache SET analyzer_version = 'old_analyzer'")
     conn.commit()
@@ -4126,7 +4096,6 @@ def test_internal_cache_version_mismatch_preserves_freshness_invalidation(
     assert cache_data["cache_status"] == "stale"
     assert cache_data["freshness_reason"] == "analyzer_version_mismatch"
 
-    # 2. Test schema version mismatch
     conn = sqlite3.connect(db_path)
     conn.execute("UPDATE repository_cache SET cache_schema_version = 0")
     conn.commit()
@@ -4183,7 +4152,6 @@ def test_cli_json_mode_reports_blocked_operation_on_stale_analysis(
         main()
     capsys.readouterr()
 
-    # Make cache stale
     source_file.write_text("x = 2\n", encoding="utf-8")
 
     with (
@@ -4459,7 +4427,6 @@ def test_locate_command_unique_match_text_and_json(
     assert "File: src/calc.py" in captured.out
     assert "Lines: 1-2" in captured.out
 
-    # JSON output
     with (
         patch(
             "context_forge.main.load_fresh_project", return_value=(project, metadata)
@@ -4546,7 +4513,6 @@ def test_locate_command_with_excerpt(
     assert "class Calculator:" in captured.out
     assert "def add(self, x, y):" in captured.out
 
-    # JSON format with excerpt
     with (
         patch(
             "context_forge.main.load_fresh_project", return_value=(project, metadata)

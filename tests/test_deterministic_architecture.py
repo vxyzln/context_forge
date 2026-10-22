@@ -79,7 +79,6 @@ def test_deterministic_ranking_produces_stable_reproducible_tie_breaking() -> No
     result1 = ranker.rank([c1, c2], signals)
     result2 = ranker.rank([c2, c1], signals)
 
-    # Identical scores and signals must break ties deterministically
     assert [r.entity_id for r in result1] == [r.entity_id for r in result2]
 
 
@@ -122,12 +121,10 @@ def test_file_fingerprints_detect_modifications_offline(
     repo = ProjectRepository(Database(db_path))
     key = RepositoryIdentity(tmp_path).key
 
-    # Initially fresh
     fp1 = current_fingerprints(project)
     freshness1 = repo.check_cache_freshness(key, fp1)
     assert freshness1.is_fresh
 
-    # Modify file
     src_file.write_text("X = 2\n", encoding="utf-8")
     fp2 = current_fingerprints(project)
     freshness2 = repo.check_cache_freshness(key, fp2)
@@ -192,7 +189,6 @@ def test_context_package_contains_verifiable_repository_evidence(
     assert "facts" in unit
     assert "signals" in unit
 
-    # Evidence exists with descriptions
     facts = unit["facts"]
     assert any(len(f.get("evidence", [])) > 0 for f in facts)
     all_evidence = [ev for f in facts for ev in f.get("evidence", [])]

@@ -1473,7 +1473,6 @@ def test_save_analysis_rolls_back_all_writes_on_failure(
 
     original_project_name = project.name
 
-    # Seed an existing fingerprint that must survive a failed update.
     with database.connect() as connection:
         connection.execute(
             """
@@ -1495,8 +1494,6 @@ def test_save_analysis_rolls_back_all_writes_on_failure(
             ),
         )
 
-    # Preserve the original implementation so the fingerprint deletion
-    # happens before the injected failure.
     original_save_fingerprints = repository._save_file_fingerprints
 
     def fail_after_fingerprint_write(
@@ -1536,19 +1533,16 @@ def test_save_analysis_rolls_back_all_writes_on_failure(
             fingerprints=[],
         )
 
-    # Project data must remain unchanged in the database.
     saved_project = repository.load(project.id)
     assert saved_project is not None
     assert saved_project.name == original_project_name
 
-    # Cache metadata must also remain unchanged.
     saved_metadata = repository.load_cache_metadata(
         metadata.repository_key,
     )
     assert saved_metadata is not None
     assert saved_metadata.analyzer_version == "original"
 
-    # The fingerprint deleted during the failed transaction must be restored.
     with database.connect() as connection:
         fingerprint = connection.execute(
             """
@@ -1615,7 +1609,6 @@ def test_database_migration_adds_project_classification_columns(
 ) -> None:
     database_path = tmp_path / "context_forge.db"
 
-    # Simulate a database created before classification columns existed.
     with sqlite3.connect(database_path) as connection:
         connection.execute(
             """
@@ -1665,7 +1658,6 @@ def test_database_migration_adds_project_classification_columns(
             ),
         )
 
-    # Initialization must upgrade the existing database.
     database = Database(database_path)
     database.initialize()
 
@@ -1683,17 +1675,14 @@ def test_database_migration_adds_project_classification_columns(
     assert "languages" in columns
     assert "frameworks" in columns
 
-    # The migration must preserve the existing project.
     assert row is not None
     assert row["name"] == "Legacy Project"
     assert row["root_path"] == root_path
     assert row["analysis_status"] == "analyzed"
 
-    # Existing projects receive valid empty-list defaults.
     assert row["languages"] == "[]"
     assert row["frameworks"] == "[]"
 
-    # The migrated project must also load through the repository.
     repository = ProjectRepository(database)
     loaded = repository.load(project_id)
 
@@ -1949,18 +1938,15 @@ def test_project_repository_loads_older_database_without_imports_table(
     project.add_import(ImportReference(file_id=file_a.id, module_name="sys"))
     repository.save(project)
 
-    # Drop the imports table to simulate older schema
     with database.connect() as connection:
         connection.execute("DROP TABLE imports")
 
-    # Loading project must succeed without OperationalError
     loaded = repository.load(project.id)
     assert loaded is not None
     assert loaded.id == project.id
     assert len(loaded.files) == 1
     assert loaded.imports == []
 
-    # Invalidation must succeed without OperationalError
     repository.invalidate_cache(
         str(tmp_path),
         CacheInvalidation(

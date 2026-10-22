@@ -21,13 +21,11 @@ from context_forge.reporting.contract import DiagnosticSeverity, OperationStatus
 
 @pytest.fixture
 def sample_project(tmp_path: Path) -> Project:
-    """Create a sample project with multiple files and symbols for testing locator and excerpts."""
     project = Project(
         name="test_project",
         root_path=tmp_path.resolve(),
     )
 
-    # File 1: calculator.py
     file1_path = Path("src/calculator.py")
     file1_full = tmp_path / file1_path
     file1_full.parent.mkdir(parents=True, exist_ok=True)
@@ -100,7 +98,6 @@ def sample_project(tmp_path: Path) -> Project:
     project.add_symbol(sym_calc_mul)
     project.add_symbol(sym_compute)
 
-    # File 2: math_ops.py (with duplicate symbol name 'add')
     file2_path = Path("src/math_ops.py")
     file2_full = tmp_path / file2_path
     file2_full.parent.mkdir(parents=True, exist_ok=True)
@@ -143,11 +140,6 @@ def sample_project(tmp_path: Path) -> Project:
     return project
 
 
-# ==============================================================================
-# Part 1: Precise Symbol Lookup Tests
-# ==============================================================================
-
-
 def test_locate_symbol_unique_exact_name(sample_project: Project) -> None:
     resolution = locate_symbol(sample_project, "Calculator")
 
@@ -165,7 +157,7 @@ def test_locate_symbol_unique_exact_name(sample_project: Project) -> None:
 
 
 def test_locate_symbol_qualified_name(sample_project: Project) -> None:
-    # 'add' is ambiguous as a simple name, but unique as a qualified name
+
     res_qual = locate_symbol(sample_project, "calculator.Calculator.add")
 
     assert res_qual.is_resolved is True
@@ -195,7 +187,7 @@ def test_locate_symbol_explicit_qualified_name_argument(
 
 
 def test_locate_symbol_ambiguous_without_filter(sample_project: Project) -> None:
-    # 'add' exists in both calculator.py and math_ops.py
+
     resolution = locate_symbol(sample_project, "add")
 
     assert resolution.is_resolved is False
@@ -204,11 +196,9 @@ def test_locate_symbol_ambiguous_without_filter(sample_project: Project) -> None
     assert resolution.target is None
     assert len(resolution.candidates) == 2
 
-    # Candidates should be deterministically ordered
     paths = [c.path for c in resolution.candidates]
     assert paths == ["src/calculator.py", "src/math_ops.py"]
 
-    # Candidate details preserved
     assert resolution.candidates[0].name == "add"
     assert resolution.candidates[0].kind == "method"
     assert resolution.candidates[1].name == "add"
@@ -220,14 +210,13 @@ def test_locate_symbol_ambiguous_without_filter(sample_project: Project) -> None
 
 
 def test_locate_symbol_file_filter_disambiguates(sample_project: Project) -> None:
-    # Disambiguate using relative path
+
     res1 = locate_symbol(sample_project, "add", file_path="src/calculator.py")
     assert res1.is_resolved is True
     assert res1.target is not None
     assert res1.target.path == "src/calculator.py"
     assert res1.target.kind == "method"
 
-    # Disambiguate using basename
     res2 = locate_symbol(sample_project, "add", file_path="math_ops.py")
     assert res2.is_resolved is True
     assert res2.target is not None
@@ -236,7 +225,7 @@ def test_locate_symbol_file_filter_disambiguates(sample_project: Project) -> Non
 
 
 def test_locate_symbol_type_filter_disambiguates(sample_project: Project) -> None:
-    # Disambiguate using symbol type
+
     res_method = locate_symbol(sample_project, "add", symbol_type="method")
     assert res_method.is_resolved is True
     assert res_method.target is not None
@@ -262,12 +251,11 @@ def test_locate_symbol_combined_filters(sample_project: Project) -> None:
     assert resolution.target.name == "add"
     assert resolution.target.kind == "method"
 
-    # Contradictory filters produce not-found
     res_none = locate_symbol(
         sample_project,
         "add",
         file_path="src/calculator.py",
-        symbol_type="function",  # calculator only has 'add' as method
+        symbol_type="function",
     )
     assert res_none.is_not_found is True
     assert res_none.status == "not_found"
@@ -287,22 +275,19 @@ def test_locate_symbol_not_found(sample_project: Project) -> None:
 
 
 def test_locate_symbol_invalid_requests(sample_project: Project) -> None:
-    # 1. Empty symbol name
+
     res_empty = locate_symbol(sample_project, "   ")
     assert res_empty.status == "invalid"
     assert res_empty.is_invalid is True
     assert res_empty.is_resolved is False
     assert res_empty.outcome.is_success is False
 
-    # 2. Non-string name
     res_type = locate_symbol(sample_project, 123)  # type: ignore[arg-type]
     assert res_type.status == "invalid"
 
-    # 3. Empty file filter
     res_bad_file = locate_symbol(sample_project, "Calculator", file_path="   ")
     assert res_bad_file.status == "invalid"
 
-    # 4. Empty symbol type filter
     res_bad_type = locate_symbol(sample_project, "Calculator", symbol_type="  ")
     assert res_bad_type.status == "invalid"
 
@@ -316,11 +301,6 @@ def test_locate_symbol_preserves_stable_identity(sample_project: Project) -> Non
     assert resolution.target.start_line == original_sym.start_line
     assert resolution.target.end_line == original_sym.end_line
     assert resolution.target.signature == original_sym.signature
-
-
-# ==============================================================================
-# Part 2: Bounded Source Evidence Tests
-# ==============================================================================
 
 
 def test_get_source_evidence_successful_excerpt(sample_project: Project) -> None:
@@ -362,7 +342,7 @@ def test_get_source_evidence_truncation_boundary(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # Create a large symbol spanning 30 lines
+
     large_file = tmp_path / "src/large.py"
     lines = [f"def large_function():  # line {i}" for i in range(1, 31)]
     large_file.write_text("\n".join(lines), encoding="utf-8")
@@ -386,7 +366,6 @@ def test_get_source_evidence_truncation_boundary(
     )
     sample_project.add_symbol(sym_large)
 
-    # Request with max_lines=10
     evidence = get_source_evidence(sample_project, sym_large, max_lines=10)
 
     assert evidence.status == "success"
@@ -405,7 +384,6 @@ def test_get_source_evidence_missing_or_deleted_file(
     resolution = locate_symbol(sample_project, "Calculator")
     assert resolution.target is not None
 
-    # Delete the source file on disk
     (tmp_path / "src/calculator.py").unlink()
 
     evidence = get_source_evidence(sample_project, resolution.target)
@@ -444,7 +422,7 @@ def test_get_source_evidence_invalid_location(sample_project: Project) -> None:
         start_line=1,
         end_line=5,
     )
-    # Mutate to invalid negative line
+
     object.__setattr__(sym_invalid_start, "start_line", 0)
 
     evidence = get_source_evidence(sample_project, sym_invalid_start)
@@ -457,12 +435,11 @@ def test_get_source_evidence_location_out_of_range(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # Truncate file on disk so line numbers exceed file length
+
     (tmp_path / "src/calculator.py").write_text("x = 1\n", encoding="utf-8")
 
     resolution = locate_symbol(sample_project, "compute_total")
     assert resolution.target is not None
-    # compute_total was at line 11, now file only has 1 line
 
     evidence = get_source_evidence(sample_project, resolution.target)
 
@@ -476,7 +453,7 @@ def test_get_source_evidence_stale_location_detected(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # Overwrite calculator.py with different code at lines 1-9
+
     new_content = (
         "# Modified file without target class\n"
         "a = 10\n"
@@ -495,9 +472,8 @@ def test_get_source_evidence_stale_location_detected(
 
     evidence = get_source_evidence(sample_project, resolution.target)
 
-    # Excerpt was read, but reported as stale because Calculator is not in the text
     assert evidence.status == "stale_location"
-    assert evidence.is_success is True  # Content was read
+    assert evidence.is_success is True
     assert evidence.total_lines == 9
     assert any(
         "does not contain symbol 'Calculator'" in lim for lim in evidence.limitations
@@ -511,7 +487,7 @@ def test_get_source_evidence_never_uses_cached_source_text(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # Update file on disk with updated signature
+
     (tmp_path / "src/calculator.py").write_text(
         "class Calculator:\n    # UPDATED ON DISK\n    pass\n",
         encoding="utf-8",
@@ -526,19 +502,17 @@ def test_get_source_evidence_never_uses_cached_source_text(
 
 
 def test_locate_and_get_evidence_integrated_flow(sample_project: Project) -> None:
-    # 1. Unique symbol succeeds with evidence
+
     res1, ev1 = locate_and_get_evidence(sample_project, "Calculator")
     assert res1.is_resolved is True
     assert ev1 is not None
     assert ev1.status == "success"
     assert "class Calculator:" in ev1.content
 
-    # 2. Ambiguous symbol returns resolution without evidence
     res2, ev2 = locate_and_get_evidence(sample_project, "add")
     assert res2.is_ambiguous is True
     assert ev2 is None
 
-    # 3. Not found symbol returns not_found without evidence
     res3, ev3 = locate_and_get_evidence(sample_project, "missing")
     assert res3.is_not_found is True
     assert ev3 is None
@@ -547,25 +521,17 @@ def test_locate_and_get_evidence_integrated_flow(sample_project: Project) -> Non
 def test_project_query_locator_methods(sample_project: Project) -> None:
     query = ProjectQuery(sample_project)
 
-    # 1. locate_symbol on query
     res = query.locate_symbol("Calculator")
     assert res.is_resolved is True
     assert res.target is not None
 
-    # 2. get_source_evidence on query
     ev = query.get_source_evidence(res.target)
     assert ev.status == "success"
 
-    # 3. locate_and_get_evidence on query
     res_comb, ev_comb = query.locate_and_get_evidence("Calculator")
     assert res_comb.is_resolved is True
     assert ev_comb is not None
     assert ev_comb.status == "success"
-
-
-# ==============================================================================
-# Phase 2 Regression Tests: Path Containment and Security Boundary
-# ==============================================================================
 
 
 def test_get_source_evidence_rejects_parent_traversal(sample_project: Project) -> None:
@@ -683,7 +649,7 @@ def test_get_source_evidence_with_root_path_override(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # Overriding root_path to tmp_path / "src" should restrict boundary to src/
+
     src_dir = tmp_path / "src"
     target = ResolvedTarget(
         id=uuid4(),
@@ -700,11 +666,6 @@ def test_get_source_evidence_with_root_path_override(
     assert evidence.status == "path_outside_root"
     assert evidence.is_success is False
     assert evidence.outcome.status == OperationStatus.BLOCKED
-
-
-# ==============================================================================
-# Phase 3 Regression Tests: Precise Stale-Source Detection
-# ==============================================================================
 
 
 def test_stale_source_accepts_valid_class_and_method_definitions(
@@ -752,7 +713,7 @@ def test_stale_source_rejects_symbol_name_only_in_comment(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # Symbol name appears only in comment at start_line
+
     code = (
         "# class DataProcessor:\n"
         "# This comment mentions DataProcessor but is not a definition\n"
@@ -773,7 +734,7 @@ def test_stale_source_rejects_symbol_name_only_in_comment(
     evidence = get_source_evidence(sample_project, target)
 
     assert evidence.status == "stale_location"
-    assert evidence.is_success is True  # Content was still read
+    assert evidence.is_success is True
     assert evidence.total_lines == 3
     assert evidence.outcome.status == OperationStatus.PARTIAL
     assert evidence.outcome.diagnostics[0].code == "STALE_SOURCE_LOCATION"
@@ -814,11 +775,10 @@ def test_stale_source_detects_moved_or_removed_definition(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # The file had DataProcessor at line 1, but new lines were prepended so line 1 is unrelated
+
     code = "def unrelated_helper():\n    return 42\n\nclass DataProcessor:\n    pass\n"
     (tmp_path / "src" / "processor.py").write_text(code, encoding="utf-8")
 
-    # Stale metadata thinks DataProcessor is still at line 1
     target = ResolvedTarget(
         id=uuid4(),
         target_type="symbol",
@@ -855,7 +815,6 @@ def test_stale_source_accepts_decorated_and_multiline_definitions(
     )
     (tmp_path / "src" / "task.py").write_text(code, encoding="utf-8")
 
-    # Case 1: start_line recorded at decorator start (line 1)
     target_from_decorator = ResolvedTarget(
         id=uuid4(),
         target_type="symbol",
@@ -869,7 +828,6 @@ def test_stale_source_accepts_decorated_and_multiline_definitions(
     assert ev1.status == "success"
     assert ev1.is_success is True
 
-    # Case 2: start_line recorded at `def` line (line 6)
     target_from_def = ResolvedTarget(
         id=uuid4(),
         target_type="symbol",
@@ -888,7 +846,7 @@ def test_stale_source_constant_valid_and_stale(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # 1. Valid constant assignment and annotated assignment
+
     code = "MAX_RETRIES = 5\nDEFAULT_TIMEOUT: int = 30\n"
     (tmp_path / "src" / "constants.py").write_text(code, encoding="utf-8")
 
@@ -920,7 +878,6 @@ def test_stale_source_constant_valid_and_stale(
     assert ev2.is_success is True
     assert "DEFAULT_TIMEOUT: int = 30" in ev2.content
 
-    # 2. Stale constant: name in comment only
     (tmp_path / "src" / "constants.py").write_text(
         "# MAX_RETRIES = 5\nOTHER = 1\n",
         encoding="utf-8",
@@ -930,7 +887,6 @@ def test_stale_source_constant_valid_and_stale(
     assert ev_stale_comment.outcome.status == OperationStatus.PARTIAL
     assert ev_stale_comment.outcome.diagnostics[0].code == "STALE_SOURCE_LOCATION"
 
-    # 3. Stale constant: name in expression only
     (tmp_path / "src" / "constants.py").write_text(
         "if x == MAX_RETRIES:\n    pass\n",
         encoding="utf-8",
@@ -944,7 +900,7 @@ def test_stale_source_variable_valid_and_stale(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # 1. Valid variable definitions
+
     code = "active_count = 0\nuser_cache: dict[str, str] = {}\n"
     (tmp_path / "src" / "state.py").write_text(code, encoding="utf-8")
 
@@ -975,7 +931,6 @@ def test_stale_source_variable_valid_and_stale(
     assert ev2.status == "success"
     assert ev2.is_success is True
 
-    # 2. Stale variable: name in comment only
     (tmp_path / "src" / "state.py").write_text(
         "# active_count = 0\nx = 1\n",
         encoding="utf-8",
@@ -984,7 +939,6 @@ def test_stale_source_variable_valid_and_stale(
     assert ev_stale.status == "stale_location"
     assert ev_stale.outcome.status == OperationStatus.PARTIAL
 
-    # 3. Stale variable: name in string literal only
     (tmp_path / "src" / "state.py").write_text(
         "log_msg = 'active_count is reset'\n",
         encoding="utf-8",
@@ -997,7 +951,7 @@ def test_stale_source_import_valid_and_stale(
     sample_project: Project,
     tmp_path: Path,
 ) -> None:
-    # 1. Valid imports: simple import, from-import, aliased import, multiline import
+
     code = (
         "import os\n"
         "from pathlib import Path\n"
@@ -1009,7 +963,6 @@ def test_stale_source_import_valid_and_stale(
     )
     (tmp_path / "src" / "imports.py").write_text(code, encoding="utf-8")
 
-    # simple import
     t_os = ResolvedTarget(
         id=uuid4(),
         target_type="symbol",
@@ -1021,7 +974,6 @@ def test_stale_source_import_valid_and_stale(
     )
     assert get_source_evidence(sample_project, t_os).status == "success"
 
-    # from-import
     t_path = ResolvedTarget(
         id=uuid4(),
         target_type="symbol",
@@ -1033,7 +985,6 @@ def test_stale_source_import_valid_and_stale(
     )
     assert get_source_evidence(sample_project, t_path).status == "success"
 
-    # aliased import
     t_alias = ResolvedTarget(
         id=uuid4(),
         target_type="symbol",
@@ -1045,7 +996,6 @@ def test_stale_source_import_valid_and_stale(
     )
     assert get_source_evidence(sample_project, t_alias).status == "success"
 
-    # multiline import member
     t_multi = ResolvedTarget(
         id=uuid4(),
         target_type="symbol",
@@ -1057,7 +1007,6 @@ def test_stale_source_import_valid_and_stale(
     )
     assert get_source_evidence(sample_project, t_multi).status == "success"
 
-    # 2. Stale import: comment only
     (tmp_path / "src" / "imports.py").write_text(
         "# from pathlib import Path\nx = 1\n",
         encoding="utf-8",
@@ -1066,7 +1015,6 @@ def test_stale_source_import_valid_and_stale(
     assert ev_stale_comment.status == "stale_location"
     assert ev_stale_comment.outcome.status == OperationStatus.PARTIAL
 
-    # 3. Stale import: usage in expression, not import
     (tmp_path / "src" / "imports.py").write_text(
         "# Header line\np = Path('some/path')\n",
         encoding="utf-8",
@@ -1094,7 +1042,6 @@ def test_stale_source_unsupported_kind_reports_limitation_honestly(
 
     evidence = get_source_evidence(sample_project, target)
 
-    # Excerpt was read successfully, but honestly reports limitation rather than claiming verification
     assert evidence.status == "success"
     assert evidence.is_success is True
     assert "CUSTOM_MACRO_DEF(Calculator)" in evidence.content

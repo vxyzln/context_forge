@@ -8,8 +8,6 @@ from .models import GroundedRelationship, GroundedTask, RepositoryGrounding
 
 
 class TaskRepositoryGroundingService:
-    """Expand task-grounded entities through repository relationships."""
-
     def __init__(self, max_depth: int = 1) -> None:
         if max_depth < 0:
             raise ValueError("Repository grounding depth cannot be negative")

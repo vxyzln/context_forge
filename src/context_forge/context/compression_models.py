@@ -3,8 +3,6 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class CompressionConfig:
-    """Configuration shared by deterministic context compressors."""
-
     max_units: int | None = None
     max_facts_per_unit: int | None = None
     max_signals_per_unit: int | None = None

@@ -85,18 +85,15 @@ def test_preflight_detected_unsupported_languages(tmp_path: Path) -> None:
     assert report["inventory"]["files"] == 3
     assert report["inventory"]["source_files"] == 3
 
-    # Python is supported
     py_lang = next(l for l in report["languages"] if l["name"] == "python")
     assert py_lang["supported"] is True
 
-    # JS and Rust are detected but unsupported
     js_lang = next(l for l in report["languages"] if l["name"] == "javascript")
     assert js_lang["supported"] is False
 
     rs_lang = next(l for l in report["languages"] if l["name"] == "rust")
     assert rs_lang["supported"] is False
 
-    # Check warning diagnostics and limitations
     assert any(
         d["code"] == "UNSUPPORTED_LANGUAGE"
         and d["severity"] == "warning"
@@ -109,7 +106,6 @@ def test_preflight_detected_unsupported_languages(tmp_path: Path) -> None:
 def test_preflight_with_custom_parser_registry(tmp_path: Path) -> None:
     (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
 
-    # Empty registry with no parsers
     empty_registry = ParserRegistry()
     report = build_preflight_report(tmp_path, parser_registry=empty_registry)
 
@@ -124,7 +120,6 @@ def test_preflight_excludes_standard_ignored_directories(tmp_path: Path) -> None
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
 
-    # Ignored directories
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "config").write_text("dummy", encoding="utf-8")
     (tmp_path / ".venv").mkdir()
@@ -178,7 +173,7 @@ def test_git_detection_non_git_directory(tmp_path: Path) -> None:
 
 
 def test_git_detection_malformed_git_file(tmp_path: Path) -> None:
-    # 1. Empty .git file
+
     repo1 = tmp_path / "repo1"
     repo1.mkdir()
     (repo1 / ".git").write_text("", encoding="utf-8")
@@ -186,7 +181,6 @@ def test_git_detection_malformed_git_file(tmp_path: Path) -> None:
         build_preflight_report(repo1)["repository_status"]["is_git_repository"] is False
     )
 
-    # 2. Arbitrary text not matching gitdir:
     repo2 = tmp_path / "repo2"
     repo2.mkdir()
     (repo2 / ".git").write_text("not a git repository\n", encoding="utf-8")
@@ -194,7 +188,6 @@ def test_git_detection_malformed_git_file(tmp_path: Path) -> None:
         build_preflight_report(repo2)["repository_status"]["is_git_repository"] is False
     )
 
-    # 3. Dangling gitdir target
     repo3 = tmp_path / "repo3"
     repo3.mkdir()
     (repo3 / ".git").write_text("gitdir: /nonexistent/target/path\n", encoding="utf-8")
@@ -218,7 +211,6 @@ def test_preflight_invalid_config_does_not_claim_resolved(tmp_path: Path) -> Non
 def test_preflight_with_valid_and_invalid_configuration(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
 
-    # 1. Valid config
     config_file = tmp_path / ".contextforge.toml"
     config_file.write_text(
         """
@@ -240,7 +232,6 @@ max_context_units = 30
     assert valid_report["configuration"]["precedence"]["database_path"] == "project"
     assert valid_report["readiness"] != "blocked"
 
-    # 2. Malformed config produces blocker
     config_file.write_text("MALFORMED [[[[", encoding="utf-8")
     invalid_report = build_preflight_report(tmp_path)
     assert invalid_report["configuration"]["status"] == "invalid"
@@ -254,28 +245,23 @@ max_context_units = 30
 
 
 def test_preflight_read_only_guarantee_no_side_effects(tmp_path: Path) -> None:
-    # Set up sample repository without database
+
     src = tmp_path / "src"
     src.mkdir()
     py_file = src / "app.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
 
-    # Snapshot directory contents before preflight
     initial_files = set(tmp_path.rglob("*"))
     initial_mtimes = {f: f.stat().st_mtime_ns for f in initial_files if f.is_file()}
 
-    # Run preflight
     report = build_preflight_report(tmp_path)
 
-    # 1. Verify preflight reported analysis readiness accurately
     assert report["analysis_readiness"]["has_persisted_analysis"] is False
     assert report["analysis_readiness"]["database_path"] == ".context_forge.db"
 
-    # 2. Verify no SQLite database was created
     db_file = tmp_path / ".context_forge.db"
     assert not db_file.exists(), "Preflight must not create .context_forge.db"
 
-    # 3. Verify no files or directories were created or modified
     final_files = set(tmp_path.rglob("*"))
     assert final_files == initial_files, "Preflight must not create any files or dirs"
 

@@ -3,8 +3,6 @@ from context_forge.context.priority_ordering import ContextPriorityOrdering
 
 
 class ContextAssembler:
-    """Assemble the final deterministic context package."""
-
     def __init__(
         self,
         ordering: ContextPriorityOrdering,

@@ -1,5 +1,3 @@
-"""Deterministic, read-only repository preflight readiness and configuration audit."""
-
 from __future__ import annotations
 
 import os
@@ -30,7 +28,6 @@ def _default_parser_registry() -> ParserRegistry:
 
 
 def is_git_repository(root_path: Path) -> bool:
-    """Return True if root_path contains valid Git metadata (.git dir or worktree file)."""
     git_entry = root_path / ".git"
     if git_entry.is_dir():
         return True
@@ -61,17 +58,10 @@ def build_preflight_report(
     global_config_file: Path | None = None,
     parser_registry: ParserRegistry | None = None,
 ) -> dict[str, Any]:
-    """Perform a strictly read-only preflight readiness and configuration audit.
-
-    Evaluates repository-root accessibility, configuration layers/precedence,
-    discovered file inventory, detected vs supported languages, and analysis
-    readiness without performing analysis, creating databases, or mutating state.
-    """
     raw_path = Path(repository_path).expanduser()
     all_diagnostics: list[DiagnosticItem] = []
     limitations: list[str] = []
 
-    # 1. Repository-root validation
     if not raw_path.exists():
         msg = f"Repository path does not exist: {raw_path}"
         diag = DiagnosticItem.blocker(
@@ -182,7 +172,6 @@ def build_preflight_report(
 
     resolved_path = raw_path.resolve()
 
-    # Check accessibility (read & execute)
     try:
         os.listdir(resolved_path)
     except (OSError, PermissionError) as exc:
@@ -239,21 +228,18 @@ def build_preflight_report(
             "limitations": [msg],
         }
 
-    # 2. Git status assessment (read-only fact)
     is_git = is_git_repository(resolved_path)
     if not is_git:
         limitations.append(
             "Directory is not a Git repository; Git-specific inspection features will be unavailable."
         )
 
-    # 3. Configuration audit (precedence: project > global > default)
     config_audit = audit_configuration(
         resolved_path,
         global_config_path_override=global_config_file,
     )
     all_diagnostics.extend(config_audit.diagnostics)
 
-    # 4. Read-only discovery and scanner inventory
     try:
         scanner = RepositoryScanner(resolved_path)
         scanned_project = scanner.scan()
@@ -303,7 +289,6 @@ def build_preflight_report(
     directory_count = len(scanned_project.directories)
     file_count = len(scanned_project.files)
 
-    # 5. Language detection and parser capabilities
     detector = LanguageDetector()
     registry = (
         parser_registry if parser_registry is not None else _default_parser_registry()
@@ -367,12 +352,10 @@ def build_preflight_report(
         )
         limitations.append("No source files matching supported languages were found.")
 
-    # 6. Scope and exclusions note
     limitations.append(
         "Standard directories (.git, .venv, __pycache__, etc.) are excluded from inspection."
     )
 
-    # 7. Analysis readiness (strictly read-only existence check)
     db_rel = (
         config_audit.resolved.database_path
         if config_audit.resolved is not None
@@ -385,7 +368,6 @@ def build_preflight_report(
             f"No persisted analysis database found at '{db_rel}'; run 'context-forge analyze' before running queries."
         )
 
-    # 8. Readiness determination
     has_blocker = any(d.severity == DiagnosticSeverity.BLOCKER for d in all_diagnostics)
     has_error = any(d.severity == DiagnosticSeverity.ERROR for d in all_diagnostics)
     has_warning = any(d.severity == DiagnosticSeverity.WARNING for d in all_diagnostics)
@@ -449,7 +431,6 @@ def build_preflight_report(
 
 
 def format_preflight_summary(report: dict[str, Any]) -> list[str]:
-    """Format a preflight report into clear, human-readable text lines."""
     lines: list[str] = []
     lines.append(f"Repository: {report['repository']}")
     readiness_label = report["readiness"].replace("_", " ").upper()

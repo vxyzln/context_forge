@@ -370,11 +370,9 @@ def test_architecture_inventory_reports_unresolved_imports_separately(
 
     inventory = ProjectQuery(project).get_architecture_inventory()
 
-    # Dependencies must only contain resolved IMPORTS relationships.
     assert len(inventory.dependencies) == 1
     assert inventory.dependencies[0].relationship_type == RelationshipType.IMPORTS
 
-    # Unresolved imports must be reported as separate evidence.
     assert len(inventory.unresolved_imports) == 2
     unresolved_modules = [u.module_name for u in inventory.unresolved_imports]
     assert ".nonexistent" in unresolved_modules
@@ -531,8 +529,6 @@ def test_architecture_inventory_filtering_does_not_falsely_report_missing_entiti
     project = create_architecture_project(tmp_path)
     query = ProjectQuery(project)
 
-    # Filtering for symbol only excludes files and directories from visible collections,
-    # but must NOT cause missing_directory_parent, missing_file_directory, etc.
     inventory = query.get_architecture_inventory({"symbol"})
 
     assert inventory.directories == ()
@@ -555,7 +551,7 @@ def test_architecture_inventory_genuine_integrity_finding_detectable_under_any_f
     project.add_directory(broken_dir)
 
     query = ProjectQuery(project)
-    # Even when filtering for "symbol", the directory parent integrity finding is present
+
     inventory = query.get_architecture_inventory({"symbol"})
 
     assert any(
@@ -628,7 +624,6 @@ def test_architecture_inventory_detects_invalid_defines_endpoint_types(
     sym_1 = project.symbols[0]
     sym_2 = project.symbols[1]
 
-    # DEFINES requires file -> symbol. Connecting symbol -> symbol is invalid type.
     invalid_rel = Relationship(
         source_id=sym_1.id,
         target_id=sym_2.id,
@@ -638,7 +633,6 @@ def test_architecture_inventory_detects_invalid_defines_endpoint_types(
 
     inventory = ProjectQuery(project).get_architecture_inventory()
 
-    # Must NOT report missing entity since both sym_1 and sym_2 exist
     missing_findings = [
         f
         for f in inventory.integrity_findings
@@ -666,7 +660,6 @@ def test_architecture_inventory_detects_invalid_contains_endpoint_types(
     file_1 = project.files[0]
     sym_1 = project.symbols[0]
 
-    # CONTAINS requires symbol -> symbol. Connecting file -> symbol is invalid type.
     invalid_rel = Relationship(
         source_id=file_1.id,
         target_id=sym_1.id,
@@ -704,7 +697,6 @@ def test_architecture_inventory_detects_invalid_adjacent_structural_reference_ty
     file_1 = project.files[0]
     sym_1 = project.symbols[0]
 
-    # Directory parent pointing to a file
     dir_with_file_parent = Directory(
         project_id=project.id,
         path=Path("src/invalid_dir"),
@@ -713,7 +705,6 @@ def test_architecture_inventory_detects_invalid_adjacent_structural_reference_ty
     )
     project.add_directory(dir_with_file_parent)
 
-    # File directory pointing to a symbol
     file_with_sym_dir = File(
         project_id=project.id,
         path=Path("src/invalid_file.py"),
@@ -779,7 +770,6 @@ def test_architecture_inventory_detects_invalid_symbol_file_type(
     project = create_architecture_project(tmp_path)
     directory = project.directories[0]
 
-    # Symbol whose file_id points to an existing directory instead of a file
     invalid_symbol = Symbol(
         file_id=directory.id,
         name="misplaced_symbol",
@@ -791,7 +781,6 @@ def test_architecture_inventory_detects_invalid_symbol_file_type(
 
     inventory = ProjectQuery(project).get_architecture_inventory()
 
-    # Must NOT report missing_symbol_file since the target entity exists
     missing_findings = [
         f
         for f in inventory.integrity_findings
@@ -820,7 +809,6 @@ def test_architecture_inventory_detects_invalid_parent_symbol_type(
     project = create_architecture_project(tmp_path)
     file_1 = project.files[0]
 
-    # Symbol whose parent_symbol_id points to an existing file instead of a symbol
     invalid_child = Symbol(
         file_id=file_1.id,
         name="misparented_symbol",
@@ -833,7 +821,6 @@ def test_architecture_inventory_detects_invalid_parent_symbol_type(
 
     inventory = ProjectQuery(project).get_architecture_inventory()
 
-    # Must NOT report missing_parent_symbol since file_1 exists
     missing_findings = [
         f
         for f in inventory.integrity_findings
@@ -865,13 +852,12 @@ def test_architecture_inventory_detects_missing_defines_endpoints(
     missing_source_id = uuid4()
     missing_target_id = uuid4()
 
-    # DEFINES with missing source (non-existent file ID, existing target symbol)
     rel_missing_source = Relationship(
         source_id=missing_source_id,
         target_id=sym_1.id,
         relationship_type=RelationshipType.DEFINES,
     )
-    # DEFINES with missing target (existing source file, non-existent target symbol ID)
+
     rel_missing_target = Relationship(
         source_id=file_1.id,
         target_id=missing_target_id,
@@ -882,7 +868,6 @@ def test_architecture_inventory_detects_missing_defines_endpoints(
 
     inventory = ProjectQuery(project).get_architecture_inventory()
 
-    # Check missing source endpoint finding
     source_findings = [
         f
         for f in inventory.integrity_findings
@@ -892,7 +877,7 @@ def test_architecture_inventory_detects_missing_defines_endpoints(
     assert len(source_findings) == 1
     assert source_findings[0].target_id == sym_1.id
     assert "source file" in source_findings[0].message
-    # sym_1 must NOT be falsely reported as missing
+
     assert not any(
         f.finding_type == "missing_relationship_endpoint"
         and f.target_id == sym_1.id
@@ -900,7 +885,6 @@ def test_architecture_inventory_detects_missing_defines_endpoints(
         for f in inventory.integrity_findings
     )
 
-    # Check missing target endpoint finding
     target_findings = [
         f
         for f in inventory.integrity_findings
@@ -910,7 +894,7 @@ def test_architecture_inventory_detects_missing_defines_endpoints(
     assert len(target_findings) == 1
     assert target_findings[0].source_id == file_1.id
     assert "target symbol" in target_findings[0].message
-    # file_1 must NOT be falsely reported as missing
+
     assert not any(
         f.finding_type == "missing_relationship_endpoint"
         and f.source_id == file_1.id
@@ -928,13 +912,12 @@ def test_architecture_inventory_detects_missing_contains_endpoints(
     missing_source_id = uuid4()
     missing_target_id = uuid4()
 
-    # CONTAINS with missing source (non-existent symbol ID, existing target symbol)
     rel_missing_source = Relationship(
         source_id=missing_source_id,
         target_id=sym_1.id,
         relationship_type=RelationshipType.CONTAINS,
     )
-    # CONTAINS with missing target (existing source symbol, non-existent target symbol ID)
+
     rel_missing_target = Relationship(
         source_id=sym_2.id,
         target_id=missing_target_id,
@@ -945,7 +928,6 @@ def test_architecture_inventory_detects_missing_contains_endpoints(
 
     inventory = ProjectQuery(project).get_architecture_inventory()
 
-    # Check missing source endpoint finding
     source_findings = [
         f
         for f in inventory.integrity_findings
@@ -955,7 +937,7 @@ def test_architecture_inventory_detects_missing_contains_endpoints(
     assert len(source_findings) == 1
     assert source_findings[0].target_id == sym_1.id
     assert "source symbol" in source_findings[0].message
-    # sym_1 must NOT be falsely reported as missing
+
     assert not any(
         f.finding_type == "missing_relationship_endpoint"
         and f.target_id == sym_1.id
@@ -963,7 +945,6 @@ def test_architecture_inventory_detects_missing_contains_endpoints(
         for f in inventory.integrity_findings
     )
 
-    # Check missing target endpoint finding
     target_findings = [
         f
         for f in inventory.integrity_findings
@@ -973,7 +954,7 @@ def test_architecture_inventory_detects_missing_contains_endpoints(
     assert len(target_findings) == 1
     assert target_findings[0].source_id == sym_2.id
     assert "target symbol" in target_findings[0].message
-    # sym_2 must NOT be falsely reported as missing
+
     assert not any(
         f.finding_type == "missing_relationship_endpoint"
         and f.source_id == sym_2.id

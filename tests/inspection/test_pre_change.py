@@ -580,6 +580,7 @@ def test_relative_repository_path_inspection(
     sample_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(sample_repo)
+    # Verify relative paths resolve properly for git context.
     result = inspect_pre_change(Path("."), "AuthService")
     assert result.is_success is True
     assert result.git_context is not None
@@ -588,3 +589,6 @@ def test_relative_repository_path_inspection(
         "Git repository root path must be absolute" in d.message
         for d in result.diagnostics
     )
+
+
+# TODO: add test scenario for symlinked repository roots

@@ -1,5 +1,3 @@
-"""Structured operational exceptions that carry DiagnosticItem and OperationOutcome."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -13,13 +11,6 @@ from context_forge.reporting.contract import (
 
 
 class ContextForgeError(ValueError):
-    """Base exception for Context Forge operational errors.
-
-    Carries structured diagnostic context and an OperationOutcome representation
-    so callers and CLI handlers can access machine-readable failure details
-    while preserving standard string representation and exception semantics.
-    """
-
     def __init__(
         self,
         message: str,
@@ -69,7 +60,6 @@ class ContextForgeError(ValueError):
 
     @property
     def diagnostic(self) -> DiagnosticItem:
-        """Primary diagnostic item for this exception."""
         if self.outcome.diagnostics:
             return self.outcome.diagnostics[0]
         return DiagnosticItem(
@@ -84,13 +74,10 @@ class ContextForgeError(ValueError):
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Structured error dictionary."""
         return self.outcome.to_dict()
 
 
 class OperationalError(ContextForgeError):
-    """Raised when an operation encounters an unrecoverable runtime error."""
-
     def __init__(
         self,
         message: str,
@@ -118,8 +105,6 @@ class OperationalError(ContextForgeError):
 
 
 class BlockedOperationError(OperationalError):
-    """Raised when an operation cannot proceed due to an unmet prerequisite or constraint."""
-
     def __init__(
         self,
         message: str,
@@ -146,8 +131,6 @@ class BlockedOperationError(OperationalError):
 
 
 class MissingAnalysisError(BlockedOperationError):
-    """Raised when persisted analysis is required but missing."""
-
     def __init__(
         self,
         message: str = "No persisted analysis found; run 'context-forge analyze' first",
@@ -165,8 +148,6 @@ class MissingAnalysisError(BlockedOperationError):
 
 
 class StaleAnalysisError(BlockedOperationError):
-    """Raised when cached analysis is stale and fresh analysis is required."""
-
     def __init__(
         self,
         message: str = (
@@ -186,8 +167,6 @@ class StaleAnalysisError(BlockedOperationError):
 
 
 class IncompleteAnalysisError(BlockedOperationError):
-    """Raised when analysis is incomplete, failed, or contains recorded errors."""
-
     def __init__(
         self,
         message: str = (
@@ -207,8 +186,6 @@ class IncompleteAnalysisError(BlockedOperationError):
 
 
 class IndeterminateFreshnessError(BlockedOperationError):
-    """Raised when repository analysis freshness cannot be determined reliably."""
-
     def __init__(
         self,
         message: str = (

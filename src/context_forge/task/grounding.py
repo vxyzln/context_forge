@@ -13,8 +13,6 @@ from .models import (
 
 
 class TaskGroundingService:
-    """Resolve explicit task references against a repository."""
-
     _PATH_PATTERN = re.compile(
         r"(?<![\w./-])"
         r"(?:[A-Za-z0-9_.-]+/)+"

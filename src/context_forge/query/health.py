@@ -1,5 +1,3 @@
-"""Deterministic repository health reports and metrics."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -33,20 +31,11 @@ def build_health_report(
     inventory: ArchitectureInventory | None = None,
     limit: int = DEFAULT_HEALTH_LIMIT,
 ) -> dict[str, Any]:
-    """Build a deterministic, evidence-based repository health report.
-
-    Integrates repository inventory metrics, analysis status, cache freshness,
-    and supported dependency and structural findings without overstating certainty.
-
-    A measured count of zero is distinguished from unavailable information (which
-    is represented as ``None``).
-    """
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("Report limit must be a positive integer")
 
     resolved_path = _path(repository_path)
 
-    # 1. Unanalyzed or unavailable project state
     if project is None:
         missing_limitation = (
             "No persisted analysis found for repository; inventory metrics "
@@ -101,7 +90,6 @@ def build_health_report(
             "outcome": outcome.to_dict(),
         }
 
-    # 2. Project metadata and analysis state
     project_payload = {
         "name": project.name,
         "project_type": project.project_type or "unknown",
@@ -115,7 +103,6 @@ def build_health_report(
         "errors": analysis_errors,
     }
 
-    # 3. Cache freshness state
     if freshness is not None:
         cache_status = "fresh" if freshness.is_fresh else "stale"
         freshness_reason = freshness.reason
@@ -128,7 +115,6 @@ def build_health_report(
         "reason": freshness_reason,
     }
 
-    # 4. Inventory metrics and findings
     if inventory is None:
         from context_forge.query.project import ProjectQuery
 
@@ -159,7 +145,6 @@ def build_health_report(
         "dependencies": len(inventory.dependencies),
     }
 
-    # 5. Dependency and structural findings
     dependency_pairs: set[tuple[str, str]] = set()
     for rel in inventory.dependencies:
         source_file = files_by_id.get(rel.source_id)
@@ -214,7 +199,6 @@ def build_health_report(
         "structural_integrity": _limited_section(integrity_findings, limit),
     }
 
-    # 6. Honest limitations and caveats
     limitations: list[str] = [
         (
             "The report describes persisted static analysis evidence; it does not "
@@ -264,7 +248,6 @@ def build_health_report(
             f"Findings display was limited to {limit} items per category."
         )
 
-    # 7. Structured outcome semantics
     diagnostics: list[DiagnosticItem] = []
     for err in analysis_errors:
         diagnostics.append(

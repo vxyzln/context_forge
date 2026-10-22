@@ -2,8 +2,6 @@ from context_forge.context.models import ContextPackage, ContextUnit
 
 
 class ContextBudgetCompressor:
-    """Deterministically reduces a context package to a unit budget."""
-
     def compress(
         self,
         package: ContextPackage,

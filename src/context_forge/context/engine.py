@@ -17,7 +17,6 @@ from context_forge.context.selection import ContextSelector
 class ContextEngine(ABC):
     @abstractmethod
     def build(self, request: ContextRequest) -> ContextPackage:
-        """Build a context package for a context request."""
         raise NotImplementedError
 
 

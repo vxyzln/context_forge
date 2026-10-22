@@ -4,8 +4,6 @@ from .models import TaskInterpretation
 
 
 class TaskUnderstandingService:
-    """Deterministically interpret a natural-language development task."""
-
     _ACTION_WORDS = frozenset(
         {
             "add",

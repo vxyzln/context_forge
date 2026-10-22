@@ -10,7 +10,7 @@ from context_forge.reporting.contract import DiagnosticSeverity
 
 
 def test_audit_configuration_defaults_when_no_config(tmp_path: Path) -> None:
-    # Both project and global configs missing
+
     missing_global = tmp_path / "global_missing.toml"
     result = audit_configuration(tmp_path, global_config_path_override=missing_global)
 
@@ -113,7 +113,7 @@ max_context_units = 50
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     project_config_file = project_dir / ".contextforge.toml"
-    # Project overrides only max_context_units; database_path comes from global
+
     project_config_file.write_text(
         """
 [analysis]
@@ -215,7 +215,7 @@ max_context_units = -10
 def test_audit_configuration_config_path_is_directory(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    # Create directory with config filename
+
     (project_dir / ".contextforge.toml").mkdir()
 
     result = audit_configuration(project_dir)

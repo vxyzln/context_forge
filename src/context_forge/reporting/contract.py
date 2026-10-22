@@ -1,14 +1,3 @@
-"""Shared reporting, status, and diagnostic outcome contracts.
-
-Provides unified, deterministic outcome semantics for Context Forge operations
-(preflight, health, architecture, impact, inspection, etc.) distinguishing:
-- complete success
-- success with warnings
-- partial results
-- blocked operations
-- operational errors and failures
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,8 +6,6 @@ from typing import Any
 
 
 class OperationStatus(str, Enum):
-    """Execution status for Context Forge operations."""
-
     SUCCESS = "success"
     PARTIAL = "partial"
     INCOMPLETE = "incomplete"
@@ -27,33 +14,26 @@ class OperationStatus(str, Enum):
 
     @property
     def is_successful(self) -> bool:
-        """True if the operation completed with full success."""
         return self is OperationStatus.SUCCESS
 
     @property
     def is_failure(self) -> bool:
-        """True if the operation failed with an error."""
         return self is OperationStatus.FAILED
 
     @property
     def is_blocked(self) -> bool:
-        """True if the operation was blocked by a prerequisite or constraint."""
         return self is OperationStatus.BLOCKED
 
     @property
     def is_partial(self) -> bool:
-        """True if the operation produced partial results."""
         return self is OperationStatus.PARTIAL
 
     @property
     def is_incomplete(self) -> bool:
-        """True if the operation or underlying data is incomplete/unanalyzed."""
         return self is OperationStatus.INCOMPLETE
 
 
 class DiagnosticSeverity(str, Enum):
-    """Severity classification for diagnostics and findings."""
-
     INFO = "info"
     WARNING = "warning"
     BLOCKER = "blocker"
@@ -61,12 +41,10 @@ class DiagnosticSeverity(str, Enum):
 
     @property
     def is_blocking(self) -> bool:
-        """True if this diagnostic prevents or blocks successful execution."""
         return self in (DiagnosticSeverity.BLOCKER, DiagnosticSeverity.ERROR)
 
     @property
     def is_actionable(self) -> bool:
-        """True if this diagnostic represents a warning, blocker, or error."""
         return self in (
             DiagnosticSeverity.WARNING,
             DiagnosticSeverity.BLOCKER,
@@ -76,8 +54,6 @@ class DiagnosticSeverity(str, Enum):
 
 @dataclass(frozen=True)
 class DiagnosticItem:
-    """Structured diagnostic finding or notification."""
-
     severity: DiagnosticSeverity
     message: str
     code: str | None = None
@@ -188,7 +164,6 @@ class DiagnosticItem:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Deterministic dictionary representation."""
         payload: dict[str, Any] = {
             "severity": self.severity.value,
             "message": self.message,
@@ -205,8 +180,6 @@ class DiagnosticItem:
 
 @dataclass(frozen=True)
 class OperationOutcome:
-    """Comprehensive operation outcome representing execution status and diagnostics."""
-
     status: OperationStatus
     message: str = ""
     diagnostics: tuple[DiagnosticItem, ...] = ()
@@ -225,27 +198,22 @@ class OperationOutcome:
 
     @property
     def is_success(self) -> bool:
-        """True only if the operation succeeded completely without failure or blocking."""
         return self.status == OperationStatus.SUCCESS
 
     @property
     def is_partial(self) -> bool:
-        """True if the operation returned partial results."""
         return self.status == OperationStatus.PARTIAL
 
     @property
     def is_incomplete(self) -> bool:
-        """True if the operation or underlying analysis is incomplete."""
         return self.status == OperationStatus.INCOMPLETE
 
     @property
     def is_blocked(self) -> bool:
-        """True if the operation was blocked from proceeding."""
         return self.status == OperationStatus.BLOCKED
 
     @property
     def is_failed(self) -> bool:
-        """True if the operation failed with an error."""
         return self.status == OperationStatus.FAILED
 
     @property
@@ -384,15 +352,6 @@ class OperationOutcome:
         is_incomplete: bool = False,
         metadata: dict[str, Any] | None = None,
     ) -> OperationOutcome:
-        """Derive an appropriate OperationOutcome based on diagnostic severities and completeness.
-
-        Rules:
-        - ERROR diagnostics produce FAILED status.
-        - BLOCKER diagnostics produce BLOCKED status.
-        - Incomplete execution/analysis produces INCOMPLETE status.
-        - Materially partial results or limitations produce PARTIAL status.
-        - Complete operations with warnings remain SUCCESS with warning diagnostics.
-        """
         diags = tuple(diagnostics)
         lims = tuple(limitations)
 
@@ -419,7 +378,6 @@ class OperationOutcome:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize outcome to a clean, deterministic dictionary."""
         return {
             "status": self.status.value,
             "is_success": self.is_success,

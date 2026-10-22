@@ -10,8 +10,6 @@ from context_forge.context.models import (
 
 
 class DeterministicContextCompressor(ContextCompressor):
-    """Deterministically remove duplicate context units."""
-
     def compress(self, package: ContextPackage) -> ContextPackage:
         merged: dict[tuple[object, object], ContextUnit] = {}
 

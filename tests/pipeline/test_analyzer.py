@@ -1414,7 +1414,6 @@ def test_analyzer_detects_added_and_deleted_files_incrementally(
 
     assert {symbol.name for symbol in second_project.symbols} == {"retained", "added"}
 
-    # The persisted analysis must match the current repository.
     loaded_analysis = second_analyzer.repository.load_analysis(
         second_analyzer.identity.key,
     )
@@ -1617,11 +1616,9 @@ def test_analyzer_handles_file_rename_incrementally(
     assert retained_after.id == retained_file.id
     assert renamed_file.id != original_file.id
 
-    # Obsolete symbols from the original path must not survive.
     current_symbol_ids = {symbol.id for symbol in second_project.symbols}
     assert original_symbol_ids.isdisjoint(current_symbol_ids)
 
-    # The persisted analysis must agree with the in-memory result.
     loaded_analysis = second_analyzer.repository.load_analysis(
         second_analyzer.identity.key,
     )
@@ -1675,13 +1672,11 @@ def test_analyzer_incremental_analysis_preserves_and_replaces_imports(
 
     assert len(first_project.imports) == 2
 
-    # Now modify only b.py, leaving a.py unchanged.
     file_b.write_text("import re\nimport csv\n", encoding="utf-8")
 
     second_analyzer = ProjectAnalyzer(tmp_path, database_path)
     second_project = second_analyzer.analyze()
 
-    # a.py's import ("math") must survive from cache, and b.py's imports must be "re" and "csv".
     assert len(second_project.imports) == 3
     imports_by_file: dict[Path, list[str]] = {}
     for file in second_project.files:
@@ -1707,7 +1702,6 @@ def test_analyzer_incremental_analysis_removes_imports_for_deleted_file(
     first_project = first_analyzer.analyze()
     assert len(first_project.imports) == 2
 
-    # Delete b.py
     file_b.unlink()
 
     second_analyzer = ProjectAnalyzer(tmp_path, database_path)
@@ -1717,7 +1711,6 @@ def test_analyzer_incremental_analysis_removes_imports_for_deleted_file(
     assert len(second_project.imports) == 1
     assert second_project.imports[0].module_name == "math"
 
-    # Verify persisted DB has only a.py's import
     loaded = second_analyzer.repository.load(second_project.id)
     assert loaded is not None
     assert len(loaded.imports) == 1
@@ -1734,7 +1727,6 @@ def test_analyzer_cache_schema_mismatch_triggers_safe_reanalysis(
     analyzer = ProjectAnalyzer(tmp_path, database_path)
     analyzer.analyze()
 
-    # Modify metadata in DB to simulate old schema version
     with analyzer.database.connect() as connection:
         connection.execute(
             "UPDATE repository_cache SET cache_schema_version = ?",
@@ -1771,7 +1763,6 @@ def test_analyzer_graph_relationships_consistent_with_cached_imports(
     ]
     assert len(import_rels) == 1
 
-    # Reload in a new analyzer instance via cache
     second_analyzer = ProjectAnalyzer(tmp_path, database_path)
     second_project = second_analyzer.analyze()
 
@@ -1782,3 +1773,6 @@ def test_analyzer_graph_relationships_consistent_with_cached_imports(
     ]
     assert len(cached_import_rels) == 1
     assert len(second_project.imports) == 1
+
+
+# TODO: add benchmark coverage for large project analysis runs

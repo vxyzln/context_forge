@@ -81,7 +81,6 @@ def _create_sample_project(tmp_path: Path) -> Project:
     project.add_symbol(sym_a)
     project.add_symbol(sym_b)
 
-    # Containment
     project.add_relationship(
         Relationship(
             source_id=mod_a.id,
@@ -97,7 +96,6 @@ def _create_sample_project(tmp_path: Path) -> Project:
         )
     )
 
-    # Dependency: a -> b
     project.add_relationship(
         Relationship(
             source_id=mod_a.id,
@@ -274,7 +272,6 @@ def test_build_health_report_dependency_cycles(tmp_path: Path) -> None:
     project.add_file(f_a)
     project.add_file(f_b)
 
-    # Mutual import: a -> b and b -> a
     project.add_relationship(
         Relationship(
             source_id=f_a.id,
@@ -338,7 +335,6 @@ def test_build_health_report_structural_integrity(tmp_path: Path) -> None:
     f_a = File(project_id=project.id, path=Path("a.py"), name="a.py", extension=".py")
     project.add_file(f_a)
 
-    # Symbol with invalid parent pointing to non-existent symbol
     missing_id = uuid4()
     sym = Symbol(
         file_id=f_a.id,
@@ -385,7 +381,6 @@ def test_build_health_report_bounded_limit(tmp_path: Path) -> None:
     assert unresolved["truncated"] is True
     assert any("limited to 1 items" in lim for lim in report["limitations"])
 
-    # Invalid limits
     with pytest.raises(ValueError, match="positive integer"):
         build_health_report(project=project, limit=0)
     with pytest.raises(ValueError, match="positive integer"):
@@ -399,7 +394,6 @@ def test_build_health_report_determinism(tmp_path: Path) -> None:
 
     rep1 = build_health_report(project=project, repository_path=tmp_path)
 
-    # Invert order of symbols, files, and relationships
     project.files.reverse()
     project.symbols.reverse()
     project.relationships.reverse()
@@ -420,7 +414,7 @@ def test_project_query_get_health_report(tmp_path: Path) -> None:
 
 
 def test_health_report_outcome_contract_states(tmp_path: Path) -> None:
-    # 1. Unavailable project -> INCOMPLETE
+
     unavail_rep = build_health_report(project=None, repository_path=tmp_path)
     assert "outcome" in unavail_rep
     assert unavail_rep["outcome"]["status"] == "incomplete"
@@ -428,7 +422,6 @@ def test_health_report_outcome_contract_states(tmp_path: Path) -> None:
     assert unavail_rep["outcome"]["summary"]["blockers"] == 1
     assert unavail_rep["outcome"]["diagnostics"][0]["code"] == "MISSING_ANALYSIS"
 
-    # 2. Fresh clean project -> SUCCESS
     project = _create_sample_project(tmp_path)
     freshness = CacheFreshness(is_fresh=True, reason="clean")
     fresh_rep = build_health_report(
@@ -441,7 +434,6 @@ def test_health_report_outcome_contract_states(tmp_path: Path) -> None:
     assert fresh_rep["outcome"]["summary"]["errors"] == 0
     assert fresh_rep["outcome"]["summary"]["blockers"] == 0
 
-    # 3. Stale cache -> PARTIAL with warning
     stale_freshness = CacheFreshness(is_fresh=False, reason="files_changed")
     stale_rep = build_health_report(
         project=project,
@@ -455,7 +447,6 @@ def test_health_report_outcome_contract_states(tmp_path: Path) -> None:
         for d in stale_rep["outcome"]["diagnostics"]
     )
 
-    # 4. Failed analysis -> FAILED with error diagnostic
     failed_project = _create_sample_project(tmp_path)
     failed_project.analysis_status = "failed"
     failed_project.errors = ["Syntax error in bad.py"]

@@ -1,5 +1,3 @@
-"""Formatting helpers for OperationOutcome and DiagnosticItem."""
-
 from __future__ import annotations
 
 from context_forge.reporting.contract import (
@@ -10,7 +8,6 @@ from context_forge.reporting.contract import (
 
 
 def format_diagnostic_line(diag: DiagnosticItem) -> str:
-    """Format a single DiagnosticItem for human-readable display."""
     prefix = f"[{diag.severity.value.upper()}]"
     loc_parts: list[str] = []
     if diag.path:
@@ -33,7 +30,6 @@ def render_outcome_text(
     *,
     indent: str = "  ",
 ) -> list[str]:
-    """Render an OperationOutcome as human-readable text lines."""
     lines: list[str] = []
     status_label = outcome.status.value.upper()
     if outcome.message:

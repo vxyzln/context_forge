@@ -1,5 +1,3 @@
-"""Shared reporting, status, and diagnostic outcome contracts."""
-
 from context_forge.reporting.contract import (
     DiagnosticItem,
     DiagnosticSeverity,

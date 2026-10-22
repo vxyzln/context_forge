@@ -1,12 +1,3 @@
-"""Precise symbol locator and bounded source evidence retrieval.
-
-Implements Context Forge v0.12 Section 3:
-- Part 1: Precise Symbol Lookup with exact, qualified, file, and kind filtering,
-  explicit uniqueness, ambiguity, and not-found semantics.
-- Part 2: Bounded, current-source evidence excerpts from working tree files with
-  accurate path/line metadata, truncation limits, and stale location handling.
-"""
-
 from __future__ import annotations
 
 import re
@@ -34,8 +25,6 @@ DEFAULT_EXCERPT_MAX_LINES: int = 50
 
 @dataclass(frozen=True)
 class SourceExcerpt:
-    """Bounded source evidence from the current working tree source file."""
-
     target_id: UUID
     target_name: str
     path: str
@@ -46,18 +35,16 @@ class SourceExcerpt:
     symbol_start_line: int | None = None
     symbol_end_line: int | None = None
     is_truncated: bool = False
-    status: str = "success"  # "success", "stale_location", "missing_file", "unreadable_file", "location_out_of_range", "invalid_location", "invalid_file_type", "path_outside_root", "invalid_path"
+    status: str = "success"
     message: str = ""
     limitations: tuple[str, ...] = ()
 
     @property
     def is_success(self) -> bool:
-        """True if source content was successfully read (even if truncated or stale)."""
         return self.status in ("success", "stale_location")
 
     @property
     def outcome(self) -> OperationOutcome:
-        """Derive standard OperationOutcome representation from SourceExcerpt."""
         diagnostics: list[DiagnosticItem] = []
 
         if self.status == "success":
@@ -100,7 +87,6 @@ class SourceExcerpt:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize source evidence to a deterministic dictionary."""
         return {
             "target_id": str(self.target_id),
             "target_name": self.target_name,
@@ -128,18 +114,6 @@ def locate_symbol(
     symbol_type: str | None = None,
     qualified_name: str | None = None,
 ) -> TargetResolution:
-    """Resolve a repository symbol using supported identifiers and filters.
-
-    Args:
-        project: Analyzed Project containing files and symbols.
-        name: Symbol name or qualified name to look up.
-        file_path: Optional file path filter (relative or basename).
-        symbol_type: Optional symbol kind/type filter (e.g. 'class', 'function', 'method').
-        qualified_name: Optional explicit qualified name match.
-
-    Returns:
-        TargetResolution with status 'resolved', 'ambiguous', 'not_found', or 'invalid'.
-    """
     if not isinstance(name, str):
         return TargetResolution(
             status="invalid",
@@ -155,13 +129,11 @@ def locate_symbol(
 
     files_by_id: dict[UUID, File] = {f.id: f for f in project.files}
 
-    # 1. Base symbol matching
     candidate_symbols: list[Symbol]
     if qualified_name is not None:
         q_target = qualified_name.strip()
         candidate_symbols = [s for s in project.symbols if s.qualified_name == q_target]
     elif "." in query:
-        # Check qualified name first
         q_matches = [s for s in project.symbols if s.qualified_name == query]
         if q_matches:
             candidate_symbols = q_matches
@@ -170,7 +142,6 @@ def locate_symbol(
     else:
         candidate_symbols = [s for s in project.symbols if s.name == query]
 
-    # 2. File path filtering
     if file_path is not None:
         raw_fp = str(file_path).strip().replace("\\", "/").removeprefix("./")
         if not raw_fp:
@@ -179,7 +150,6 @@ def locate_symbol(
                 message="File path filter cannot be empty",
             )
 
-        # Normalize relative to project root if absolute
         if project.root_path is not None:
             as_path = Path(raw_fp)
             if as_path.is_absolute():
@@ -199,7 +169,6 @@ def locate_symbol(
                 filtered.append(sym)
         candidate_symbols = filtered
 
-    # 3. Symbol type/kind filtering
     if symbol_type is not None:
         target_type = symbol_type.strip().lower()
         if not target_type:
@@ -211,7 +180,6 @@ def locate_symbol(
             s for s in candidate_symbols if s.kind.lower() == target_type
         ]
 
-    # 4. Outcome determination
     if not candidate_symbols:
         filter_details: list[str] = []
         if file_path:
@@ -246,7 +214,6 @@ def locate_symbol(
             message=f"Resolved symbol '{sym.name}' in {sym_file.path.as_posix() if sym_file else 'unknown'}",
         )
 
-    # Multiple matching candidates: sort deterministically
     candidates = sorted(
         [
             TargetCandidate(
@@ -287,24 +254,12 @@ def _validate_definition_header(
     target_name: str,
     target_kind: str | None = None,
 ) -> tuple[str, str | None]:
-    """Validate whether excerpt_lines begin with the definition of target_name.
-
-    Scans the definition header lines starting at the beginning of the excerpt,
-    skipping valid leading decorator lines and blank lines, and verifies that
-    a definition header for target_name is present according to the symbol kind.
-    Comments, docstrings, string literals, and unrelated expressions/calls are rejected.
-
-    Returns:
-        tuple of (validation_status, limitation_message_if_any)
-        where validation_status is "valid", "stale", or "unsupported".
-    """
     if not excerpt_lines or not target_name:
         return "stale", None
 
     bare_name = target_name.rsplit(".", 1)[-1]
     kind = target_kind.strip().lower() if target_kind else None
 
-    # Known / supported symbol kinds emitted by Context Forge parsers
     supported_kinds = {"class", "function", "method", "constant", "variable", "import"}
     if kind is not None and kind not in supported_kinds:
         return (
@@ -336,7 +291,6 @@ def _validate_definition_header(
     elif kind == "import":
         patterns = []
     else:
-        # Kind unspecified: accept class, function, method, or assignment
         patterns = [class_pattern, func_pattern, assign_pattern]
 
     max_scan = min(15, len(excerpt_lines))
@@ -357,11 +311,9 @@ def _validate_definition_header(
         if stripped.startswith("#"):
             return "stale", None
 
-        # Check standard definition patterns (class, function, method, assign)
         if any(p.match(stripped) for p in patterns):
             return "valid", None
 
-        # Check import syntax
         if kind in ("import", None):
             if stripped.startswith(("import ", "from ")):
                 simple_import = re.compile(r"\b" + re.escape(bare_name) + r"\b")
@@ -390,7 +342,6 @@ def _validate_definition_header(
                 idx += 1
                 continue
 
-        # Check decorators (for class/function/method)
         if stripped.startswith("@") and (kind in ("class", "function", "method", None)):
             open_parens = stripped.count("(") - stripped.count(")")
             open_brackets = stripped.count("[") - stripped.count("]")
@@ -417,7 +368,6 @@ def _is_definition_header_match(
     target_name: str,
     target_kind: str | None = None,
 ) -> bool:
-    """Validate whether excerpt_lines begin with the definition of target_name."""
     status, _ = _validate_definition_header(
         excerpt_lines,
         target_name=target_name,
@@ -433,27 +383,9 @@ def get_source_evidence(
     root_path: Path | None = None,
     max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
 ) -> SourceExcerpt:
-    """Read a bounded source evidence excerpt from the current working tree file.
-
-    Guarantees:
-    - Reads from current file on disk (never cached source text).
-    - Preserves repository-relative path and 1-indexed line numbers.
-    - Limits excerpt to max_lines, recording truncation when applied.
-    - Handles missing, unreadable, out-of-range, and stale locations honestly.
-
-    Args:
-        project: Project metadata model.
-        target: ResolvedTarget or Symbol instance to extract evidence for.
-        root_path: Optional explicit root directory override (defaults to project.root_path).
-        max_lines: Maximum number of source lines to return (default: 50).
-
-    Returns:
-        SourceExcerpt with status, content, line boundaries, and outcome.
-    """
     if max_lines < 1:
         raise ValueError("max_lines must be a positive integer")
 
-    # Extract target properties
     target_id = target.id
     target_name = target.name
     start_line = target.start_line
@@ -471,7 +403,6 @@ def get_source_evidence(
         file_match = next((f for f in project.files if f.id == target.file_id), None)
         rel_path_str = file_match.path.as_posix() if file_match is not None else ""
 
-    # 1. Location validity check
     if start_line is None or start_line < 1:
         return SourceExcerpt(
             target_id=target_id,
@@ -502,7 +433,6 @@ def get_source_evidence(
             message=f"End line ({end_line}) precedes start line ({start_line}) for symbol '{target_name}'",
         )
 
-    # 2. File resolution and repository containment check
     root = root_path if root_path is not None else project.root_path
     if root is None or not rel_path_str:
         return SourceExcerpt(
@@ -519,11 +449,9 @@ def get_source_evidence(
             message=f"Source file path is unavailable or empty for symbol '{target_name}'",
         )
 
-    # Resolve permitted root to canonical absolute path
     canonical_root = Path(root).resolve()
     target_path_obj = Path(rel_path_str)
 
-    # Reject absolute target paths outside repository abstraction
     if target_path_obj.is_absolute():
         return SourceExcerpt(
             target_id=target_id,
@@ -541,7 +469,6 @@ def get_source_evidence(
             ),
         )
 
-    # Resolve canonical target path
     try:
         full_path = (canonical_root / target_path_obj).resolve()
     except (OSError, RuntimeError) as exc:
@@ -559,8 +486,7 @@ def get_source_evidence(
             message=f"Failed to resolve source path '{rel_path_str}': {exc}",
         )
 
-    # Verify containment within canonical root before any reading or filesystem access
-    # Uses is_relative_to for robust path component containment rather than string prefix checks
+    # Verify the target path stays within the repository root.
     if not full_path.is_relative_to(canonical_root):
         return SourceExcerpt(
             target_id=target_id,
@@ -606,7 +532,6 @@ def get_source_evidence(
             message=f"Source path is not a regular file: {rel_path_str}",
         )
 
-    # 3. Read current file content from working tree
     try:
         raw_text = full_path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
@@ -644,7 +569,6 @@ def get_source_evidence(
     file_lines = raw_text.splitlines()
     total_file_lines = len(file_lines)
 
-    # 4. Line range check
     if start_line > total_file_lines:
         return SourceExcerpt(
             target_id=target_id,
@@ -666,7 +590,6 @@ def get_source_evidence(
     target_end = end_line if end_line is not None else start_line
     target_end = min(target_end, total_file_lines)
 
-    # 5. Boundary limit enforcement
     requested_lines = target_end - start_line + 1
     is_truncated = False
     limitations: list[str] = []
@@ -685,7 +608,6 @@ def get_source_evidence(
     excerpt_lines = file_lines[slice_start:slice_end]
     content = "\n".join(excerpt_lines)
 
-    # 6. Staleness verification: validate evidence against recorded definition location
     status = "success"
     validation_status, validation_limitation = _validate_definition_header(
         excerpt_lines,
@@ -734,11 +656,6 @@ def locate_and_get_evidence(
     root_path: Path | None = None,
     max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
 ) -> tuple[TargetResolution, SourceExcerpt | None]:
-    """Resolve a symbol and retrieve bounded source evidence if uniquely resolved.
-
-    Returns:
-        A tuple of (resolution, evidence_or_none).
-    """
     resolution = locate_symbol(
         project,
         name,

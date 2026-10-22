@@ -6,8 +6,6 @@ from context_forge.context.types import ContextUnitType
 
 
 class DeterministicPrioritizer:
-    """Assign deterministic priority scores to context units."""
-
     _TYPE_WEIGHTS: ClassVar[dict[ContextUnitType, float]] = {
         ContextUnitType.SYMBOL: 1.0,
         ContextUnitType.FILE: 0.85,

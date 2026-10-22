@@ -8,7 +8,7 @@ PROJECT_CONFIG_FILENAME = ".contextforge.toml"
 
 
 class ConfigurationLoadError(ValueError):
-    """Raised when project configuration cannot be loaded."""
+    pass
 
 
 def project_config_path(project_root: Path) -> Path:

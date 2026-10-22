@@ -29,8 +29,6 @@ DEFAULT_IMPACT_RELATIONSHIP_TYPES: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class TargetCandidate:
-    """A candidate symbol when an unqualified target query is ambiguous."""
-
     id: UUID
     name: str
     kind: str
@@ -55,13 +53,11 @@ class TargetCandidate:
 
 @dataclass(frozen=True)
 class ResolvedTarget:
-    """An unambiguously resolved file or symbol impact target."""
-
     id: UUID
-    target_type: str  # "file" or "symbol"
+    target_type: str
     name: str
     path: str
-    kind: str  # "file" for files, or symbol.kind ("class", "function", "method", etc.)
+    kind: str
     qualified_name: str | None = None
     start_line: int | None = None
     end_line: int | None = None
@@ -83,9 +79,7 @@ class ResolvedTarget:
 
 @dataclass(frozen=True)
 class TargetResolution:
-    """Outcome of resolving a target query against a project."""
-
-    status: str  # "resolved", "not_found", "ambiguous"
+    status: str
     target: ResolvedTarget | None = None
     candidates: tuple[TargetCandidate, ...] = ()
     message: str = ""
@@ -108,7 +102,6 @@ class TargetResolution:
 
     @property
     def outcome(self) -> OperationOutcome:
-        """Derive shared OperationOutcome representation from TargetResolution."""
         if self.status == "not_found":
             return OperationOutcome.blocked(
                 self.message or "Target query not found",
@@ -170,11 +163,9 @@ class TargetResolution:
 
 @dataclass(frozen=True)
 class ImpactPathStep:
-    """A single relationship hop in an evidence path from target to discovered entity."""
-
     relationship_id: UUID
     relationship_type: str
-    direction: str  # "incoming" or "outgoing" relative to traversal hop
+    direction: str
     source_id: UUID
     target_id: UUID
     from_id: UUID
@@ -210,15 +201,13 @@ class ImpactPathStep:
 
 @dataclass(frozen=True)
 class ImpactItem:
-    """A connected component with its supporting relationship evidence and path."""
-
     relationship_id: UUID
     relationship_type: str
-    direction: str  # "incoming" or "outgoing"
+    direction: str
     source_id: UUID
     target_id: UUID
     related_id: UUID
-    related_type: str  # "file" or "symbol"
+    related_type: str
     related_name: str
     related_path: str | None = None
     related_kind: str | None = None
@@ -226,7 +215,7 @@ class ImpactItem:
     confidence: float = 1.0
     metadata: dict[str, str] = field(default_factory=dict)
     depth: int = 1
-    classification: str = "direct"  # "direct" or "indirect"
+    classification: str = "direct"
     path: tuple[ImpactPathStep, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -255,11 +244,9 @@ DirectImpactItem = ImpactItem
 
 @dataclass(frozen=True)
 class ImpactResult:
-    """Complete result of an impact analysis operation (direct or transitive)."""
-
-    status: str  # "resolved", "not_found", "ambiguous"
+    status: str
     target: ResolvedTarget | None
-    direction: str  # "incoming", "outgoing", "both"
+    direction: str
     items: tuple[ImpactItem, ...]
     total: int
     truncated: bool
@@ -275,7 +262,6 @@ class ImpactResult:
 
     @property
     def outcome(self) -> OperationOutcome:
-        """Derive shared OperationOutcome representation from ImpactResult."""
         diagnostics: list[DiagnosticItem] = []
 
         if self.status == "not_found":
@@ -367,7 +353,7 @@ def _build_module_index(project: Project) -> dict[str, File]:
         parts = _module_parts(file)
         if parts:
             index[".".join(parts)] = file
-        # Also index raw path parts with dots (e.g. src.pkg)
+
         raw_parts = list(file.path.parts)
         if raw_parts:
             raw_filename = raw_parts.pop()
@@ -382,11 +368,9 @@ def resolve_impact_target(
     project: Project,
     target: str | File | Symbol,
 ) -> TargetResolution:
-    """Resolve a file path, symbol name, or entity instance to a TargetResolution."""
     files_by_id = {file.id: file for file in project.files}
     symbols_by_id = {symbol.id: symbol for symbol in project.symbols}
 
-    # 1. Direct File instance
     if isinstance(target, File):
         if target.id not in files_by_id:
             return TargetResolution(
@@ -404,7 +388,6 @@ def resolve_impact_target(
             ),
         )
 
-    # 2. Direct Symbol instance
     if isinstance(target, Symbol):
         if target.id not in symbols_by_id:
             return TargetResolution(
@@ -427,7 +410,6 @@ def resolve_impact_target(
             ),
         )
 
-    # 3. String query
     if not isinstance(target, str):
         raise TypeError(
             f"Target must be a str, File, or Symbol; got {type(target).__name__}"
@@ -437,10 +419,8 @@ def resolve_impact_target(
     if not query:
         raise ValueError("Target cannot be empty")
 
-    # Path normalization for file lookup
     normalized_path = query.replace("\\", "/").removeprefix("./")
 
-    # Handle absolute paths within project root
     if project.root_path is not None:
         as_path = Path(query)
         if as_path.is_absolute():
@@ -449,7 +429,6 @@ def resolve_impact_target(
             except ValueError:
                 pass
 
-    # Exact repository-relative file match takes precedence
     for file in project.files:
         if file.path.as_posix() == normalized_path:
             return TargetResolution(
@@ -463,16 +442,13 @@ def resolve_impact_target(
                 ),
             )
 
-    # Symbol lookup
     matching_symbols: list[Symbol] = []
 
     if "." in query:
-        # Check exact qualified name first
         qualified_matches = [s for s in project.symbols if s.qualified_name == query]
         if qualified_matches:
             matching_symbols = qualified_matches
         else:
-            # Check module index (e.g. package.module)
             module_index = _build_module_index(project)
             if query in module_index:
                 mod_file = module_index[query]
@@ -486,13 +462,11 @@ def resolve_impact_target(
                         kind="file",
                     ),
                 )
-            # Also check if symbol name literally contains dot
+
             matching_symbols = [s for s in project.symbols if s.name == query]
     else:
-        # Unqualified symbol lookup
         matching_symbols = [s for s in project.symbols if s.name == query]
         if not matching_symbols:
-            # Check module index for single-component module name
             module_index = _build_module_index(project)
             if query in module_index:
                 mod_file = module_index[query]
@@ -531,7 +505,6 @@ def resolve_impact_target(
             ),
         )
 
-    # Ambiguous matches: sort deterministically
     candidates = sorted(
         [
             TargetCandidate(
@@ -639,7 +612,6 @@ def find_direct_impact(
     target_types: set[str] | None = None,
     limit: int | None = None,
 ) -> DirectImpactResult:
-    """Identify directly connected entities and evidence for a target entity."""
     if direction not in {"incoming", "outgoing", "both"}:
         raise ValueError("Direction must be 'incoming', 'outgoing', or 'both'")
 
@@ -693,7 +665,6 @@ def find_direct_impact(
         if rel_type not in types_filter:
             continue
 
-        # 1. Incoming: relationship.target_id == target_id
         if direction in ("incoming", "both") and rel.target_id == target_id:
             related_id = rel.source_id
             if related_id in files_by_id:
@@ -757,7 +728,6 @@ def find_direct_impact(
                     )
                 )
 
-        # 2. Outgoing: relationship.source_id == target_id
         if direction in ("outgoing", "both") and rel.source_id == target_id:
             related_id = rel.target_id
             if related_id in files_by_id:
@@ -821,7 +791,6 @@ def find_direct_impact(
                     )
                 )
 
-    # Sort deterministically
     sorted_items = sorted(
         raw_items,
         key=lambda item: (
@@ -877,7 +846,6 @@ def find_impact(
     max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
     limit: int | None = DEFAULT_IMPACT_LIMIT,
 ) -> ImpactResult:
-    """Identify directly and indirectly connected entities and evidence paths."""
     if direction not in {"incoming", "outgoing", "both"}:
         raise ValueError("Direction must be 'incoming', 'outgoing', or 'both'")
 
@@ -962,7 +930,6 @@ def find_impact(
     for current_depth in range(1, max_depth + 1):
         next_candidates: dict[UUID, list[tuple[ImpactPathStep, ...]]] = {}
 
-        # Process current_frontier in deterministic order
         sorted_frontier = sorted(
             current_frontier,
             key=lambda uid: (_path_sort_key(best_path_to[uid]), uid.hex),
@@ -1025,7 +992,6 @@ def find_impact(
         if not next_candidates:
             break
 
-        # Process newly discovered entities deterministically
         next_frontier: list[UUID] = []
         for v_id in sorted(
             next_candidates.keys(),

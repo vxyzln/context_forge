@@ -1,5 +1,3 @@
-"""Deterministic architecture reports built from persisted inventory data."""
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -17,14 +15,12 @@ DEFAULT_REPORT_LIMIT = 50
 
 
 def _path(value: Any) -> str:
-    """Return a stable POSIX path representation."""
     if isinstance(value, Path):
         return value.as_posix()
     return str(value).replace("\\", "/")
 
 
 def _identifier(value: Any) -> str:
-    """Serialize an identifier consistently."""
     if isinstance(value, UUID):
         return str(value)
     return str(value)
@@ -34,7 +30,6 @@ def _limited_section(
     items: list[dict[str, Any]],
     limit: int,
 ) -> dict[str, Any]:
-    """Return a bounded list while preserving its full count."""
     return {
         "items": items[:limit],
         "total": len(items),
@@ -44,7 +39,6 @@ def _limited_section(
 
 
 def _finding_payload(finding: Any) -> dict[str, Any]:
-    """Serialize a structural finding without losing its evidence fields."""
     return {
         "type": finding.finding_type,
         "message": finding.message,
@@ -66,7 +60,6 @@ def _unresolved_import_payload(
     unresolved_import: Any,
     files_by_id: dict[Any, Any],
 ) -> dict[str, Any]:
-    """Serialize unresolved import evidence."""
     source_file = files_by_id.get(unresolved_import.file_id)
     source_path = unresolved_import.source_path
 
@@ -87,7 +80,6 @@ def _strongly_connected_components(
     nodes: list[str],
     adjacency: dict[str, set[str]],
 ) -> list[tuple[str, ...]]:
-    """Find strongly connected components using deterministic Tarjan traversal."""
     index = 0
     indices: dict[str, int] = {}
     lowlinks: dict[str, int] = {}
@@ -139,11 +131,6 @@ def _cycle_payloads(
     dependency_pairs: set[tuple[str, str]],
     limit: int = DEFAULT_REPORT_LIMIT,
 ) -> list[dict[str, Any]]:
-    """Describe cyclic module groups and the resolved edges within each group.
-
-    Each cyclic component payload bounds its displayed modules and displayed
-    dependencies by ``limit`` while reporting the true counts.
-    """
     adjacency: dict[str, set[str]] = {path: set() for path in module_paths}
 
     for source, target in dependency_pairs:
@@ -197,19 +184,6 @@ def build_architecture_report(
     repository_path: str | Path,
     limit: int = DEFAULT_REPORT_LIMIT,
 ) -> dict[str, Any]:
-    """Build a deterministic, bounded architecture report from an inventory.
-
-    ``limit`` bounds each top-level list in the report as well as displayed
-    sub-lists (such as modules and dependencies within each cycle payload).
-    Counts always describe the complete inventory, not only the displayed items.
-
-    Dependency direction is importer -> imported file. Cycle detection uses
-    Tarjan's algorithm to identify cyclic strongly connected components (SCCs)
-    among indexed Python modules using resolved import relationships; an SCC
-    represents mutually reachable modules and may contain multiple simple cycles.
-    Unresolved imports are reported separately. Package detection inventories
-    conventional Python packages containing ``__init__.py`` files.
-    """
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise ValueError("Report limit must be a positive integer")
 
@@ -360,7 +334,6 @@ def build_architecture_report(
     symbol_count = len(inventory.symbols)
     containment_count = len(inventory.containment)
 
-    # Structured outcome semantics
     diagnostics: list[DiagnosticItem] = []
     for err in analysis_errors:
         diagnostics.append(

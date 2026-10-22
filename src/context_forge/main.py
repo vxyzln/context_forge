@@ -516,7 +516,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if argv is None:
         argv = sys.argv[1:]
 
-    # Default a bare project path to `status`
     if argv and argv[0] not in {
         "analyze",
         "refresh",
@@ -536,6 +535,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "-h",
         "--help",
     }:
+        # Default a bare repository path to the status command.
         argv = ["status", *argv]
 
     return create_parser().parse_args(argv)
@@ -619,13 +619,6 @@ def load_guarded_project(
     allow_refresh: bool = False,
     database_path: Path | None = None,
 ) -> tuple[Project, RepositoryCacheMetadata, WorkflowFreshness]:
-    """Load project analysis guarded by WorkflowFreshnessGuard.
-
-    If allow_refresh is True, attempts refresh when analysis is stale or incomplete.
-    Raises ContextForgeError (MissingAnalysisError, StaleAnalysisError,
-    IncompleteAnalysisError, or IndeterminateFreshnessError) if freshness
-    is not current after guard execution.
-    """
     guard = WorkflowFreshnessGuard(root_path, database_path=database_path)
     freshness = guard.guard(allow_refresh=allow_refresh)
 
@@ -662,7 +655,6 @@ def load_guarded_project(
     )
 
 
-# Backward compatibility alias for any existing callers
 load_generation_project = load_fresh_project
 
 
@@ -1152,7 +1144,6 @@ def run_memory_symbol(
 
     files_by_id = {file.id: file for file in project.files}
 
-    # Apply file filter if specified
     if file_path is not None:
         raw_fp = file_path.strip().replace("\\", "/").removeprefix("./")
         if project.root_path is not None:
@@ -1173,7 +1164,6 @@ def run_memory_symbol(
             )
         ]
 
-    # Apply symbol type filter if specified
     if symbol_type is not None:
         target_kind = symbol_type.strip().lower()
         symbols = [s for s in symbols if s.kind.lower() == target_kind]
@@ -1677,7 +1667,6 @@ def run_memory_relationships(
     files_by_id = {file.id: file for file in project.files}
     symbols_by_id = {symbol.id: symbol for symbol in project.symbols}
 
-    # An exact repository-relative file path takes precedence.
     file = query.get_file(normalized_name)
 
     if file is not None:
@@ -1930,7 +1919,6 @@ def run_architecture(
     output_format: str = "text",
     limit: int = DEFAULT_REPORT_LIMIT,
 ) -> None:
-    """Print a deterministic architecture report for a fresh analysis."""
     if isinstance(limit, bool) or limit < 1:
         raise ValueError("Report limit must be a positive integer")
 
@@ -2195,7 +2183,6 @@ def run_health(
     output_format: str = "text",
     limit: int = DEFAULT_HEALTH_LIMIT,
 ) -> None:
-    """Print an evidence-based repository health report."""
     if isinstance(limit, bool) or limit < 1:
         raise ValueError("Report limit must be a positive integer")
 

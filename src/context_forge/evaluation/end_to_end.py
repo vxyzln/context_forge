@@ -26,8 +26,6 @@ class EndToEndEvaluationResult:
 
 
 class EndToEndEvaluator:
-    """Evaluate the final context produced for a development task."""
-
     def evaluate(
         self,
         project: Project,

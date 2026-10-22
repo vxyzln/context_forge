@@ -1,15 +1,3 @@
-"""Tests for Context Forge v0.12 Section 4: Workflow Freshness Guard.
-
-Covers:
-- Semantic freshness states: current, stale, incomplete, indeterminate
-- Evidence-based detection: additions, modifications, deletions, status, errors
-- Deterministic precedence rules
-- Read-only guarantees
-- Controlled refresh execution, failure handling, and duplicate refresh prevention
-- Integration with ProjectQuery and main loader
-- Structured reporting contracts and error representations
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -54,7 +42,6 @@ def _create_sample_project(
     analysis_status: str = "analyzed",
     errors: list[str] | None = None,
 ) -> Project:
-    """Helper to create a populated Project model."""
     proj_id = uuid4()
     file_list: list[File] = []
     if files:
@@ -93,7 +80,6 @@ def _setup_analyzed_repo(
     cache_schema_version: int = CACHE_SCHEMA_VERSION,
     analyzer_version: str = ANALYZER_VERSION,
 ) -> tuple[Database, ProjectRepository, Project, RepositoryCacheMetadata]:
-    """Helper to initialize and persist analysis for a repository."""
     db_path = repo_dir / ".context_forge.db"
     db = Database(db_path)
     db.initialize()
@@ -126,13 +112,7 @@ def _setup_analyzed_repo(
     return db, repo, proj, metadata
 
 
-# ==============================================================================
-# 1. Semantic Freshness States
-# ==============================================================================
-
-
 def test_freshness_state_enum_properties():
-    """Verify FreshnessState properties."""
     assert FreshnessState.CURRENT.is_current is True
     assert FreshnessState.CURRENT.is_stale is False
     assert FreshnessState.CURRENT.is_incomplete is False
@@ -149,7 +129,6 @@ def test_freshness_state_enum_properties():
 
 
 def test_workflow_freshness_to_dict_and_contract(tmp_path: Path):
-    """Verify WorkflowFreshness serialization and outcome contract."""
     _setup_analyzed_repo(tmp_path)
     guard = WorkflowFreshnessGuard(tmp_path)
     freshness = guard.assess_freshness()
@@ -171,7 +150,6 @@ def test_workflow_freshness_to_dict_and_contract(tmp_path: Path):
 
 
 def test_assess_current_repository(tmp_path: Path):
-    """Verify clean, unmutated analyzed repository assesses as CURRENT."""
     _setup_analyzed_repo(tmp_path, files=["app.py", "util.py"])
     guard = WorkflowFreshnessGuard(tmp_path)
     freshness = guard.assess_freshness()
@@ -187,17 +165,11 @@ def test_assess_current_repository(tmp_path: Path):
     assert freshness.metadata is not None
 
 
-# ==============================================================================
-# 2. Staleness Detection: Modified, Added, Deleted Files
-# ==============================================================================
-
-
 def test_assess_stale_when_file_modified(tmp_path: Path):
-    """Verify modifying a file marks the repository as STALE."""
     _setup_analyzed_repo(tmp_path, files=["app.py"])
     target_file = tmp_path / "app.py"
 
-    # Modify file content and change mtime
+    # Ensure content changes alone trigger staleness.
     target_file.write_text("# modified content\nprint('new')\n", encoding="utf-8")
 
     guard = WorkflowFreshnessGuard(tmp_path)
@@ -215,10 +187,8 @@ def test_assess_stale_when_file_modified(tmp_path: Path):
 
 
 def test_assess_stale_when_file_added(tmp_path: Path):
-    """Verify adding a new file marks the repository as STALE."""
     _setup_analyzed_repo(tmp_path, files=["app.py"])
 
-    # Create new file on disk not in cached fingerprints
     new_file = tmp_path / "new_module.py"
     new_file.write_text("# brand new\n", encoding="utf-8")
 
@@ -233,10 +203,8 @@ def test_assess_stale_when_file_added(tmp_path: Path):
 
 
 def test_assess_stale_when_file_deleted(tmp_path: Path):
-    """Verify deleting a file marks the repository as STALE."""
     _setup_analyzed_repo(tmp_path, files=["app.py", "remove_me.py"])
 
-    # Delete one file from disk
     (tmp_path / "remove_me.py").unlink()
 
     guard = WorkflowFreshnessGuard(tmp_path)
@@ -250,14 +218,12 @@ def test_assess_stale_when_file_deleted(tmp_path: Path):
 
 
 def test_assess_stale_with_multiple_mixed_changes(tmp_path: Path):
-    """Verify mixed add, modify, delete changes are accurately detected and reported."""
     _setup_analyzed_repo(tmp_path, files=["mod1.py", "mod2.py", "delete.py"])
 
-    # Modify mod1
     (tmp_path / "mod1.py").write_text("# modified\n", encoding="utf-8")
-    # Delete delete.py
+
     (tmp_path / "delete.py").unlink()
-    # Add added.py
+
     (tmp_path / "added.py").write_text("# added\n", encoding="utf-8")
 
     guard = WorkflowFreshnessGuard(tmp_path)
@@ -273,14 +239,8 @@ def test_assess_stale_with_multiple_mixed_changes(tmp_path: Path):
     assert "1 deleted" in freshness.reason
 
 
-# ==============================================================================
-# 3. Incompleteness Detection: Status and Errors
-# ==============================================================================
-
-
 @pytest.mark.parametrize("status", ["failed", "partial", "analyzing", "not_analyzed"])
 def test_assess_incomplete_due_to_analysis_status(tmp_path: Path, status: str):
-    """Verify non-successful analysis status marks repository as INCOMPLETE."""
     _setup_analyzed_repo(tmp_path, files=["app.py"], analysis_status=status)
 
     guard = WorkflowFreshnessGuard(tmp_path)
@@ -295,7 +255,6 @@ def test_assess_incomplete_due_to_analysis_status(tmp_path: Path, status: str):
 
 
 def test_assess_incomplete_due_to_recorded_errors(tmp_path: Path):
-    """Verify recorded analysis errors mark repository as INCOMPLETE."""
     _setup_analyzed_repo(
         tmp_path,
         files=["app.py"],
@@ -314,13 +273,7 @@ def test_assess_incomplete_due_to_recorded_errors(tmp_path: Path):
     assert any(d.code == "ANALYSIS_ERROR" for d in freshness.diagnostics)
 
 
-# ==============================================================================
-# 4. Indeterminate Freshness Detection: Missing or Corrupt Evidence
-# ==============================================================================
-
-
 def test_assess_indeterminate_missing_database(tmp_path: Path):
-    """Verify missing database returns INDETERMINATE with MISSING_ANALYSIS blocker."""
     guard = WorkflowFreshnessGuard(tmp_path)
     freshness = guard.assess_freshness()
 
@@ -332,7 +285,6 @@ def test_assess_indeterminate_missing_database(tmp_path: Path):
 
 
 def test_assess_indeterminate_no_analysis_in_db(tmp_path: Path):
-    """Verify empty database with no matching repository analysis returns INDETERMINATE."""
     db_path = tmp_path / ".context_forge.db"
     db = Database(db_path)
     db.initialize()
@@ -346,7 +298,6 @@ def test_assess_indeterminate_no_analysis_in_db(tmp_path: Path):
 
 
 def test_assess_indeterminate_cache_schema_mismatch(tmp_path: Path):
-    """Verify cache schema version mismatch returns INDETERMINATE with SCHEMA_VERSION_MISMATCH."""
     _setup_analyzed_repo(
         tmp_path,
         files=["app.py"],
@@ -363,7 +314,6 @@ def test_assess_indeterminate_cache_schema_mismatch(tmp_path: Path):
 
 
 def test_assess_indeterminate_analyzer_version_mismatch(tmp_path: Path):
-    """Verify analyzer version mismatch returns INDETERMINATE with ANALYZER_VERSION_MISMATCH."""
     _setup_analyzed_repo(
         tmp_path,
         files=["app.py"],
@@ -380,10 +330,8 @@ def test_assess_indeterminate_analyzer_version_mismatch(tmp_path: Path):
 
 
 def test_assess_indeterminate_missing_fingerprints(tmp_path: Path):
-    """Verify missing cached fingerprints returns INDETERMINATE with MISSING_FINGERPRINTS."""
     db, _repo, _proj, _metadata = _setup_analyzed_repo(tmp_path, files=["app.py"])
 
-    # Clear cached fingerprints from database
     with db.connect() as conn:
         conn.execute("DELETE FROM repository_file_fingerprints")
 
@@ -397,7 +345,6 @@ def test_assess_indeterminate_missing_fingerprints(tmp_path: Path):
 
 
 def test_assess_indeterminate_filesystem_error(tmp_path: Path):
-    """Verify filesystem scan error returns INDETERMINATE with INDETERMINATE_FRESHNESS."""
     _setup_analyzed_repo(tmp_path, files=["app.py"])
 
     guard = WorkflowFreshnessGuard(tmp_path)
@@ -413,13 +360,7 @@ def test_assess_indeterminate_filesystem_error(tmp_path: Path):
     assert any(d.code == "INDETERMINATE_FRESHNESS" for d in freshness.diagnostics)
 
 
-# ==============================================================================
-# 5. Deterministic Precedence Rules
-# ==============================================================================
-
-
 def test_precedence_stale_takes_precedence_over_incomplete(tmp_path: Path):
-    """Verify file changes report as STALE even if analysis status is failed."""
     _setup_analyzed_repo(
         tmp_path,
         files=["app.py"],
@@ -427,7 +368,6 @@ def test_precedence_stale_takes_precedence_over_incomplete(tmp_path: Path):
         errors=["Fatal parse error in app.py"],
     )
 
-    # Modify app.py so file changes exist
     (tmp_path / "app.py").write_text("# changed\n", encoding="utf-8")
 
     guard = WorkflowFreshnessGuard(tmp_path)
@@ -435,7 +375,7 @@ def test_precedence_stale_takes_precedence_over_incomplete(tmp_path: Path):
 
     assert freshness.state == FreshnessState.STALE
     assert freshness.is_stale is True
-    # Analysis errors should still be tracked in diagnostics and fields
+
     assert freshness.analysis_status == "failed"
     assert len(freshness.analysis_errors) == 1
     assert any(d.code == "STALE_ANALYSIS" for d in freshness.diagnostics)
@@ -443,7 +383,6 @@ def test_precedence_stale_takes_precedence_over_incomplete(tmp_path: Path):
 
 
 def test_precedence_incomplete_takes_precedence_over_current(tmp_path: Path):
-    """Verify unchanged files with failed analysis reports as INCOMPLETE, not CURRENT."""
     _setup_analyzed_repo(
         tmp_path,
         files=["app.py"],
@@ -458,13 +397,7 @@ def test_precedence_incomplete_takes_precedence_over_current(tmp_path: Path):
     assert freshness.is_current is False
 
 
-# ==============================================================================
-# 6. Read-Only Guarantees
-# ==============================================================================
-
-
 def test_readonly_guarantee_assess_freshness(tmp_path: Path):
-    """Verify assess_freshness does not mutate repo files, DB, or execute analyze()."""
     _setup_analyzed_repo(tmp_path, files=["app.py"])
     (tmp_path / "app.py").write_text("# modified\n", encoding="utf-8")
 
@@ -480,7 +413,6 @@ def test_readonly_guarantee_assess_freshness(tmp_path: Path):
 
 
 def test_readonly_guarantee_guard_allow_refresh_false(tmp_path: Path):
-    """Verify guard(allow_refresh=False) strictly preserves read-only mode."""
     _setup_analyzed_repo(tmp_path, files=["app.py"])
     (tmp_path / "app.py").write_text("# modified\n", encoding="utf-8")
 
@@ -492,13 +424,7 @@ def test_readonly_guarantee_guard_allow_refresh_false(tmp_path: Path):
     mock_analyze.assert_not_called()
 
 
-# ==============================================================================
-# 7. Controlled Refresh Execution and Failure Handling
-# ==============================================================================
-
-
 def test_guard_no_refresh_when_already_current(tmp_path: Path):
-    """Verify guard(allow_refresh=True) does not trigger analyzer when already CURRENT."""
     _setup_analyzed_repo(tmp_path, files=["app.py"])
 
     with patch.object(ProjectAnalyzer, "analyze") as mock_analyze:
@@ -511,22 +437,19 @@ def test_guard_no_refresh_when_already_current(tmp_path: Path):
 
 
 def test_guard_refreshes_when_stale_and_authorized(tmp_path: Path):
-    """Verify guard(allow_refresh=True) executes analyzer and returns fresh analysis."""
-    # Start with empty repo, analyze it with real ProjectAnalyzer
+
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
     db_path = tmp_path / ".context_forge.db"
     analyzer = ProjectAnalyzer(tmp_path, db_path)
     analyzer.analyze()
 
-    # Modify mod.py to make it stale
     (tmp_path / "mod.py").write_text("x = 2\ny = 3\n", encoding="utf-8")
 
     guard = WorkflowFreshnessGuard(tmp_path)
-    # First assess confirms stale
+
     initial = guard.assess_freshness()
     assert initial.is_stale is True
 
-    # Now guard with allow_refresh=True
     post_freshness = guard.guard(allow_refresh=True)
 
     assert post_freshness.is_current is True
@@ -536,7 +459,6 @@ def test_guard_refreshes_when_stale_and_authorized(tmp_path: Path):
 
 
 def test_guard_prevents_duplicate_refresh_in_same_guard_instance(tmp_path: Path):
-    """Verify guard instance does not repeat refresh if already attempted."""
     _setup_analyzed_repo(tmp_path, files=["app.py"])
     (tmp_path / "app.py").write_text("# modified\n", encoding="utf-8")
 
@@ -547,17 +469,14 @@ def test_guard_prevents_duplicate_refresh_in_same_guard_instance(tmp_path: Path)
 
     guard = WorkflowFreshnessGuard(tmp_path, analyzer=mock_analyzer)
 
-    # First call refreshes
     guard.guard(allow_refresh=True)
     assert mock_analyzer.analyze.call_count == 1
 
-    # Second call must not call analyze again on the same guard instance
     guard.guard(allow_refresh=True)
     assert mock_analyzer.analyze.call_count == 1
 
 
 def test_guard_reports_refresh_failure_honestly(tmp_path: Path):
-    """Verify refresh exception is caught and reported honestly without crashing."""
     _setup_analyzed_repo(tmp_path, files=["app.py"])
     (tmp_path / "app.py").write_text("# modified\n", encoding="utf-8")
 
@@ -575,7 +494,6 @@ def test_guard_reports_refresh_failure_honestly(tmp_path: Path):
 
 
 def test_guard_refreshes_when_incomplete_and_authorized(tmp_path: Path):
-    """Verify guard(allow_refresh=True) executes analyzer when analysis is incomplete."""
     _setup_analyzed_repo(tmp_path, files=["app.py"], analysis_status="failed")
 
     mock_analyzer = MagicMock()
@@ -586,7 +504,6 @@ def test_guard_refreshes_when_incomplete_and_authorized(tmp_path: Path):
     initial = guard.assess_freshness()
     assert initial.is_incomplete is True
 
-    # allow_refresh=True must refresh incomplete analysis
     post = guard.guard(allow_refresh=True)
     assert mock_analyzer.analyze.call_count == 1
     assert post.refreshed is True
@@ -605,9 +522,7 @@ def test_guard_refreshes_when_incomplete_and_authorized(tmp_path: Path):
 def test_guard_does_not_refresh_prohibited_indeterminate_states(
     tmp_path: Path, setup_scenario: str
 ):
-    """Verify guard(allow_refresh=True) strictly refuses to invoke analyzer for indeterminate states."""
     if setup_scenario == "missing_analysis":
-        # No DB, no analysis
         pass
     elif setup_scenario == "missing_fingerprints":
         db, _repo, _proj, _metadata = _setup_analyzed_repo(tmp_path, files=["app.py"])
@@ -637,13 +552,7 @@ def test_guard_does_not_refresh_prohibited_indeterminate_states(
     mock_analyzer.analyze.assert_not_called()
 
 
-# ==============================================================================
-# 8. Query and Main Layer Integration
-# ==============================================================================
-
-
 def test_project_query_assess_freshness(tmp_path: Path):
-    """Verify ProjectQuery.assess_freshness works seamlessly on an analyzed project."""
     _, _, proj, metadata = _setup_analyzed_repo(tmp_path, files=["app.py"])
 
     query = ProjectQuery(proj)
@@ -657,15 +566,14 @@ def test_project_query_assess_freshness(tmp_path: Path):
 def test_project_query_assess_freshness_without_metadata_preserves_supplied_project(
     tmp_path: Path,
 ):
-    """Verify ProjectQuery.assess_freshness without metadata preserves supplied project instance."""
     _, _, proj, _ = _setup_analyzed_repo(tmp_path, files=["app.py"])
 
     query = ProjectQuery(proj)
-    freshness = query.assess_freshness()  # metadata=None
+    freshness = query.assess_freshness()
 
     assert freshness.is_current is True
     assert freshness.state == FreshnessState.CURRENT
-    assert freshness.project is proj  # Supplied project identity preserved!
+    assert freshness.project is proj
     assert freshness.metadata is not None
     assert freshness.metadata.project_id == proj.id
 
@@ -673,19 +581,17 @@ def test_project_query_assess_freshness_without_metadata_preserves_supplied_proj
 def test_project_query_assess_freshness_unpersisted_project_preserves_supplied_project(
     tmp_path: Path,
 ):
-    """Verify ProjectQuery.assess_freshness on unpersisted project returns INDETERMINATE preserving project."""
     proj = _create_sample_project(tmp_path, files=["app.py"])
     query = ProjectQuery(proj)
 
-    freshness = query.assess_freshness()  # DB does not exist
+    freshness = query.assess_freshness()
 
     assert freshness.state == FreshnessState.INDETERMINATE
     assert freshness.reason == "missing_analysis"
-    assert freshness.project is proj  # Supplied project identity preserved!
+    assert freshness.project is proj
 
 
 def test_project_query_assess_freshness_missing_root_path():
-    """Verify ProjectQuery.assess_freshness without root_path returns INDETERMINATE."""
     mock_proj = MagicMock()
     mock_proj.root_path = None
     query = ProjectQuery(mock_proj)
@@ -697,7 +603,6 @@ def test_project_query_assess_freshness_missing_root_path():
 
 
 def test_load_guarded_project_returns_on_current(tmp_path: Path):
-    """Verify load_guarded_project returns project, metadata, freshness on clean repository."""
     from context_forge.main import load_guarded_project
 
     _setup_analyzed_repo(tmp_path, files=["app.py"])
@@ -709,7 +614,6 @@ def test_load_guarded_project_returns_on_current(tmp_path: Path):
 
 
 def test_load_guarded_project_raises_stale_error(tmp_path: Path):
-    """Verify load_guarded_project raises StaleAnalysisError when repo is stale."""
     from context_forge.main import load_guarded_project
 
     _setup_analyzed_repo(tmp_path, files=["app.py"])
@@ -723,7 +627,6 @@ def test_load_guarded_project_raises_stale_error(tmp_path: Path):
 
 
 def test_load_guarded_project_raises_incomplete_error(tmp_path: Path):
-    """Verify load_guarded_project raises IncompleteAnalysisError on incomplete analysis."""
     from context_forge.main import load_guarded_project
 
     _setup_analyzed_repo(tmp_path, files=["app.py"], analysis_status="failed")
@@ -736,7 +639,6 @@ def test_load_guarded_project_raises_incomplete_error(tmp_path: Path):
 
 
 def test_load_guarded_project_raises_missing_error(tmp_path: Path):
-    """Verify load_guarded_project raises MissingAnalysisError when database is absent."""
     from context_forge.main import load_guarded_project
 
     with pytest.raises(MissingAnalysisError) as exc_info:
@@ -747,7 +649,6 @@ def test_load_guarded_project_raises_missing_error(tmp_path: Path):
 
 
 def test_load_guarded_project_raises_indeterminate_error(tmp_path: Path):
-    """Verify load_guarded_project raises IndeterminateFreshnessError on version mismatch."""
     from context_forge.main import load_guarded_project
 
     _setup_analyzed_repo(tmp_path, files=["app.py"], cache_schema_version=99)
@@ -760,14 +661,12 @@ def test_load_guarded_project_raises_indeterminate_error(tmp_path: Path):
 
 
 def test_load_guarded_project_refreshes_when_allowed(tmp_path: Path):
-    """Verify load_guarded_project refreshes stale project when allow_refresh=True."""
     from context_forge.main import load_guarded_project
 
     (tmp_path / "hello.py").write_text("print('hello')\n", encoding="utf-8")
     db_path = tmp_path / ".context_forge.db"
     ProjectAnalyzer(tmp_path, db_path).analyze()
 
-    # Modify file
     (tmp_path / "hello.py").write_text("print('hello world')\n", encoding="utf-8")
 
     _proj, _meta, freshness = load_guarded_project(tmp_path, allow_refresh=True)
@@ -775,13 +674,7 @@ def test_load_guarded_project_refreshes_when_allowed(tmp_path: Path):
     assert freshness.refreshed is True
 
 
-# ==============================================================================
-# 9. Structured Errors and Diagnostics Verification
-# ==============================================================================
-
-
 def test_error_classes_attributes_and_outcomes():
-    """Verify error classes carry proper diagnostic and outcome properties."""
     err_inc = IncompleteAnalysisError("analysis incomplete")
     assert err_inc.code == "INCOMPLETE_ANALYSIS"
     assert err_inc.source == "analyzer"

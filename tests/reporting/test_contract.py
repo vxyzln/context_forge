@@ -108,13 +108,12 @@ def test_diagnostic_item_validation() -> None:
     with pytest.raises(ValueError, match="Diagnostic message cannot be empty"):
         DiagnosticItem(severity=DiagnosticSeverity.INFO, message="   ")
 
-    # String severity coerced to enum
     item = DiagnosticItem(severity="warning", message="Something odd")  # type: ignore[arg-type]
     assert item.severity == DiagnosticSeverity.WARNING
 
 
 def test_operation_outcome_factories_and_properties() -> None:
-    # 1. Complete success
+
     succ = OperationOutcome.success("Analysis complete")
     assert succ.is_success
     assert not succ.is_partial
@@ -126,7 +125,6 @@ def test_operation_outcome_factories_and_properties() -> None:
     assert not succ.has_errors
     assert succ.status == OperationStatus.SUCCESS
 
-    # 2. Success with warnings / partial
     warn_item = DiagnosticItem.warning("1 cycle detected")
     part = OperationOutcome.partial(
         "Analysis has warnings",
@@ -141,7 +139,6 @@ def test_operation_outcome_factories_and_properties() -> None:
     assert not part.has_blockers
     assert not part.has_errors
 
-    # 3. Incomplete outcome
     inc = OperationOutcome.incomplete(
         "Project not analyzed",
         limitations=["Run analyze first"],
@@ -150,7 +147,6 @@ def test_operation_outcome_factories_and_properties() -> None:
     assert not inc.is_success
     assert not inc.is_failed
 
-    # 4. Blocked outcome
     blk_item = DiagnosticItem.blocker("Analysis stale, refresh needed")
     blocked = OperationOutcome.blocked(
         "Operation blocked",
@@ -161,7 +157,6 @@ def test_operation_outcome_factories_and_properties() -> None:
     assert blocked.has_blockers
     assert len(blocked.blockers) == 1
 
-    # 5. Failed outcome
     err_item = DiagnosticItem.error("Parse syntax error", path="bad.py")
     failed = OperationOutcome.failed(
         "Analysis failed",
@@ -179,36 +174,30 @@ def test_operation_outcome_from_diagnostics_resolution() -> None:
     warn = DiagnosticItem.warning("Stale timestamp")
     info = DiagnosticItem.info("Processed 10 files")
 
-    # Error priority
     outcome_err = OperationOutcome.from_diagnostics([warn, err, blk])
     assert outcome_err.status == OperationStatus.FAILED
     assert outcome_err.has_errors
     assert outcome_err.has_blockers
     assert outcome_err.has_warnings
 
-    # Blocker priority over warning
     outcome_blk = OperationOutcome.from_diagnostics([warn, blk, info])
     assert outcome_blk.status == OperationStatus.BLOCKED
     assert outcome_blk.has_blockers
     assert not outcome_blk.has_errors
 
-    # Non-blocking warning on complete operation -> SUCCESS with warnings
     outcome_warn = OperationOutcome.from_diagnostics([info, warn])
     assert outcome_warn.status == OperationStatus.SUCCESS
     assert outcome_warn.is_success
     assert outcome_warn.has_warnings
 
-    # Explicit partial flag -> PARTIAL
     outcome_partial = OperationOutcome.from_diagnostics([info, warn], is_partial=True)
     assert outcome_partial.status == OperationStatus.PARTIAL
     assert not outcome_partial.is_success
 
-    # Explicit incomplete flag -> INCOMPLETE
     outcome_inc = OperationOutcome.from_diagnostics([info], is_incomplete=True)
     assert outcome_inc.status == OperationStatus.INCOMPLETE
     assert not outcome_inc.is_success
 
-    # Pure info -> SUCCESS
     outcome_clean = OperationOutcome.from_diagnostics([info])
     assert outcome_clean.status == OperationStatus.SUCCESS
     assert outcome_clean.is_success
@@ -216,7 +205,7 @@ def test_operation_outcome_from_diagnostics_resolution() -> None:
 
 
 def test_operation_outcome_distinguishes_five_states() -> None:
-    # 1. Success without diagnostics
+
     clean = OperationOutcome.from_diagnostics(
         [DiagnosticItem.info("Processed clean repository")]
     )
@@ -226,7 +215,6 @@ def test_operation_outcome_distinguishes_five_states() -> None:
     assert not clean.has_blockers
     assert not clean.has_errors
 
-    # 2. Success with non-blocking warning and complete results
     with_warn = OperationOutcome.from_diagnostics(
         [
             DiagnosticItem.info("All 10 modules analyzed"),
@@ -242,7 +230,6 @@ def test_operation_outcome_distinguishes_five_states() -> None:
     assert not with_warn.has_blockers
     assert not with_warn.has_errors
 
-    # 3. Partial results or materially incomplete execution
     part = OperationOutcome.from_diagnostics(
         [DiagnosticItem.warning("Results truncated to limit 50", code="TRUNCATED")],
         is_partial=True,
@@ -252,7 +239,6 @@ def test_operation_outcome_distinguishes_five_states() -> None:
     assert part.is_partial
     assert part.has_warnings
 
-    # 4. Blocked operation
     blocked = OperationOutcome.from_diagnostics(
         [
             DiagnosticItem.blocker(
@@ -265,7 +251,6 @@ def test_operation_outcome_distinguishes_five_states() -> None:
     assert blocked.is_blocked
     assert blocked.has_blockers
 
-    # 5. Failed operation
     failed = OperationOutcome.from_diagnostics(
         [DiagnosticItem.error("Crash during AST parsing", code="PARSE_ERROR")]
     )
