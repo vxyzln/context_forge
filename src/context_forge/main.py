@@ -8,6 +8,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from context_forge.inspection import (
+    format_pre_change_inspection_summary,
+    inspect_pre_change,
+)
 from context_forge.models.project import Project
 from context_forge.pipeline.analyzer import (
     ProjectAnalyzer,
@@ -449,6 +453,62 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _add_output_format_argument(locate_parser)
 
+    inspect_change_parser = subparsers.add_parser(
+        "inspect-change",
+        aliases=["pre-change"],
+        help="Perform read-only pre-change inspection composing preflight, target resolution, freshness, evidence, and Git context.",
+    )
+    inspect_change_parser.add_argument(
+        "target",
+        help="Target symbol name or qualified name to inspect.",
+    )
+    inspect_change_parser.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        type=Path,
+        help="Repository root path (default: current directory).",
+    )
+    inspect_change_parser.add_argument(
+        "--file",
+        dest="file_path",
+        default=None,
+        help="Filter symbol by file path.",
+    )
+    inspect_change_parser.add_argument(
+        "--type",
+        dest="symbol_type",
+        default=None,
+        help="Filter symbol by type/kind (e.g., class, function, method).",
+    )
+    inspect_change_parser.add_argument(
+        "--direction",
+        choices=("both", "incoming", "outgoing"),
+        default="both",
+        help="Traversal direction for structural impact (default: both).",
+    )
+    inspect_change_parser.add_argument(
+        "--depth",
+        "--max-depth",
+        dest="max_depth",
+        type=int,
+        default=DEFAULT_IMPACT_MAX_DEPTH,
+        help=f"Maximum traversal depth for structural impact (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
+    )
+    inspect_change_parser.add_argument(
+        "--max-lines",
+        type=int,
+        default=DEFAULT_EXCERPT_MAX_LINES,
+        help=f"Maximum lines for source excerpt (default: {DEFAULT_EXCERPT_MAX_LINES}).",
+    )
+    inspect_change_parser.add_argument(
+        "--no-git",
+        action="store_true",
+        default=False,
+        help="Disable Git context inspection.",
+    )
+    _add_output_format_argument(inspect_change_parser)
+
     return parser
 
 
@@ -471,6 +531,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "health",
         "preflight",
         "locate",
+        "inspect-change",
+        "pre-change",
         "-h",
         "--help",
     }:
@@ -1266,6 +1328,38 @@ def run_locate(
         raise SystemExit(1)
     else:
         print(f"Message: {resolution.message}")
+        raise SystemExit(1)
+
+
+def run_inspect_change(
+    target: str,
+    path: Path,
+    output_format: str = "text",
+    file_path: str | None = None,
+    symbol_type: str | None = None,
+    direction: str = "both",
+    max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+    max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
+    no_git: bool = False,
+) -> None:
+    result = inspect_pre_change(
+        repository_path=path,
+        target=target,
+        file_path=file_path,
+        symbol_type=symbol_type,
+        direction=direction,
+        max_depth=max_depth,
+        max_excerpt_lines=max_lines,
+        include_git=not no_git,
+    )
+
+    if output_format == "json":
+        _emit_json(result.to_dict())
+    else:
+        for line in format_pre_change_inspection_summary(result):
+            print(line)
+
+    if result.is_blocked or result.is_failed:
         raise SystemExit(1)
 
 
@@ -2410,6 +2504,28 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             getattr(args, "symbol_type", None),
             getattr(args, "excerpt", False),
             getattr(args, "max_lines", DEFAULT_EXCERPT_MAX_LINES),
+        ),
+        "inspect-change": lambda: run_inspect_change(
+            args.target,
+            args.path,
+            args.format,
+            getattr(args, "file_path", None),
+            getattr(args, "symbol_type", None),
+            getattr(args, "direction", "both"),
+            getattr(args, "max_depth", DEFAULT_IMPACT_MAX_DEPTH),
+            getattr(args, "max_lines", DEFAULT_EXCERPT_MAX_LINES),
+            getattr(args, "no_git", False),
+        ),
+        "pre-change": lambda: run_inspect_change(
+            args.target,
+            args.path,
+            args.format,
+            getattr(args, "file_path", None),
+            getattr(args, "symbol_type", None),
+            getattr(args, "direction", "both"),
+            getattr(args, "max_depth", DEFAULT_IMPACT_MAX_DEPTH),
+            getattr(args, "max_lines", DEFAULT_EXCERPT_MAX_LINES),
+            getattr(args, "no_git", False),
         ),
     }
 

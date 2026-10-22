@@ -44,6 +44,7 @@ def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> No
     assert "architecture" in captured.out
     assert "impact" in captured.out
     assert "health" in captured.out
+    assert "inspect-change" in captured.out
     assert "generate" not in captured.out
     assert "runtime" not in captured.out
     assert "--provider" not in captured.out
