@@ -1255,3 +1255,55 @@ class ProjectQuery:
             metadata=metadata,
             current_fingerprints=current_fingerprints,
         )
+
+    def navigate_git(
+        self,
+        *,
+        git_repository: Any | None = None,
+        untracked_mode: str = "all",
+        timeout_seconds: float = 15.0,
+    ) -> Any:
+        from context_forge.git import (
+            GitNavigationContext,
+            GitRepository,
+            GitStatusResult,
+            map_changed_paths,
+        )
+
+        root = self.project.root_path
+        if root is None:
+            diag = DiagnosticItem.blocker(
+                "Project has no root_path configured; cannot navigate Git",
+                code="MISSING_ROOT_PATH",
+                source="project",
+            )
+            empty_status = GitStatusResult(
+                is_repository=False,
+                root_path=None,
+                branch=None,
+                head_hash=None,
+                entries=(),
+                outcome=OperationOutcome.blocked(
+                    "Project has no root_path configured",
+                    diagnostics=(diag,),
+                ),
+            )
+            return GitNavigationContext(
+                git_root=None,
+                project_root=Path("."),
+                is_git_repository=False,
+                git_status=empty_status,
+                mappings=(),
+                outcome=OperationOutcome.blocked(
+                    "Project has no root_path configured",
+                    diagnostics=(diag,),
+                ),
+                diagnostics=(diag,),
+            )
+
+        repo = git_repository or GitRepository(root)
+        status_result = repo.get_status(
+            untracked_mode=untracked_mode,
+            timeout_seconds=timeout_seconds,
+        )
+        return map_changed_paths(self.project, status_result)

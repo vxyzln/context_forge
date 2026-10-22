@@ -2,7 +2,14 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from context_forge.git.models import GitCommit, GitFileChange, GitRepositoryInfo
+from context_forge.git.models import (
+    GitCommit,
+    GitFileChange,
+    GitRepositoryInfo,
+    GitStatusEntry,
+    GitStatusResult,
+)
+from context_forge.reporting.contract import DiagnosticItem, OperationOutcome
 
 
 class GitRepository:
@@ -221,10 +228,217 @@ class GitRepository:
         except ValueError:
             return 0
 
+    def get_status(
+        self,
+        *,
+        untracked_mode: str = "all",
+        timeout_seconds: float = 15.0,
+    ) -> GitStatusResult:
+        root = self.get_root()
+        if root is None or not self.is_repository():
+            diag = DiagnosticItem.blocker(
+                f"Directory is not a Git repository: {self.root_path}",
+                code="NOT_A_GIT_REPOSITORY",
+                source="git",
+                path=str(self.root_path),
+            )
+            return GitStatusResult(
+                is_repository=False,
+                root_path=None,
+                branch=None,
+                head_hash=None,
+                entries=(),
+                limitations=(f"Directory is not a Git repository: {self.root_path}",),
+                outcome=OperationOutcome.blocked(
+                    "Not a Git repository",
+                    diagnostics=(diag,),
+                    limitations=(
+                        f"Directory is not a Git repository: {self.root_path}",
+                    ),
+                ),
+            )
+
+        info = self.get_info()
+        branch = info.current_branch if info else None
+        head_hash = info.head_hash if info else None
+
+        try:
+            result = self._run_git(
+                "status",
+                "--porcelain=v1",
+                "-z",
+                f"--untracked-files={untracked_mode}",
+                check=False,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            diag = DiagnosticItem.error(
+                f"Git status command timed out after {timeout_seconds}s",
+                code="GIT_TIMEOUT",
+                source="git",
+                path=str(self.root_path),
+            )
+            return GitStatusResult(
+                is_repository=True,
+                root_path=root,
+                branch=branch,
+                head_hash=head_hash,
+                entries=(),
+                limitations=("Git status operation timed out.",),
+                outcome=OperationOutcome.failed(
+                    f"Git status timed out after {timeout_seconds}s",
+                    diagnostics=(diag,),
+                    limitations=("Git status operation timed out.",),
+                ),
+            )
+        except (FileNotFoundError, PermissionError) as exc:
+            diag = DiagnosticItem.error(
+                f"Failed to invoke Git executable: {exc}",
+                code="GIT_INVOCATION_FAILED",
+                source="git",
+                path=str(self.root_path),
+            )
+            return GitStatusResult(
+                is_repository=True,
+                root_path=root,
+                branch=branch,
+                head_hash=head_hash,
+                entries=(),
+                limitations=(f"Git executable cannot be invoked: {exc}",),
+                outcome=OperationOutcome.failed(
+                    f"Failed to invoke Git executable: {exc}",
+                    diagnostics=(diag,),
+                    limitations=(f"Git executable cannot be invoked: {exc}",),
+                ),
+            )
+
+        if result.returncode != 0:
+            stderr_msg = (
+                result.stderr.strip()
+                or f"Git status exited with code {result.returncode}"
+            )
+            diag = DiagnosticItem.error(
+                stderr_msg,
+                code="GIT_COMMAND_FAILED",
+                source="git",
+                path=str(self.root_path),
+                details={
+                    "returncode": result.returncode,
+                    "stderr": result.stderr.strip(),
+                },
+            )
+            return GitStatusResult(
+                is_repository=True,
+                root_path=root,
+                branch=branch,
+                head_hash=head_hash,
+                entries=(),
+                limitations=(f"Git status command failed: {stderr_msg}",),
+                outcome=OperationOutcome.failed(
+                    stderr_msg,
+                    diagnostics=(diag,),
+                    limitations=(f"Git status command failed: {stderr_msg}",),
+                ),
+            )
+
+        try:
+            entries = self._parse_porcelain_z(result.stdout)
+        except ValueError as exc:
+            diag = DiagnosticItem.error(
+                f"Failed to parse Git status output: {exc}",
+                code="MALFORMED_GIT_STATUS",
+                source="git",
+                path=str(self.root_path),
+            )
+            return GitStatusResult(
+                is_repository=True,
+                root_path=root,
+                branch=branch,
+                head_hash=head_hash,
+                entries=(),
+                limitations=(f"Git status output could not be parsed: {exc}",),
+                outcome=OperationOutcome.failed(
+                    f"Failed to parse Git status output: {exc}",
+                    diagnostics=(diag,),
+                    limitations=(f"Git status output could not be parsed: {exc}",),
+                ),
+            )
+
+        sorted_entries = tuple(
+            sorted(
+                entries,
+                key=lambda e: (e.path, e.status_code, e.orig_path or ""),
+            )
+        )
+        msg = (
+            f"Discovered {len(sorted_entries)} changed path(s)"
+            if sorted_entries
+            else "Working tree is clean"
+        )
+        return GitStatusResult(
+            is_repository=True,
+            root_path=root,
+            branch=branch,
+            head_hash=head_hash,
+            entries=sorted_entries,
+            outcome=OperationOutcome.success(msg),
+        )
+
+    @staticmethod
+    def _parse_porcelain_z(output: str) -> list[GitStatusEntry]:
+        if not output:
+            return []
+
+        tokens = output.split("\0")
+        entries: list[GitStatusEntry] = []
+        i = 0
+        total_tokens = len(tokens)
+
+        while i < total_tokens:
+            token = tokens[i]
+            if not token and i == total_tokens - 1:
+                break
+            if not token:
+                i += 1
+                continue
+
+            if len(token) <= 3 or token[2] != " ":
+                raise ValueError(f"Malformed Git status record: {token!r}")
+
+            index_status = token[0]
+            working_tree_status = token[1]
+            path = token[3:]
+            orig_path: str | None = None
+
+            if "R" in (index_status, working_tree_status) or "C" in (
+                index_status,
+                working_tree_status,
+            ):
+                i += 1
+                if i < total_tokens and tokens[i]:
+                    orig_path = tokens[i]
+                else:
+                    raise ValueError(
+                        f"Missing original path for rename/copy record: {token!r}"
+                    )
+
+            entries.append(
+                GitStatusEntry(
+                    path=path,
+                    index_status=index_status,
+                    working_tree_status=working_tree_status,
+                    orig_path=orig_path,
+                )
+            )
+            i += 1
+
+        return entries
+
     def _run_git(
         self,
         *arguments: str,
         check: bool = True,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", *arguments],
@@ -232,4 +446,5 @@ class GitRepository:
             capture_output=True,
             text=True,
             check=check,
+            timeout=timeout,
         )
