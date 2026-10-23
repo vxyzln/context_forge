@@ -11,6 +11,7 @@ import pytest
 from context_forge.context.models import ContextPackage, ContextUnit
 from context_forge.main import (
     load_fresh_project,
+    load_guarded_project,
     load_project_analysis,
     main,
     parse_args,
@@ -21,6 +22,11 @@ from context_forge.main import (
     run_status,
 )
 from context_forge.query.result import SearchResult, SearchResultType
+from context_forge.reporting.errors import (
+    IndeterminateFreshnessError,
+    MissingAnalysisError,
+    RefreshFailedError,
+)
 
 
 def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
@@ -536,7 +542,7 @@ def test_load_fresh_project_rejects_stale_analysis(tmp_path: Path) -> None:
             match=r"Repository analysis is stale; run 'context-forge analyze .*' first",
         ),
     ):
-        load_fresh_project(tmp_path)
+        load_fresh_project(tmp_path, allow_refresh=False)
 
 
 def test_context_command_with_explicit_task(
@@ -3100,15 +3106,16 @@ def test_architecture_command_rejects_invalid_limit(
     assert "Error: Report limit must be a positive integer" in captured.err
 
 
-def test_architecture_command_fails_on_uninitialized_repository(
+def test_architecture_command_fails_on_uninitialized_repository_with_no_refresh(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    db_path = tmp_path / ".context_forge.db"
     with (
         patch.object(
             sys,
             "argv",
-            ["context-forge", "architecture", str(tmp_path)],
+            ["context-forge", "architecture", str(tmp_path), "--no-refresh"],
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -3119,6 +3126,28 @@ def test_architecture_command_fails_on_uninitialized_repository(
     assert (
         "No persisted analysis found; run 'context-forge analyze' first" in captured.err
     )
+    assert not db_path.exists()
+
+
+def test_architecture_command_auto_analyzes_uninitialized_repository(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    db_path = tmp_path / ".context_forge.db"
+    assert not db_path.exists()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "architecture", str(tmp_path)],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Analysis status: analyzed" in captured.out
+    assert db_path.exists()
 
 
 def test_architecture_command_fails_on_stale_repository(
@@ -3138,7 +3167,7 @@ def test_architecture_command_fails_on_stale_repository(
         patch.object(
             sys,
             "argv",
-            ["context-forge", "architecture", str(tmp_path)],
+            ["context-forge", "architecture", str(tmp_path), "--no-refresh"],
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -3147,6 +3176,33 @@ def test_architecture_command_fails_on_stale_repository(
     assert exc_info.value.code == 1
     captured = capsys.readouterr()
     assert "Repository analysis is stale; run 'context-forge analyze" in captured.err
+
+
+def test_architecture_command_auto_refreshes_on_stale_repository(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "file.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Modify file to make cache stale
+    source.write_text("x = 2\n", encoding="utf-8")
+
+    # Running architecture without --no-refresh automatically refreshes and succeeds
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "architecture", str(tmp_path)],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Analysis status: analyzed" in captured.out
 
 
 def test_architecture_command_handles_schema_v1_database_without_crashing(
@@ -3196,7 +3252,7 @@ def test_architecture_command_handles_schema_v1_database_without_crashing(
         patch.object(
             sys,
             "argv",
-            ["context-forge", "architecture", str(tmp_path)],
+            ["context-forge", "architecture", str(tmp_path), "--no-refresh"],
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -3206,16 +3262,16 @@ def test_architecture_command_handles_schema_v1_database_without_crashing(
     arch_captured = capsys.readouterr()
     assert "no such table: imports" not in arch_captured.err
     assert (
-        "Repository analysis is stale; run 'context-forge analyze" in arch_captured.err
+        "Repository analysis freshness is indeterminate (schema_version_mismatch); reanalysis is required"
+        in arch_captured.err
     )
 
-    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
-        main()
-    capsys.readouterr()
-
+    # Without --no-refresh, architecture auto-recovers and succeeds
     with patch.object(sys, "argv", ["context-forge", "architecture", str(tmp_path)]):
         main()
     final_captured = capsys.readouterr()
+    assert final_captured.err == ""
+    assert "Analysis status: analyzed" in final_captured.out
     assert final_captured.err == ""
     assert "Analysis status: analyzed" in final_captured.out
 
@@ -3515,7 +3571,7 @@ def test_impact_command_stale_cache_aborts(
         patch.object(
             sys,
             "argv",
-            ["context-forge", "impact", "a.py", str(tmp_path)],
+            ["context-forge", "impact", "a.py", str(tmp_path), "--no-refresh"],
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -3524,6 +3580,32 @@ def test_impact_command_stale_cache_aborts(
     assert exc_info.value.code == 1
     captured = capsys.readouterr()
     assert "Repository analysis is stale" in captured.err
+
+
+def test_impact_command_auto_refreshes_on_stale_repository(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target_file = tmp_path / "a.py"
+    target_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    target_file.write_text("x = 2\n", encoding="utf-8")
+
+    # Automatically refreshes and succeeds
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "impact", "a.py", str(tmp_path)],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Repository:" in captured.out
 
 
 def test_impact_command_rejects_empty_target_or_invalid_limit(
@@ -3726,7 +3808,7 @@ def test_health_command_json_output(
     assert isinstance(data["limitations"], list)
 
 
-def test_health_command_stale_cache_does_not_abort(
+def test_health_command_stale_cache_does_not_abort_and_does_not_refresh(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -3739,10 +3821,22 @@ def test_health_command_stale_cache_does_not_abort(
 
     target_file.write_text("x = 2\n", encoding="utf-8")
 
-    with patch.object(
-        sys,
-        "argv",
-        ["context-forge", "health", str(tmp_path)],
+    db_path = tmp_path / ".context_forge.db"
+    conn = sqlite3.connect(db_path)
+    old_fingerprints = conn.execute(
+        "SELECT * FROM repository_file_fingerprints"
+    ).fetchall()
+    conn.close()
+
+    with (
+        patch(
+            "context_forge.pipeline.analyzer.ProjectAnalyzer.analyze"
+        ) as mock_analyze,
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "health", str(tmp_path)],
+        ),
     ):
         main()
 
@@ -3750,13 +3844,25 @@ def test_health_command_stale_cache_does_not_abort(
     assert captured.err == ""
     assert "Cache status: stale" in captured.out
     assert "Cached analysis is stale" in captured.out
+    mock_analyze.assert_not_called()
+
+    conn = sqlite3.connect(db_path)
+    current_fingerprints = conn.execute(
+        "SELECT * FROM repository_file_fingerprints"
+    ).fetchall()
+    conn.close()
+    assert old_fingerprints == current_fingerprints
 
 
 def test_health_command_unanalyzed_repository_aborts(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    db_file = tmp_path / ".context_forge.db"
     with (
+        patch(
+            "context_forge.pipeline.analyzer.ProjectAnalyzer.analyze"
+        ) as mock_analyze,
         patch.object(sys, "argv", ["context-forge", "health", str(tmp_path)]),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -3764,6 +3870,75 @@ def test_health_command_unanalyzed_repository_aborts(
 
     assert exc_info.value.code == 1
     assert "No persisted analysis found" in capsys.readouterr().err
+    assert not db_file.exists()
+    mock_analyze.assert_not_called()
+
+
+def test_health_command_incomplete_analysis_reports_without_refreshing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target_file = tmp_path / "a.py"
+    target_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    db_path = tmp_path / ".context_forge.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE projects SET analysis_status = 'failed'")
+    conn.commit()
+    conn.close()
+
+    with (
+        patch(
+            "context_forge.pipeline.analyzer.ProjectAnalyzer.analyze"
+        ) as mock_analyze,
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "health", str(tmp_path)],
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Analysis status is 'failed'" in captured.out
+    mock_analyze.assert_not_called()
+
+    conn = sqlite3.connect(db_path)
+    status_row = conn.execute("SELECT analysis_status FROM projects").fetchone()
+    conn.close()
+    assert status_row[0] == "failed"
+
+
+def test_health_command_corrupt_database_aborts_without_refreshing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    db_file = tmp_path / ".context_forge.db"
+    db_file.write_text("CORRUPTED_NOT_A_DATABASE\n", encoding="utf-8")
+
+    with (
+        patch(
+            "context_forge.pipeline.analyzer.ProjectAnalyzer.analyze"
+        ) as mock_analyze,
+        patch.object(sys, "argv", ["context-forge", "health", str(tmp_path)]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert (
+        "error" in captured.err.lower()
+        or "file is not a database" in captured.err.lower()
+    )
+    mock_analyze.assert_not_called()
+    assert db_file.read_text(encoding="utf-8") == "CORRUPTED_NOT_A_DATABASE\n"
 
 
 def test_health_command_rejects_invalid_limit(
@@ -3849,11 +4024,11 @@ def test_cf_entry_point_dispatches_status(
 @pytest.mark.parametrize(
     "argv",
     [
-        ["architecture"],
+        ["architecture", "--no-refresh"],
         ["health"],
-        ["impact", "a.py"],
-        ["memory", "dependencies", "a.py"],
-        ["memory", "relationships", "a.py"],
+        ["impact", "a.py", "--no-refresh"],
+        ["memory", "dependencies", "a.py", "--no-refresh"],
+        ["memory", "relationships", "a.py", "--no-refresh"],
         ["status"],
         ["diagnostics"],
         ["inspect"],
@@ -3901,11 +4076,141 @@ def test_unanalyzed_directory_missing_db_avoids_database_connection(
         database_mock.assert_not_called()
 
 
+def test_unanalyzed_directory_real_path_read_only_invariance(tmp_path: Path) -> None:
+    """Verifies with zero mocks that read-only project loading on an unanalyzed directory
+    never creates a database file or directory on disk."""
+    sample_file = tmp_path / "mod.py"
+    sample_file.write_text("x = 1\n", encoding="utf-8")
+
+    initial_listing = set(tmp_path.rglob("*"))
+    assert (tmp_path / ".context_forge.db") not in initial_listing
+
+    # 1. Test load_guarded_project without mocks
+    with pytest.raises(MissingAnalysisError) as exc_info:
+        load_guarded_project(tmp_path)
+    assert exc_info.value.code == "MISSING_ANALYSIS"
+    assert set(tmp_path.rglob("*")) == initial_listing
+    assert not (tmp_path / ".context_forge.db").exists()
+
+    # 2. Test load_fresh_project without mocks
+    with pytest.raises(MissingAnalysisError) as exc_info:
+        load_fresh_project(tmp_path, allow_refresh=False)
+    assert exc_info.value.code == "MISSING_ANALYSIS"
+    assert set(tmp_path.rglob("*")) == initial_listing
+    assert not (tmp_path / ".context_forge.db").exists()
+
+    # 3. Test explicit custom database_path that does not exist
+    custom_db = tmp_path / "custom" / "my.db"
+    with pytest.raises(MissingAnalysisError) as exc_info:
+        load_guarded_project(tmp_path, database_path=custom_db)
+    assert set(tmp_path.rglob("*")) == initial_listing
+    assert not custom_db.exists()
+    assert not (tmp_path / "custom").exists()
+
+    with pytest.raises(MissingAnalysisError) as exc_info:
+        load_fresh_project(tmp_path, database_path=custom_db, allow_refresh=False)
+    assert set(tmp_path.rglob("*")) == initial_listing
+    assert not custom_db.exists()
+
+
+def test_corrupt_database_distinguished_from_absent_database(tmp_path: Path) -> None:
+    """Verifies that an existing but corrupt SQLite database is classified as indeterminate/unreadable
+    rather than being confused with an absent database."""
+    (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    db_file = tmp_path / ".context_forge.db"
+    db_file.write_text("CORRUPTED_GARBAGE_NOT_A_SQLITE_DATABASE\n", encoding="utf-8")
+
+    with pytest.raises(IndeterminateFreshnessError) as exc_info:
+        load_guarded_project(tmp_path)
+    assert exc_info.value.code == "INDETERMINATE_FRESHNESS"
+    assert "indeterminate" in str(exc_info.value)
+    assert "missing" not in str(exc_info.value).lower()
+
+    with pytest.raises(IndeterminateFreshnessError) as exc_info:
+        load_fresh_project(tmp_path, allow_refresh=False)
+    assert exc_info.value.code == "INDETERMINATE_FRESHNESS"
+
+
+@pytest.mark.parametrize(
+    "subcommand",
+    [
+        ["status"],
+        ["cache"],
+        ["inspect"],
+        ["diagnostics"],
+        ["health"],
+        ["architecture", "--no-refresh"],
+        ["impact", "mod.py", "--no-refresh"],
+        ["changeset", "mod.py", "--no-refresh", "--path"],
+        ["path", "mod.py", "mod.py", "--no-refresh", "--path"],
+        ["locate", "x", "--no-refresh"],
+        ["context", "--no-refresh"],
+        ["memory", "search", "x", "--no-refresh"],
+        ["memory", "file", "mod.py", "--no-refresh"],
+        ["memory", "symbol", "x", "--no-refresh"],
+        ["memory", "references", "x", "--no-refresh"],
+        ["memory", "relationships", "mod.py", "--no-refresh"],
+        ["memory", "dependencies", "mod.py", "--no-refresh"],
+    ],
+)
+def test_all_commands_preserve_read_only_invariance_on_unanalyzed_repo(
+    tmp_path: Path,
+    subcommand: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Real invocation of all substantive and reporting commands against an unanalyzed repo
+    verifying zero disk mutation and zero database creation."""
+    (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    initial_listing = set(tmp_path.rglob("*"))
+
+    argv = ["context-forge", *subcommand, str(tmp_path)]
+    with (
+        patch.object(sys, "argv", argv),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    assert set(tmp_path.rglob("*")) == initial_listing
+    assert not (tmp_path / ".context_forge.db").exists()
+
+
+def test_unanalyzed_repo_json_error_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    argv = ["context-forge", "status", str(tmp_path), "--format", "json"]
+
+    with (
+        patch.object(sys, "argv", argv),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert payload["status"] == "blocked"
+    assert any(d["code"] == "MISSING_ANALYSIS" for d in payload.get("diagnostics", []))
+    assert not (tmp_path / ".context_forge.db").exists()
+
+
 @pytest.mark.parametrize(
     ("argv", "must_abort"),
     [
         (["architecture"], True),
         (["impact", "a.py"], True),
+        (["changeset", "a.py", "--path"], True),
+        (["change-set", "a.py", "--path"], True),
+        (["path", "a.py", "a.py", "--path"], True),
+        (["query-path", "a.py", "a.py", "--path"], True),
+        (["locate", "x"], True),
+        (["context", "--task", "test task"], True),
+        (["memory", "search", "x"], True),
+        (["memory", "file", "a.py"], True),
+        (["memory", "symbol", "x"], True),
+        (["memory", "references", "x"], True),
         (["memory", "dependencies", "a.py"], True),
         (["memory", "relationships", "a.py"], True),
         (["health"], False),
@@ -3931,8 +4236,11 @@ def test_freshness_policy_matrix(
     target_file.write_text("x = 2\n", encoding="utf-8")
 
     if must_abort:
+        # With --no-refresh, substantive commands must abort on stale analysis
         with (
-            patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]),
+            patch.object(
+                sys, "argv", ["context-forge", *argv, str(tmp_path), "--no-refresh"]
+            ),
             pytest.raises(SystemExit) as exc_info,
         ):
             main()
@@ -3943,6 +4251,137 @@ def test_freshness_policy_matrix(
         assert (
             "Repository analysis is stale; run 'context-forge analyze" in captured.err
         )
+
+        # Without --no-refresh, substantive commands automatically refresh and succeed!
+        with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
+            main()
+
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        assert captured.out != ""
+    else:
+        with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
+            main()
+
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        assert captured.out != ""
+
+
+@pytest.mark.parametrize(
+    ("argv", "must_abort"),
+    [
+        (["architecture"], True),
+        (["impact", "a.py"], True),
+        (["changeset", "a.py", "--path"], True),
+        (["memory", "dependencies", "a.py"], True),
+        (["status"], False),
+        (["cache"], False),
+        (["health"], False),
+        (["diagnostics"], False),
+        (["inspect"], False),
+    ],
+)
+def test_freshness_policy_matrix_incomplete(
+    tmp_path: Path,
+    argv: list[str],
+    must_abort: bool,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target_file = tmp_path / "a.py"
+    target_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    db_path = tmp_path / ".context_forge.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE projects SET analysis_status = 'failed'")
+    conn.commit()
+    conn.close()
+
+    if must_abort:
+        with (
+            patch.object(
+                sys, "argv", ["context-forge", *argv, str(tmp_path), "--no-refresh"]
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "Repository analysis is incomplete" in captured.err
+
+        # Without --no-refresh, substantive commands auto-recover and succeed
+        with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
+            main()
+
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        assert captured.out != ""
+    else:
+        with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
+            main()
+
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        assert captured.out != ""
+
+
+@pytest.mark.parametrize(
+    ("argv", "must_abort"),
+    [
+        (["architecture"], True),
+        (["impact", "a.py"], True),
+        (["memory", "relationships", "a.py"], True),
+        (["status"], False),
+        (["cache"], False),
+        (["health"], False),
+    ],
+)
+def test_freshness_policy_matrix_indeterminate(
+    tmp_path: Path,
+    argv: list[str],
+    must_abort: bool,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target_file = tmp_path / "a.py"
+    target_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    db_path = tmp_path / ".context_forge.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE repository_cache SET cache_schema_version = 99")
+    conn.commit()
+    conn.close()
+
+    if must_abort:
+        with (
+            patch.object(
+                sys, "argv", ["context-forge", *argv, str(tmp_path), "--no-refresh"]
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "Repository analysis freshness is indeterminate" in captured.err
+
+        # Without --no-refresh, substantive commands auto-recover and succeed
+        with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
+            main()
+
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        assert captured.out != ""
     else:
         with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
             main()
@@ -4120,7 +4559,14 @@ def test_cli_json_mode_reports_blocked_operation_on_missing_analysis(
         patch.object(
             sys,
             "argv",
-            ["context-forge", "architecture", str(tmp_path), "--format", "json"],
+            [
+                "context-forge",
+                "architecture",
+                str(tmp_path),
+                "--format",
+                "json",
+                "--no-refresh",
+            ],
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -4158,7 +4604,14 @@ def test_cli_json_mode_reports_blocked_operation_on_stale_analysis(
         patch.object(
             sys,
             "argv",
-            ["context-forge", "architecture", str(tmp_path), "--format", "json"],
+            [
+                "context-forge",
+                "architecture",
+                str(tmp_path),
+                "--format",
+                "json",
+                "--no-refresh",
+            ],
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
@@ -4174,6 +4627,33 @@ def test_cli_json_mode_reports_blocked_operation_on_stale_analysis(
     assert error_payload["summary"]["blockers"] == 1
     assert error_payload["diagnostics"][0]["code"] == "STALE_ANALYSIS"
     assert error_payload["diagnostics"][0]["severity"] == "blocker"
+
+
+def test_cli_json_mode_auto_refreshes_on_stale_analysis(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_file = tmp_path / "mod.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    source_file.write_text("x = 2\n", encoding="utf-8")
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "architecture", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["outcome"]["status"] == "success"
+    assert payload["analysis"]["status"] == "analyzed"
 
 
 def test_cli_json_mode_reports_operational_failure(
@@ -4207,6 +4687,163 @@ def test_cli_json_mode_reports_operational_failure(
     assert error_payload["message"] == "Report limit must be a positive integer"
     assert error_payload["summary"]["errors"] == 1
     assert error_payload["diagnostics"][0]["severity"] == "error"
+
+
+def test_cli_json_mode_reports_incomplete_analysis(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_file = tmp_path / "mod.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    db_path = tmp_path / ".context_forge.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE projects SET analysis_status = 'failed'")
+    conn.commit()
+    conn.close()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "architecture",
+                str(tmp_path),
+                "--format",
+                "json",
+                "--no-refresh",
+            ],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error_payload = json.loads(captured.err)
+    assert error_payload["status"] == "blocked"
+    assert error_payload["is_success"] is False
+    assert "Repository analysis is incomplete" in error_payload["message"]
+    assert error_payload["summary"]["blockers"] == 1
+    assert error_payload["diagnostics"][0]["code"] == "INCOMPLETE_ANALYSIS"
+    assert error_payload["diagnostics"][0]["severity"] == "blocker"
+
+
+def test_cli_json_mode_reports_indeterminate_freshness(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_file = tmp_path / "mod.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    db_path = tmp_path / ".context_forge.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE repository_cache SET cache_schema_version = 99")
+    conn.commit()
+    conn.close()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "architecture",
+                str(tmp_path),
+                "--format",
+                "json",
+                "--no-refresh",
+            ],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error_payload = json.loads(captured.err)
+    assert error_payload["status"] == "blocked"
+    assert error_payload["is_success"] is False
+    assert "Repository analysis freshness is indeterminate" in error_payload["message"]
+    assert error_payload["summary"]["blockers"] == 1
+    assert error_payload["diagnostics"][0]["code"] == "INDETERMINATE_FRESHNESS"
+    assert error_payload["diagnostics"][0]["severity"] == "blocker"
+
+
+def test_cli_mode_reports_refresh_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_file = tmp_path / "mod.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    source_file.write_text("x = 2\n", encoding="utf-8")
+
+    # In JSON mode
+    with (
+        patch(
+            "context_forge.pipeline.analyzer.ProjectAnalyzer.analyze",
+            side_effect=RuntimeError("Reanalysis write fault"),
+        ),
+        patch(
+            "context_forge.main.load_guarded_project",
+            side_effect=RefreshFailedError(
+                "Repository refresh failed: Reanalysis write fault"
+            ),
+        ),
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "architecture", str(tmp_path), "--format", "json"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    error_payload = json.loads(captured.err)
+    assert error_payload["status"] == "failed"
+    assert (
+        "Repository refresh failed: Reanalysis write fault" in error_payload["message"]
+    )
+    assert error_payload["diagnostics"][0]["code"] == "REFRESH_FAILED"
+
+    # In text mode
+    with (
+        patch(
+            "context_forge.main.load_guarded_project",
+            side_effect=RefreshFailedError(
+                "Repository refresh failed: Reanalysis write fault"
+            ),
+        ),
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "architecture", str(tmp_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Error: Repository refresh failed: Reanalysis write fault" in captured.err
 
 
 def test_cli_text_mode_regression_preserves_stderr_format(
