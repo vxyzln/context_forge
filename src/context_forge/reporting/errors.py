@@ -202,3 +202,22 @@ class IndeterminateFreshnessError(BlockedOperationError):
             source="storage",
             details=details,
         )
+
+
+class RefreshFailedError(OperationalError):
+    def __init__(
+        self,
+        message: str = "Repository refresh failed",
+        *,
+        path: str | None = None,
+        details: dict[str, Any] | None = None,
+        outcome: OperationOutcome | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            code="REFRESH_FAILED",
+            path=path,
+            source="analyzer",
+            details=details,
+            outcome=outcome,
+        )

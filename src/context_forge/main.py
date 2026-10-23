@@ -59,6 +59,7 @@ from context_forge.reporting import (
     IndeterminateFreshnessError,
     MissingAnalysisError,
     OperationOutcome,
+    RefreshFailedError,
     StaleAnalysisError,
 )
 from context_forge.storage.cache import (
@@ -77,6 +78,17 @@ def _add_output_format_argument(
         choices=("text", "json"),
         default="text",
         help="Output format (default: text).",
+    )
+
+
+def _add_refresh_control_argument(
+    parser: argparse.ArgumentParser,
+) -> None:
+    parser.add_argument(
+        "--no-refresh",
+        action="store_true",
+        default=False,
+        help="Disable automatic command-time refresh on stale repository analysis.",
     )
 
 
@@ -124,6 +136,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="Write context package JSON to a file.",
     )
+    _add_refresh_control_argument(context_parser)
 
     status_parser = subparsers.add_parser(
         "status",
@@ -181,6 +194,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=Path("."),
     )
     _add_output_format_argument(memory_search_parser)
+    _add_refresh_control_argument(memory_search_parser)
     memory_file_parser = memory_subparsers.add_parser(
         "file",
         help="Retrieve a file and its defined symbols.",
@@ -197,6 +211,7 @@ def create_parser() -> argparse.ArgumentParser:
         help="Repository root path.",
     )
     _add_output_format_argument(memory_file_parser)
+    _add_refresh_control_argument(memory_file_parser)
 
     memory_symbol_parser = memory_subparsers.add_parser(
         "symbol",
@@ -238,6 +253,7 @@ def create_parser() -> argparse.ArgumentParser:
         help="Maximum lines for source excerpt (default: 50).",
     )
     _add_output_format_argument(memory_symbol_parser)
+    _add_refresh_control_argument(memory_symbol_parser)
 
     memory_references_parser = memory_subparsers.add_parser(
         "references",
@@ -255,6 +271,7 @@ def create_parser() -> argparse.ArgumentParser:
         help="Repository root path.",
     )
     _add_output_format_argument(memory_references_parser)
+    _add_refresh_control_argument(memory_references_parser)
 
     memory_relationships_parser = memory_subparsers.add_parser(
         "relationships",
@@ -288,6 +305,7 @@ def create_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_output_format_argument(memory_relationships_parser)
+    _add_refresh_control_argument(memory_relationships_parser)
 
     memory_dependencies_parser = memory_subparsers.add_parser(
         "dependencies",
@@ -311,6 +329,7 @@ def create_parser() -> argparse.ArgumentParser:
         help="Which direct dependency relationships to show (default: both).",
     )
     _add_output_format_argument(memory_dependencies_parser)
+    _add_refresh_control_argument(memory_dependencies_parser)
 
     diagnostics_parser = subparsers.add_parser(
         "diagnostics",
@@ -340,6 +359,7 @@ def create_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_output_format_argument(architecture_parser)
+    _add_refresh_control_argument(architecture_parser)
 
     impact_parser = subparsers.add_parser(
         "impact",
@@ -384,6 +404,7 @@ def create_parser() -> argparse.ArgumentParser:
         help=f"Maximum number of items displayed (default: {DEFAULT_IMPACT_LIMIT}).",
     )
     _add_output_format_argument(impact_parser)
+    _add_refresh_control_argument(impact_parser)
 
     changeset_parser = subparsers.add_parser(
         "changeset",
@@ -431,6 +452,7 @@ def create_parser() -> argparse.ArgumentParser:
         help=f"Maximum number of items displayed (default: {DEFAULT_IMPACT_LIMIT}).",
     )
     _add_output_format_argument(changeset_parser)
+    _add_refresh_control_argument(changeset_parser)
 
     path_parser = subparsers.add_parser(
         "path",
@@ -481,6 +503,7 @@ def create_parser() -> argparse.ArgumentParser:
         help=f"Maximum number of entities expanded during search (default: {DEFAULT_PATH_MAX_EXPANSIONS}).",
     )
     _add_output_format_argument(path_parser)
+    _add_refresh_control_argument(path_parser)
 
     health_parser = subparsers.add_parser(
         "health",
@@ -557,6 +580,7 @@ def create_parser() -> argparse.ArgumentParser:
         help="Maximum lines for source excerpt (default: 50).",
     )
     _add_output_format_argument(locate_parser)
+    _add_refresh_control_argument(locate_parser)
 
     inspect_change_parser = subparsers.add_parser(
         "inspect-change",
@@ -703,33 +727,44 @@ def load_project_analysis(root_path: Path):
     return repository, repository_key, project, metadata
 
 
-def load_fresh_project(root_path: Path):
-    repository, repository_key, project, metadata = load_project_analysis(root_path)
-
-    fingerprints = current_fingerprints(project)
-
-    freshness = repository.check_cache_freshness(
-        repository_key,
-        fingerprints,
-    )
-
-    if not freshness.is_fresh:
-        raise StaleAnalysisError(
-            f"Repository analysis is stale; run "
-            f"'context-forge analyze {root_path}' first",
-            path=str(root_path),
-        )
-    return project, metadata
-
-
 def load_guarded_project(
     root_path: Path,
     *,
     allow_refresh: bool = False,
     database_path: Path | None = None,
 ) -> tuple[Project, RepositoryCacheMetadata, WorkflowFreshness]:
-    guard = WorkflowFreshnessGuard(root_path, database_path=database_path)
-    freshness = guard.guard(allow_refresh=allow_refresh)
+    db_path = database_path or (root_path / ".context_forge.db")
+    repo = None
+    proj = None
+    meta = None
+
+    if database_path is None:
+        try:
+            loaded_repo, _, proj, meta = load_project_analysis(root_path)
+            repo = loaded_repo
+        except (MissingAnalysisError, sqlite3.OperationalError, sqlite3.DatabaseError):
+            pass
+    elif db_path.exists():
+        try:
+            repository = ProjectRepository(Database(db_path))
+            repository_key = RepositoryIdentity(root_path).key
+            loaded = repository.load_analysis(repository_key)
+            if loaded is not None:
+                repo = repository
+                proj, meta = loaded
+        except (sqlite3.OperationalError, sqlite3.DatabaseError):
+            pass
+
+    guard = WorkflowFreshnessGuard(
+        root_path,
+        database_path=db_path,
+        repository=repo,
+    )
+    freshness = guard.guard(
+        allow_refresh=allow_refresh,
+        project=proj,
+        metadata=meta,
+    )
 
     if (
         freshness.is_current
@@ -737,6 +772,35 @@ def load_guarded_project(
         and freshness.metadata is not None
     ):
         return freshness.project, freshness.metadata, freshness
+
+    if freshness.refreshed and not freshness.is_current:
+        error_msg = freshness.refresh_error or (
+            f"Refresh failed: analysis is {freshness.state.value} ({freshness.reason})"
+        )
+        raise RefreshFailedError(
+            f"Repository refresh failed: {error_msg}",
+            path=str(root_path),
+            details={
+                "refresh_error": error_msg,
+                "state": freshness.state.value,
+                "reason": freshness.reason,
+                "status": freshness.analysis_status,
+                "errors": list(freshness.analysis_errors),
+            },
+            outcome=freshness.outcome,
+        )
+
+    if freshness.refresh_error is not None:
+        raise RefreshFailedError(
+            f"Repository refresh failed: {freshness.refresh_error}",
+            path=str(root_path),
+            details={
+                "refresh_error": freshness.refresh_error,
+                "status": freshness.analysis_status,
+                "errors": list(freshness.analysis_errors),
+            },
+            outcome=freshness.outcome,
+        )
 
     if freshness.is_stale:
         raise StaleAnalysisError(
@@ -755,13 +819,27 @@ def load_guarded_project(
         )
     if freshness.reason == "missing_analysis":
         raise MissingAnalysisError(
-            f"No persisted analysis found; run 'context-forge analyze {root_path}' first",
+            "No persisted analysis found; run 'context-forge analyze' first",
             path=str(root_path),
         )
     raise IndeterminateFreshnessError(
         f"Repository analysis freshness is indeterminate ({freshness.reason}); reanalysis is required",
         path=str(root_path),
     )
+
+
+def load_fresh_project(
+    root_path: Path,
+    *,
+    allow_refresh: bool = True,
+    database_path: Path | None = None,
+) -> tuple[Project, RepositoryCacheMetadata]:
+    project, metadata, _ = load_guarded_project(
+        root_path,
+        allow_refresh=allow_refresh,
+        database_path=database_path,
+    )
+    return project, metadata
 
 
 load_generation_project = load_fresh_project
@@ -1086,13 +1164,19 @@ def run_memory_search(
     query: str,
     path: Path,
     output_format: str = "text",
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     normalized_query = query.strip()
     if not normalized_query:
         raise ValueError("Search query cannot be empty")
 
     root = resolve_project_path(path)
-    project, _ = load_fresh_project(root)
+    project, _ = (
+        load_fresh_project(root)
+        if allow_refresh
+        else load_fresh_project(root, allow_refresh=False)
+    )
     results = ProjectQuery(project).search(normalized_query)
 
     if output_format == "json":
@@ -1145,13 +1229,19 @@ def run_memory_file(
     file_path: str,
     path: Path,
     output_format: str = "text",
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     normalized_file_path = file_path.strip()
     if not normalized_file_path:
         raise ValueError("File path cannot be empty")
 
     root = resolve_project_path(path)
-    project, _ = load_fresh_project(root)
+    project, _ = (
+        load_fresh_project(root)
+        if allow_refresh
+        else load_fresh_project(root, allow_refresh=False)
+    )
     query = ProjectQuery(project)
     file = query.get_file(normalized_file_path)
 
@@ -1235,13 +1325,19 @@ def run_memory_symbol(
     symbol_type: str | None = None,
     excerpt: bool = False,
     max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     normalized_name = symbol_name.strip()
     if not normalized_name:
         raise ValueError("Symbol name cannot be empty")
 
     root = resolve_project_path(path)
-    project, _ = load_fresh_project(root)
+    project, _ = (
+        load_fresh_project(root)
+        if allow_refresh
+        else load_fresh_project(root, allow_refresh=False)
+    )
     query = ProjectQuery(project)
 
     if "." in normalized_name:
@@ -1359,9 +1455,15 @@ def run_locate(
     symbol_type: str | None = None,
     excerpt: bool = False,
     max_lines: int = DEFAULT_EXCERPT_MAX_LINES,
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     root = resolve_project_path(path)
-    project, _ = load_fresh_project(root)
+    project, _ = (
+        load_fresh_project(root)
+        if allow_refresh
+        else load_fresh_project(root, allow_refresh=False)
+    )
 
     resolution, evidence = locate_and_get_evidence(
         project,
@@ -1619,13 +1721,19 @@ def run_memory_references(
     symbol_name: str,
     path: Path,
     output_format: str = "text",
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     normalized_name = symbol_name.strip()
     if not normalized_name:
         raise ValueError("Symbol name cannot be empty")
 
     root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
     query = ProjectQuery(project)
 
     symbols = _find_memory_symbols(query, normalized_name)
@@ -1764,13 +1872,19 @@ def run_memory_relationships(
     direction: str,
     relationship_type: str | None,
     output_format: str = "text",
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     normalized_name = entity_name.strip()
     if not normalized_name:
         raise ValueError("Entity name cannot be empty")
 
     root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
     query = ProjectQuery(project)
 
     files_by_id = {file.id: file for file in project.files}
@@ -1944,13 +2058,19 @@ def run_memory_dependencies(
     path: Path,
     direction: str = "both",
     output_format: str = "text",
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     normalized_path = file_path.strip()
     if not normalized_path:
         raise ValueError("File path cannot be empty")
 
     root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
     query = ProjectQuery(project)
 
     file = query.get_file(normalized_path)
@@ -2027,12 +2147,18 @@ def run_architecture(
     path: Path,
     output_format: str = "text",
     limit: int = DEFAULT_REPORT_LIMIT,
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     if isinstance(limit, bool) or limit < 1:
         raise ValueError("Report limit must be a positive integer")
 
     root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
 
     inventory = ProjectQuery(project).get_architecture_inventory()
     report = build_architecture_report(
@@ -2347,6 +2473,8 @@ def run_impact(
     limit: int = DEFAULT_IMPACT_LIMIT,
     output_format: str = "text",
     max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     if not target or not target.strip():
         raise ValueError("Target cannot be empty")
@@ -2356,7 +2484,11 @@ def run_impact(
         raise ValueError("Traversal depth must be a positive integer")
 
     root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
 
     types_filter = {relationship_type} if relationship_type else None
     result = find_impact(
@@ -2475,6 +2607,8 @@ def run_changeset(
     limit: int = DEFAULT_IMPACT_LIMIT,
     output_format: str = "text",
     max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     if not paths:
         raise ValueError("Paths list cannot be empty")
@@ -2484,7 +2618,11 @@ def run_changeset(
         raise ValueError("Traversal depth must be a positive integer")
 
     root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
 
     types_filter = {relationship_type} if relationship_type else None
     result = analyze_changeset(
@@ -2581,6 +2719,8 @@ def run_path(
     max_depth: int = DEFAULT_PATH_MAX_DEPTH,
     max_expansions: int | None = DEFAULT_PATH_MAX_EXPANSIONS,
     output_format: str = "text",
+    *,
+    allow_refresh: bool = True,
 ) -> None:
     if not start or not start.strip():
         raise ValueError("Start target cannot be empty")
@@ -2594,7 +2734,11 @@ def run_path(
         raise ValueError("Expansion limit must be a positive integer")
 
     root_path = resolve_project_path(path)
-    project, _ = load_fresh_project(root_path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
 
     types_filter = {relationship_type} if relationship_type else None
     result = find_relationship_path(
@@ -2691,7 +2835,8 @@ def run_context(args: argparse.Namespace) -> None:
     from context_forge.context.serialization import ContextPackageSerializer
 
     root_path = resolve_project_path(args.path)
-    project, _ = load_fresh_project(root_path)
+    allow_refresh = not getattr(args, "no_refresh", False)
+    project, _ = load_fresh_project(root_path, allow_refresh=allow_refresh)
     task = read_task(args.task)
 
     service = build_context_service()
@@ -2714,6 +2859,8 @@ def run_context(args: argparse.Namespace) -> None:
 
 
 def _dispatch_command(args: argparse.Namespace) -> None:
+    allow_refresh = not getattr(args, "no_refresh", False)
+
     handlers = {
         "analyze": lambda: run_analyze(args.path, args.format),
         "refresh": lambda: (
@@ -2735,14 +2882,32 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             else run_inspect(args.path)
         ),
         ("memory", "search"): lambda: (
-            run_memory_search(args.query, args.path, args.format)
+            run_memory_search(
+                args.query,
+                args.path,
+                args.format,
+                allow_refresh=allow_refresh,
+            )
             if args.format == "json"
-            else run_memory_search(args.query, args.path)
+            else run_memory_search(
+                args.query,
+                args.path,
+                allow_refresh=allow_refresh,
+            )
         ),
         ("memory", "file"): lambda: (
-            run_memory_file(args.file_path, args.path, args.format)
+            run_memory_file(
+                args.file_path,
+                args.path,
+                args.format,
+                allow_refresh=allow_refresh,
+            )
             if args.format == "json"
-            else run_memory_file(args.file_path, args.path)
+            else run_memory_file(
+                args.file_path,
+                args.path,
+                allow_refresh=allow_refresh,
+            )
         ),
         ("memory", "symbol"): lambda: run_memory_symbol(
             args.symbol_name,
@@ -2752,17 +2917,20 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             getattr(args, "symbol_type", None),
             getattr(args, "excerpt", False),
             getattr(args, "max_lines", DEFAULT_EXCERPT_MAX_LINES),
+            allow_refresh=allow_refresh,
         ),
         ("memory", "references"): lambda: (
             run_memory_references(
                 args.symbol_name,
                 args.path,
                 args.format,
+                allow_refresh=allow_refresh,
             )
             if args.format == "json"
             else run_memory_references(
                 args.symbol_name,
                 args.path,
+                allow_refresh=allow_refresh,
             )
         ),
         ("memory", "relationships"): lambda: (
@@ -2772,6 +2940,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
                 args.direction,
                 args.relationship_type,
                 args.format,
+                allow_refresh=allow_refresh,
             )
             if args.format == "json"
             else run_memory_relationships(
@@ -2779,6 +2948,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
                 args.path,
                 args.direction,
                 args.relationship_type,
+                allow_refresh=allow_refresh,
             )
         ),
         ("memory", "dependencies"): lambda: run_memory_dependencies(
@@ -2786,12 +2956,14 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.path,
             args.direction,
             args.format,
+            allow_refresh=allow_refresh,
         ),
         "context": lambda: run_context(args),
         "architecture": lambda: run_architecture(
             args.path,
             args.format,
             args.limit,
+            allow_refresh=allow_refresh,
         ),
         "impact": lambda: run_impact(
             args.target,
@@ -2801,6 +2973,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.limit,
             args.format,
             args.max_depth,
+            allow_refresh=allow_refresh,
         ),
         "changeset": lambda: run_changeset(
             args.paths,
@@ -2810,6 +2983,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.limit,
             args.format,
             args.max_depth,
+            allow_refresh=allow_refresh,
         ),
         "change-set": lambda: run_changeset(
             args.paths,
@@ -2819,6 +2993,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.limit,
             args.format,
             args.max_depth,
+            allow_refresh=allow_refresh,
         ),
         "path": lambda: run_path(
             args.start,
@@ -2829,6 +3004,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.max_depth,
             args.max_expansions,
             args.format,
+            allow_refresh=allow_refresh,
         ),
         "query-path": lambda: run_path(
             args.start,
@@ -2839,6 +3015,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.max_depth,
             args.max_expansions,
             args.format,
+            allow_refresh=allow_refresh,
         ),
         "health": lambda: run_health(
             args.path,
@@ -2857,6 +3034,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             getattr(args, "symbol_type", None),
             getattr(args, "excerpt", False),
             getattr(args, "max_lines", DEFAULT_EXCERPT_MAX_LINES),
+            allow_refresh=allow_refresh,
         ),
         "inspect-change": lambda: run_inspect_change(
             args.target,

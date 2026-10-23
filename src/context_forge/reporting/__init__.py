@@ -11,6 +11,7 @@ from context_forge.reporting.errors import (
     IndeterminateFreshnessError,
     MissingAnalysisError,
     OperationalError,
+    RefreshFailedError,
     StaleAnalysisError,
 )
 from context_forge.reporting.formatter import (
@@ -29,6 +30,7 @@ __all__ = [
     "OperationOutcome",
     "OperationStatus",
     "OperationalError",
+    "RefreshFailedError",
     "StaleAnalysisError",
     "format_diagnostic_line",
     "render_outcome_text",
