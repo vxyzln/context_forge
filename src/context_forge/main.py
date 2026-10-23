@@ -29,6 +29,9 @@ from context_forge.query.architecture_report import (
     DEFAULT_REPORT_LIMIT,
     build_architecture_report,
 )
+from context_forge.query.changeset import (
+    analyze_changeset,
+)
 from context_forge.query.health import (
     DEFAULT_HEALTH_LIMIT,
     build_health_report,
@@ -42,6 +45,11 @@ from context_forge.query.locator import (
     DEFAULT_EXCERPT_MAX_LINES,
     get_source_evidence,
     locate_and_get_evidence,
+)
+from context_forge.query.path import (
+    DEFAULT_PATH_MAX_DEPTH,
+    DEFAULT_PATH_MAX_EXPANSIONS,
+    find_relationship_path,
 )
 from context_forge.query.project import ProjectQuery
 from context_forge.reporting import (
@@ -377,6 +385,103 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _add_output_format_argument(impact_parser)
 
+    changeset_parser = subparsers.add_parser(
+        "changeset",
+        aliases=["change-set"],
+        help="Analyze combined impact for a set of changed repository paths.",
+    )
+    changeset_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Changed file paths to analyze together.",
+    )
+    changeset_parser.add_argument(
+        "--path",
+        "-p",
+        dest="project_path",
+        type=Path,
+        default=Path("."),
+        help="Repository root path (default: current directory).",
+    )
+    changeset_parser.add_argument(
+        "--direction",
+        choices=("both", "incoming", "outgoing"),
+        default="both",
+        help="Relationship direction to analyze (default: both).",
+    )
+    changeset_parser.add_argument(
+        "--type",
+        dest="relationship_type",
+        choices=("imports", "references", "inherits", "calls", "depends_on"),
+        default=None,
+        help="Filter by relationship type.",
+    )
+    changeset_parser.add_argument(
+        "--depth",
+        "--max-depth",
+        dest="max_depth",
+        type=int,
+        default=DEFAULT_IMPACT_MAX_DEPTH,
+        help=f"Maximum traversal depth for impact analysis (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
+    )
+    changeset_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_IMPACT_LIMIT,
+        help=f"Maximum number of items displayed (default: {DEFAULT_IMPACT_LIMIT}).",
+    )
+    _add_output_format_argument(changeset_parser)
+
+    path_parser = subparsers.add_parser(
+        "path",
+        aliases=["query-path"],
+        help="Find and report a bounded relationship path between start and end entities.",
+    )
+    path_parser.add_argument(
+        "start",
+        help="Start entity (file path, symbol name, qualified name, or UUID).",
+    )
+    path_parser.add_argument(
+        "end",
+        help="End entity (file path, symbol name, qualified name, or UUID).",
+    )
+    path_parser.add_argument(
+        "--path",
+        "-p",
+        dest="project_path",
+        type=Path,
+        default=Path("."),
+        help="Repository root path (default: current directory).",
+    )
+    path_parser.add_argument(
+        "--direction",
+        choices=("both", "incoming", "outgoing"),
+        default="both",
+        help="Relationship direction to traverse (default: both).",
+    )
+    path_parser.add_argument(
+        "--type",
+        dest="relationship_type",
+        choices=("imports", "references", "inherits", "calls", "depends_on"),
+        default=None,
+        help="Filter by relationship type.",
+    )
+    path_parser.add_argument(
+        "--depth",
+        "--max-depth",
+        dest="max_depth",
+        type=int,
+        default=DEFAULT_PATH_MAX_DEPTH,
+        help=f"Maximum traversal depth for path search (default: {DEFAULT_PATH_MAX_DEPTH}).",
+    )
+    path_parser.add_argument(
+        "--max-expansions",
+        type=int,
+        default=DEFAULT_PATH_MAX_EXPANSIONS,
+        help=f"Maximum number of entities expanded during search (default: {DEFAULT_PATH_MAX_EXPANSIONS}).",
+    )
+    _add_output_format_argument(path_parser)
+
     health_parser = subparsers.add_parser(
         "health",
         help="Report repository health, inventory metrics, and structural findings.",
@@ -527,6 +632,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "diagnostics",
         "architecture",
         "impact",
+        "changeset",
+        "change-set",
+        "path",
+        "query-path",
         "health",
         "preflight",
         "locate",
@@ -2358,6 +2467,225 @@ def run_impact(
         print(f"  - {limitation}")
 
 
+def run_changeset(
+    paths: list[str],
+    path: Path,
+    direction: str = "both",
+    relationship_type: str | None = None,
+    limit: int = DEFAULT_IMPACT_LIMIT,
+    output_format: str = "text",
+    max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+) -> None:
+    if not paths:
+        raise ValueError("Paths list cannot be empty")
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("Report limit must be a positive integer")
+    if isinstance(max_depth, bool) or max_depth < 1:
+        raise ValueError("Traversal depth must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+
+    types_filter = {relationship_type} if relationship_type else None
+    result = analyze_changeset(
+        project,
+        paths,
+        direction=direction,
+        relationship_types=types_filter,
+        max_depth=max_depth,
+        limit=limit,
+    )
+
+    if output_format == "json":
+        _emit_json(result.to_dict())
+        return
+
+    print(f"Repository: {root_path}")
+    print(
+        f"Change-set paths ({len(result.supplied_paths)}): {', '.join(result.supplied_paths)}"
+    )
+    resolved_count = sum(1 for r in result.resolved_inputs if r.is_resolved)
+    unresolved_count = len(result.resolved_inputs) - resolved_count
+    print(f"Path resolution: {resolved_count} resolved, {unresolved_count} unresolved")
+
+    if unresolved_count > 0:
+        print()
+        print("Unresolved paths:")
+        for r in result.resolved_inputs:
+            if not r.is_resolved:
+                print(f"  - {r.original_input} [{r.status}]: {r.reason}")
+
+    print()
+    print(
+        f"Overall impact: {result.total} affected component(s) "
+        f"({result.direct_count} direct, {result.downstream_count} downstream)"
+    )
+
+    direct_items = result.direct_items
+    downstream_items = result.downstream_items
+
+    print()
+    print("Direct impact:")
+    if not direct_items:
+        print("  None detected.")
+    else:
+        for item in direct_items:
+            loc = f" ({item.path})" if item.path else ""
+            roots_str = ", ".join(item.roots)
+            print(f"  - {item.name} [{item.kind}]{loc} (from: {roots_str})")
+
+    print()
+    print("Downstream impact:")
+    if not downstream_items:
+        print("  None detected.")
+    else:
+        for item in downstream_items:
+            loc = f" ({item.path})" if item.path else ""
+            roots_str = ", ".join(item.roots)
+            print(
+                f"  - [depth {item.min_depth}] {item.name} [{item.kind}]{loc} (from: {roots_str})"
+            )
+            if item.shortest_path:
+                segments: list[str] = []
+                for idx, step in enumerate(item.shortest_path):
+                    if idx == 0:
+                        start_label = step.from_path or step.from_name
+                        segments.append(start_label)
+                    end_label = step.to_path or step.to_name
+                    segments.append(f"-[{step.relationship_type}]-> {end_label}")
+                print(f"    Path: {' '.join(segments)}")
+
+    if result.relevant_tests:
+        print()
+        print(f"Relevant tests ({len(result.relevant_tests)}):")
+        for test in result.relevant_tests:
+            print(f"  - {test.test_file_path}: {test.evidence}")
+    else:
+        print()
+        print("Relevant tests:")
+        print("  None confirmed from available repository relationship evidence.")
+
+    if result.limitations:
+        print()
+        print("Limitations:")
+        for lim in result.limitations:
+            print(f"  - {lim}")
+
+
+def run_path(
+    start: str,
+    end: str,
+    path: Path,
+    direction: str = "both",
+    relationship_type: str | None = None,
+    max_depth: int = DEFAULT_PATH_MAX_DEPTH,
+    max_expansions: int | None = DEFAULT_PATH_MAX_EXPANSIONS,
+    output_format: str = "text",
+) -> None:
+    if not start or not start.strip():
+        raise ValueError("Start target cannot be empty")
+    if not end or not end.strip():
+        raise ValueError("End target cannot be empty")
+    if isinstance(max_depth, bool) or max_depth < 1:
+        raise ValueError("Traversal depth must be a positive integer")
+    if max_expansions is not None and (
+        isinstance(max_expansions, bool) or max_expansions < 1
+    ):
+        raise ValueError("Expansion limit must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    project, _ = load_fresh_project(root_path)
+
+    types_filter = {relationship_type} if relationship_type else None
+    result = find_relationship_path(
+        project,
+        start.strip(),
+        end.strip(),
+        direction=direction,
+        relationship_types=types_filter,
+        max_depth=max_depth,
+        max_expansions=max_expansions,
+    )
+
+    if output_format == "json":
+        _emit_json(result.to_dict())
+        return
+
+    print(f"Repository: {root_path}")
+    print(f"Query: path between '{start.strip()}' and '{end.strip()}'")
+    print(f"Direction: {result.direction}")
+
+    if not result.start_resolution or not result.start_resolution.is_resolved:
+        msg = (
+            result.start_resolution.message if result.start_resolution else "Unresolved"
+        )
+        print(f"Start endpoint resolution failed: {msg}")
+        if result.start_resolution and result.start_resolution.is_ambiguous:
+            print(f"Start candidates ({len(result.start_resolution.candidates)}):")
+            for c in result.start_resolution.candidates:
+                loc = f"{c.path}:{c.start_line}" if c.path else "unknown"
+                print(f"  - [{c.kind}] {c.name} at {loc}")
+
+    if not result.end_resolution or not result.end_resolution.is_resolved:
+        msg = result.end_resolution.message if result.end_resolution else "Unresolved"
+        print(f"End endpoint resolution failed: {msg}")
+        if result.end_resolution and result.end_resolution.is_ambiguous:
+            print(f"End candidates ({len(result.end_resolution.candidates)}):")
+            for c in result.end_resolution.candidates:
+                loc = f"{c.path}:{c.start_line}" if c.path else "unknown"
+                print(f"  - [{c.kind}] {c.name} at {loc}")
+
+    if (
+        not result.start_resolution
+        or not result.start_resolution.is_resolved
+        or not result.end_resolution
+        or not result.end_resolution.is_resolved
+    ):
+        return
+
+    assert result.start_target is not None
+    assert result.end_target is not None
+    print(
+        f"Start: [{result.start_target.kind}] {result.start_target.name} ({result.start_target.path})"
+    )
+    print(
+        f"End: [{result.end_target.kind}] {result.end_target.name} ({result.end_target.path})"
+    )
+    print()
+
+    if result.path_found:
+        print(f"Status: Path found (length: {result.length} hop(s))")
+        if result.length == 0:
+            print("  Start and end endpoints are identical; zero-edge path.")
+        else:
+            print("Path steps:")
+            for idx, step in enumerate(result.steps, 1):
+                loc_info = (
+                    f"line {step.source_line}"
+                    if step.source_line is not None
+                    else "no line info"
+                )
+                from_loc = f" ({step.from_path})" if step.from_path else ""
+                to_loc = f" ({step.to_path})" if step.to_path else ""
+                print(
+                    f"  {idx}. [{step.traversal_direction}] {step.relationship_type} ({loc_info}): "
+                    f"{step.from_name}[{step.from_kind}]{from_loc} -> "
+                    f"{step.to_name}[{step.to_kind}]{to_loc}"
+                )
+    elif result.is_exhaustive:
+        print("Status: No path exists (exhaustive search).")
+        print(f"Message: {result.message}")
+    else:
+        print(f"Status: Inconclusive search ({result.status}).")
+        print(f"Message: {result.message}")
+
+    if result.limitations:
+        print()
+        print("Limitations:")
+        for lim in result.limitations:
+            print(f"  - {lim}")
+
+
 def run_context(args: argparse.Namespace) -> None:
     from context_forge.application import build_context_service
     from context_forge.context.serialization import ContextPackageSerializer
@@ -2474,6 +2802,44 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.format,
             args.max_depth,
         ),
+        "changeset": lambda: run_changeset(
+            args.paths,
+            getattr(args, "project_path", Path(".")),
+            args.direction,
+            args.relationship_type,
+            args.limit,
+            args.format,
+            args.max_depth,
+        ),
+        "change-set": lambda: run_changeset(
+            args.paths,
+            getattr(args, "project_path", Path(".")),
+            args.direction,
+            args.relationship_type,
+            args.limit,
+            args.format,
+            args.max_depth,
+        ),
+        "path": lambda: run_path(
+            args.start,
+            args.end,
+            getattr(args, "project_path", Path(".")),
+            args.direction,
+            args.relationship_type,
+            args.max_depth,
+            args.max_expansions,
+            args.format,
+        ),
+        "query-path": lambda: run_path(
+            args.start,
+            args.end,
+            getattr(args, "project_path", Path(".")),
+            args.direction,
+            args.relationship_type,
+            args.max_depth,
+            args.max_expansions,
+            args.format,
+        ),
         "health": lambda: run_health(
             args.path,
             args.format,
@@ -2529,8 +2895,8 @@ def _dispatch_command(args: argparse.Namespace) -> None:
     handler()
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
 
     if args.command is None:
         create_parser().print_help()

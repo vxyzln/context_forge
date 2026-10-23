@@ -24,6 +24,10 @@ from context_forge.query.architecture import (
     StructuralIntegrityFinding,
     UnresolvedImport,
 )
+from context_forge.query.changeset import (
+    ChangeSetImpactResult,
+    analyze_changeset,
+)
 from context_forge.query.health import DEFAULT_HEALTH_LIMIT, build_health_report
 from context_forge.query.impact import (
     DEFAULT_IMPACT_LIMIT,
@@ -42,6 +46,12 @@ from context_forge.query.locator import (
     get_source_evidence,
     locate_and_get_evidence,
     locate_symbol,
+)
+from context_forge.query.path import (
+    DEFAULT_PATH_MAX_DEPTH,
+    DEFAULT_PATH_MAX_EXPANSIONS,
+    RelationshipPathResult,
+    find_relationship_path,
 )
 from context_forge.query.result import SearchResult, SearchResultType
 from context_forge.reporting.contract import DiagnosticItem, OperationOutcome
@@ -1140,6 +1150,44 @@ class ProjectQuery:
             target_types=target_types,
             max_depth=max_depth,
             limit=limit,
+        )
+
+    def analyze_changeset(
+        self,
+        paths: Any,
+        *,
+        direction: str = "both",
+        relationship_types: set[str] | None = None,
+        max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+        limit: int | None = DEFAULT_IMPACT_LIMIT,
+    ) -> ChangeSetImpactResult:
+        return analyze_changeset(
+            self.project,
+            paths,
+            direction=direction,
+            relationship_types=relationship_types,
+            max_depth=max_depth,
+            limit=limit,
+        )
+
+    def find_relationship_path(
+        self,
+        start: str | File | Symbol,
+        end: str | File | Symbol,
+        *,
+        direction: str = "both",
+        relationship_types: set[str] | None = None,
+        max_depth: int = DEFAULT_PATH_MAX_DEPTH,
+        max_expansions: int | None = DEFAULT_PATH_MAX_EXPANSIONS,
+    ) -> RelationshipPathResult:
+        return find_relationship_path(
+            self.project,
+            start,
+            end,
+            direction=direction,
+            relationship_types=relationship_types,
+            max_depth=max_depth,
+            max_expansions=max_expansions,
         )
 
     def get_health_report(

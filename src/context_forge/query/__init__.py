@@ -9,6 +9,15 @@ from context_forge.query.architecture_report import (
     DEFAULT_REPORT_LIMIT,
     build_architecture_report,
 )
+from context_forge.query.changeset import (
+    ChangeSetImpactItem,
+    ChangeSetImpactResult,
+    ChangeSetInputResolution,
+    ChangeSetProvenance,
+    RelevantTestItem,
+    analyze_changeset,
+    resolve_changeset_path,
+)
 from context_forge.query.health import (
     DEFAULT_HEALTH_LIMIT,
     build_health_report,
@@ -37,6 +46,13 @@ from context_forge.query.locator import (
     locate_and_get_evidence,
     locate_symbol,
 )
+from context_forge.query.path import (
+    DEFAULT_PATH_MAX_DEPTH,
+    DEFAULT_PATH_MAX_EXPANSIONS,
+    RelationshipPathResult,
+    RelationshipPathStep,
+    find_relationship_path,
+)
 from context_forge.query.project import ProjectQuery
 from context_forge.query.result import SearchResult, SearchResultType
 
@@ -46,8 +62,14 @@ __all__ = [
     "DEFAULT_IMPACT_LIMIT",
     "DEFAULT_IMPACT_MAX_DEPTH",
     "DEFAULT_IMPACT_RELATIONSHIP_TYPES",
+    "DEFAULT_PATH_MAX_DEPTH",
+    "DEFAULT_PATH_MAX_EXPANSIONS",
     "DEFAULT_REPORT_LIMIT",
     "ArchitectureInventory",
+    "ChangeSetImpactItem",
+    "ChangeSetImpactResult",
+    "ChangeSetInputResolution",
+    "ChangeSetProvenance",
     "ContainmentEdge",
     "DirectImpactItem",
     "DirectImpactResult",
@@ -55,6 +77,9 @@ __all__ = [
     "ImpactPathStep",
     "ImpactResult",
     "ProjectQuery",
+    "RelationshipPathResult",
+    "RelationshipPathStep",
+    "RelevantTestItem",
     "ResolvedTarget",
     "SearchResult",
     "SearchResultType",
@@ -64,13 +89,16 @@ __all__ = [
     "TargetCandidate",
     "TargetResolution",
     "UnresolvedImport",
+    "analyze_changeset",
     "build_architecture_report",
     "build_health_report",
     "find_direct_impact",
     "find_impact",
+    "find_relationship_path",
     "find_transitive_impact",
     "get_source_evidence",
     "locate_and_get_evidence",
     "locate_symbol",
+    "resolve_changeset_path",
     "resolve_impact_target",
 ]
