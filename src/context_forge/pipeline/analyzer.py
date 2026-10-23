@@ -235,9 +235,12 @@ class ProjectAnalyzer:
             self.identity.key,
         )
 
-        if freshness.is_fresh and cached_analysis is not None:
+        if (
+            freshness.is_fresh
+            and cached_analysis is not None
+            and cached_analysis[0].analysis_status == "analyzed"
+        ):
             project, _ = cached_analysis
-            project.analysis_status = "analyzed"
             return project
 
         invalidation = self.repository.refresh_cache_state(

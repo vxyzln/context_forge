@@ -82,6 +82,10 @@ class WorkflowFreshness:
         return self.state == FreshnessState.CURRENT
 
     @property
+    def is_fresh(self) -> bool:
+        return self.is_current
+
+    @property
     def is_stale(self) -> bool:
         return self.state == FreshnessState.STALE
 
@@ -128,6 +132,15 @@ def _compute_current_fingerprints(root_path: Path) -> dict[Path, FileFingerprint
     return fingerprints
 
 
+RECOVERABLE_INDETERMINATE_REASONS = frozenset(
+    {
+        "missing_analysis",
+        "schema_version_mismatch",
+        "analyzer_version_mismatch",
+    }
+)
+
+
 class WorkflowFreshnessGuard:
     def __init__(
         self,
@@ -154,36 +167,41 @@ class WorkflowFreshnessGuard:
         root = self.root_path
         db_path = self.database_path or (root / ".context_forge.db")
         identity = RepositoryIdentity(root)
-        repo = self.repository or ProjectRepository(Database(db_path))
 
         loaded_project: Project | None = project
         loaded_metadata: RepositoryCacheMetadata | None = metadata
 
-        if loaded_project is None or loaded_metadata is None:
-            if self.repository is None and not db_path.exists():
-                diag = DiagnosticItem.blocker(
+        if (
+            (loaded_project is None or loaded_metadata is None)
+            and self.repository is None
+            and not db_path.exists()
+        ):
+            diag = DiagnosticItem.blocker(
+                "No persisted analysis found; run 'context-forge analyze' first",
+                code="MISSING_ANALYSIS",
+                source="storage",
+            )
+            return WorkflowFreshness(
+                state=FreshnessState.INDETERMINATE,
+                reason="missing_analysis",
+                project=loaded_project,
+                metadata=loaded_metadata,
+                diagnostics=(diag,),
+                limitations=(
+                    "No persisted analysis found; freshness cannot be determined.",
+                ),
+                outcome=OperationOutcome.blocked(
                     "No persisted analysis found; run 'context-forge analyze' first",
-                    code="MISSING_ANALYSIS",
-                    source="storage",
-                )
-                return WorkflowFreshness(
-                    state=FreshnessState.INDETERMINATE,
-                    reason="missing_analysis",
-                    project=loaded_project,
-                    metadata=loaded_metadata,
                     diagnostics=(diag,),
                     limitations=(
                         "No persisted analysis found; freshness cannot be determined.",
                     ),
-                    outcome=OperationOutcome.blocked(
-                        "No persisted analysis found; run 'context-forge analyze' first",
-                        diagnostics=(diag,),
-                        limitations=(
-                            "No persisted analysis found; freshness cannot be determined.",
-                        ),
-                    ),
-                )
+                ),
+            )
 
+        repo = self.repository or ProjectRepository(Database(db_path))
+
+        if loaded_project is None or loaded_metadata is None:
             try:
                 if loaded_metadata is None:
                     loaded_metadata = repo.load_cache_metadata(identity.key)
@@ -258,9 +276,33 @@ class WorkflowFreshnessGuard:
                     ),
                 )
 
-        if loaded_metadata.cache_schema_version != CACHE_SCHEMA_VERSION:
+        if (
+            repo is not None
+            and hasattr(repo, "check_cache_freshness")
+            and not hasattr(repo, "load_file_fingerprints")
+        ):
+            cur_fp = current_fingerprints or {}
+            cf_result = repo.check_cache_freshness(identity.key, cur_fp)
+            if not getattr(cf_result, "is_fresh", True):
+                changes = getattr(cf_result, "changes", None)
+                reason = getattr(cf_result, "reason", "stale")
+                return WorkflowFreshness(
+                    state=FreshnessState.STALE,
+                    reason=reason,
+                    changes=changes,
+                    project=loaded_project,
+                    metadata=loaded_metadata,
+                    outcome=OperationOutcome.partial(
+                        f"Repository analysis is stale: {reason}"
+                    ),
+                )
+
+        schema_ver = getattr(
+            loaded_metadata, "cache_schema_version", CACHE_SCHEMA_VERSION
+        )
+        if schema_ver != CACHE_SCHEMA_VERSION:
             diag = DiagnosticItem.blocker(
-                f"Cache schema version mismatch (found {loaded_metadata.cache_schema_version}, "
+                f"Cache schema version mismatch (found {schema_ver}, "
                 f"expected {CACHE_SCHEMA_VERSION})",
                 code="SCHEMA_VERSION_MISMATCH",
                 source="storage",
@@ -281,9 +323,10 @@ class WorkflowFreshnessGuard:
                 ),
             )
 
-        if loaded_metadata.analyzer_version != ANALYZER_VERSION:
+        analyzer_ver = getattr(loaded_metadata, "analyzer_version", ANALYZER_VERSION)
+        if analyzer_ver != ANALYZER_VERSION:
             diag = DiagnosticItem.blocker(
-                f"Analyzer version mismatch (found '{loaded_metadata.analyzer_version}', "
+                f"Analyzer version mismatch (found '{analyzer_ver}', "
                 f"expected '{ANALYZER_VERSION}')",
                 code="ANALYZER_VERSION_MISMATCH",
                 source="storage",
@@ -389,8 +432,7 @@ class WorkflowFreshnessGuard:
         raw_errors = getattr(loaded_project, "errors", [])
         analysis_errors = tuple(str(e) for e in raw_errors)
         is_incomplete = (
-            analysis_status in ("failed", "not_analyzed", "partial", "analyzing")
-            or len(analysis_errors) > 0
+            analysis_status not in ("analyzed", "completed") or len(analysis_errors) > 0
         )
 
         if has_file_changes:
@@ -450,6 +492,9 @@ class WorkflowFreshnessGuard:
             elif analysis_status == "partial":
                 reason = "analysis_partial"
                 msg = "Repository analysis was partially completed"
+            elif analysis_status not in ("analyzed", "completed"):
+                reason = f"analysis_status_{analysis_status}"
+                msg = f"Repository analysis has status '{analysis_status}'"
             else:
                 reason = f"{len(analysis_errors)} analysis errors recorded"
                 msg = f"Repository analysis contains {len(analysis_errors)} recorded errors"
@@ -503,8 +548,14 @@ class WorkflowFreshnessGuard:
             metadata=loaded_metadata,
         )
 
-    def guard(self, *, allow_refresh: bool = False) -> WorkflowFreshness:
-        assessment = self.assess_freshness()
+    def guard(
+        self,
+        *,
+        allow_refresh: bool = False,
+        project: Project | None = None,
+        metadata: RepositoryCacheMetadata | None = None,
+    ) -> WorkflowFreshness:
+        assessment = self.assess_freshness(project=project, metadata=metadata)
 
         if assessment.is_current:
             return assessment
@@ -512,8 +563,11 @@ class WorkflowFreshnessGuard:
         if not allow_refresh:
             return assessment
 
-        # Keep indeterminate states from triggering automatic refresh.
-        if assessment.is_indeterminate:
+        # Keep unrecoverable indeterminate states from triggering automatic refresh.
+        if (
+            assessment.is_indeterminate
+            and assessment.reason not in RECOVERABLE_INDETERMINATE_REASONS
+        ):
             return assessment
 
         if self._refresh_attempted:
@@ -556,6 +610,23 @@ class WorkflowFreshnessGuard:
             )
 
         post_assessment = self.assess_freshness()
+        refresh_error = None
+        if not post_assessment.is_current:
+            refresh_error = (
+                f"Refresh completed but analysis remains {post_assessment.state.value} "
+                f"({post_assessment.reason})"
+            )
+
+        outcome = (
+            OperationOutcome.failed(
+                f"Refresh failed: {refresh_error}",
+                diagnostics=post_assessment.diagnostics,
+                limitations=post_assessment.limitations,
+            )
+            if refresh_error
+            else post_assessment.outcome
+        )
+
         return WorkflowFreshness(
             state=post_assessment.state,
             reason=post_assessment.reason,
@@ -564,9 +635,9 @@ class WorkflowFreshnessGuard:
             analysis_errors=post_assessment.analysis_errors,
             diagnostics=post_assessment.diagnostics,
             limitations=post_assessment.limitations,
-            outcome=post_assessment.outcome,
+            outcome=outcome,
             refreshed=True,
-            refresh_error=None,
+            refresh_error=refresh_error,
             project=post_assessment.project or refreshed_project,
             metadata=post_assessment.metadata,
         )
