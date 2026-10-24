@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from context_forge.config.project import PackageBoundaryPolicy
 from context_forge.inspection import (
     format_pre_change_inspection_summary,
     inspect_pre_change,
@@ -46,12 +47,18 @@ from context_forge.query.locator import (
     get_source_evidence,
     locate_and_get_evidence,
 )
+from context_forge.query.package_boundary import (
+    analyze_package_boundaries,
+)
 from context_forge.query.path import (
     DEFAULT_PATH_MAX_DEPTH,
     DEFAULT_PATH_MAX_EXPANSIONS,
     find_relationship_path,
 )
 from context_forge.query.project import ProjectQuery
+from context_forge.query.risk import (
+    generate_change_risk_report,
+)
 from context_forge.reporting import (
     ContextForgeError,
     DiagnosticItem,
@@ -457,8 +464,83 @@ def create_parser() -> argparse.ArgumentParser:
         default=False,
         help="Display verification checklist with test recommendations.",
     )
+    changeset_parser.add_argument(
+        "--risk",
+        action="store_true",
+        default=False,
+        help="Display change-risk evidence report.",
+    )
     _add_output_format_argument(changeset_parser)
     _add_refresh_control_argument(changeset_parser)
+
+    risk_parser = subparsers.add_parser(
+        "risk",
+        aliases=["change-risk"],
+        help="Generate an evidence-based change-risk report for changed paths.",
+    )
+    risk_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Changed file paths to assess risk for.",
+    )
+    risk_parser.add_argument(
+        "--path",
+        "-p",
+        dest="project_path",
+        type=Path,
+        default=Path("."),
+        help="Repository root path (default: current directory).",
+    )
+    risk_parser.add_argument(
+        "--direction",
+        choices=("both", "incoming", "outgoing"),
+        default="both",
+        help="Relationship direction to analyze (default: both).",
+    )
+    risk_parser.add_argument(
+        "--type",
+        dest="relationship_type",
+        choices=("imports", "references", "inherits", "calls", "depends_on"),
+        default=None,
+        help="Filter by relationship type.",
+    )
+    risk_parser.add_argument(
+        "--depth",
+        "--max-depth",
+        dest="max_depth",
+        type=int,
+        default=DEFAULT_IMPACT_MAX_DEPTH,
+        help=f"Maximum traversal depth for impact analysis (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
+    )
+    risk_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_IMPACT_LIMIT,
+        help=f"Maximum number of items displayed (default: {DEFAULT_IMPACT_LIMIT}).",
+    )
+    _add_output_format_argument(risk_parser)
+    _add_refresh_control_argument(risk_parser)
+
+    pkg_boundaries_parser = subparsers.add_parser(
+        "package-boundaries",
+        aliases=["package-boundary", "boundaries"],
+        help="Analyze dependencies crossing package boundaries and evaluate boundary policies.",
+    )
+    pkg_boundaries_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path (default: current directory).",
+    )
+    pkg_boundaries_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_REPORT_LIMIT,
+        help=f"Maximum number of items displayed (default: {DEFAULT_REPORT_LIMIT}).",
+    )
+    _add_output_format_argument(pkg_boundaries_parser)
+    _add_refresh_control_argument(pkg_boundaries_parser)
 
     path_parser = subparsers.add_parser(
         "path",
@@ -671,6 +753,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "locate",
         "inspect-change",
         "pre-change",
+        "risk",
+        "change-risk",
+        "package-boundaries",
+        "package-boundary",
+        "boundaries",
         "-h",
         "--help",
     }:
@@ -2605,6 +2692,17 @@ def run_impact(
         print(f"  - {limitation}")
 
 
+def _load_project_package_policy(root_path: Path) -> PackageBoundaryPolicy | None:
+    from context_forge.config.loading import load_project_configuration
+
+    cfg = load_project_configuration(root_path)
+    if cfg.packages and (
+        cfg.packages.rules or cfg.packages.default_policy != "unrestricted"
+    ):
+        return cfg.packages
+    return None
+
+
 def run_changeset(
     paths: list[str],
     path: Path,
@@ -2615,6 +2713,7 @@ def run_changeset(
     max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
     *,
     checklist: bool = False,
+    risk: bool = False,
     allow_refresh: bool = True,
 ) -> None:
     if not paths:
@@ -2642,8 +2741,24 @@ def run_changeset(
         include_checklist=checklist,
     )
 
+    risk_report = None
+    if risk:
+        policy = _load_project_package_policy(root_path)
+        risk_report = generate_change_risk_report(
+            project,
+            paths,
+            direction=direction,
+            relationship_types=types_filter,
+            max_depth=max_depth,
+            limit=limit,
+            policy=policy,
+        )
+
     if output_format == "json":
-        _emit_json(result.to_dict())
+        payload = result.to_dict()
+        if risk_report is not None:
+            payload["change_risk"] = risk_report.to_dict()
+        _emit_json(payload)
         return
 
     print(f"Repository: {root_path}")
@@ -2772,6 +2887,228 @@ def run_changeset(
             for it in chk.unverified_areas:
                 print(f"  - [{it.execution_status}] {it.action}")
                 print(f"    Rationale: {it.rationale}")
+
+    if risk and risk_report:
+        print()
+        print("Change-risk report:")
+        print(
+            f"  Analysis status: {risk_report.analysis_status} (freshness: {risk_report.freshness_state})"
+        )
+        print(
+            f"  Directly affected: {risk_report.directly_affected_count}, Downstream: {risk_report.downstream_affected_count}"
+        )
+        print(
+            f"  Cross-package relationships: {risk_report.cross_package_impact_count}"
+        )
+        print()
+        print(f"Inferred concerns ({len(risk_report.inferred_concerns)}):")
+        if not risk_report.inferred_concerns:
+            print("  None identified.")
+        else:
+            for c in risk_report.inferred_concerns:
+                print(f"  - [{c.severity.value.upper()}] ({c.category}) {c.summary}")
+                print(f"    Rationale: {c.rationale}")
+                if c.recommended_action:
+                    print(f"    Recommended action: {c.recommended_action}")
+        if risk_report.missing_evidence:
+            print()
+            print("Missing evidence:")
+            for m in risk_report.missing_evidence:
+                print(f"  - [{m.category}] {m.description}")
+        print()
+        print(f"Disclaimer: {risk_report.disclaimer}")
+
+
+def run_risk(
+    paths: list[str],
+    path: Path,
+    direction: str = "both",
+    relationship_type: str | None = None,
+    limit: int = DEFAULT_IMPACT_LIMIT,
+    output_format: str = "text",
+    max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+    *,
+    allow_refresh: bool = True,
+) -> None:
+    if not paths:
+        raise ValueError("Paths list cannot be empty")
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("Report limit must be a positive integer")
+    if isinstance(max_depth, bool) or max_depth < 1:
+        raise ValueError("Traversal depth must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
+
+    policy = _load_project_package_policy(root_path)
+
+    types_filter = {relationship_type} if relationship_type else None
+    report = generate_change_risk_report(
+        project,
+        paths,
+        direction=direction,
+        relationship_types=types_filter,
+        max_depth=max_depth,
+        limit=limit,
+        policy=policy,
+    )
+
+    if output_format == "json":
+        _emit_json(report.to_dict())
+        return
+
+    print(f"Repository: {root_path}")
+    print(
+        f"Change inputs ({len(report.change_inputs)}): {', '.join(report.change_inputs)}"
+    )
+    print(
+        f"Analysis status: {report.analysis_status} (freshness: {report.freshness_state})"
+    )
+    print()
+    print("Summary:")
+    print(f"  Directly affected components: {report.directly_affected_count}")
+    print(f"  Downstream affected components: {report.downstream_affected_count}")
+    print(f"  Associated test suites: {report.associated_tests_count}")
+    print(f"  Unassociated targets: {report.unassociated_targets_count}")
+    print(f"  Cross-package impact relationships: {report.cross_package_impact_count}")
+    print(f"  Total observed facts: {len(report.observed_facts)}")
+    print(f"  Total inferred concerns: {len(report.inferred_concerns)}")
+
+    print()
+    print("Inferred concerns:")
+    if not report.inferred_concerns:
+        print("  None identified.")
+    else:
+        for c in report.inferred_concerns:
+            print(f"  - [{c.severity.value.upper()}] ({c.category}) {c.summary}")
+            print(f"    Rationale: {c.rationale}")
+            if c.recommended_action:
+                print(f"    Recommended action: {c.recommended_action}")
+            for ev in c.supporting_evidence:
+                print(f"    Evidence: {ev}")
+
+    print()
+    print("Observed facts:")
+    if not report.observed_facts:
+        print("  None observed.")
+    else:
+        facts_to_show = (
+            report.observed_facts[:limit] if limit else report.observed_facts
+        )
+        for f in facts_to_show:
+            print(f"  - [{f.category}] {f.statement}")
+        if limit and len(report.observed_facts) > limit:
+            print(f"  ... showing {limit} of {len(report.observed_facts)} facts")
+
+    if report.missing_evidence:
+        print()
+        print("Missing evidence / Limitations:")
+        for m in report.missing_evidence:
+            print(f"  - [{m.category}] {m.description}")
+            print(f"    Impact: {m.impact_on_assessment}")
+
+    print()
+    print(f"Disclaimer: {report.disclaimer}")
+
+
+def run_package_boundaries(
+    path: Path,
+    output_format: str = "text",
+    limit: int = DEFAULT_REPORT_LIMIT,
+    *,
+    allow_refresh: bool = True,
+) -> None:
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("Report limit must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
+
+    policy = _load_project_package_policy(root_path)
+
+    report = analyze_package_boundaries(
+        project,
+        policy=policy,
+        limit=limit,
+    )
+
+    if output_format == "json":
+        _emit_json(report.to_dict())
+        return
+
+    print(f"Repository: {root_path}")
+    print(f"Packages detected ({len(report.packages)}):")
+    if not report.packages:
+        print("  None detected (no directories containing '__init__.py').")
+    else:
+        for pkg in report.packages:
+            print(f"  - {pkg}")
+
+    print()
+    print(f"Cross-package dependencies ({report.total_cross_package_count}):")
+    if not report.cross_package_dependencies:
+        print("  None detected.")
+    else:
+        for dep in report.cross_package_dependencies:
+            status_tag = (
+                f" [{dep.policy_status}]" if dep.policy_status != "unrestricted" else ""
+            )
+            print(
+                f"  - [{dep.direction}]{status_tag} {dep.source_package} ({dep.source_file_path}) "
+                f"-[{dep.relationship_type}]-> {dep.target_package} ({dep.target_file_path})"
+            )
+            if dep.violation_reason:
+                print(f"    Violation: {dep.violation_reason}")
+        if report.truncated:
+            print(
+                f"  ... showing {len(report.cross_package_dependencies)} of "
+                f"{report.total_cross_package_count} items"
+            )
+
+    print()
+    print(f"Repeated cross-package patterns ({len(report.repeated_patterns)}):")
+    if not report.repeated_patterns:
+        print("  None detected.")
+    else:
+        for pat in report.repeated_patterns:
+            print(
+                f"  - {pat.source_package} -[{pat.relationship_type}]-> "
+                f"{pat.target_package}: {pat.count} dependency(ies)"
+            )
+
+    if report.unclassified_dependencies:
+        print()
+        print(f"Unclassified dependencies ({len(report.unclassified_dependencies)}):")
+        for u in report.unclassified_dependencies[:limit]:
+            print(
+                f"  - {u.source_file_path} -[{u.relationship_type}]-> {u.target_file_path}: {u.reason}"
+            )
+        if len(report.unclassified_dependencies) > limit:
+            print(
+                f"  ... showing {limit} of {len(report.unclassified_dependencies)} "
+                "unclassified dependencies"
+            )
+
+    if report.policy_violations:
+        print()
+        print(f"Policy violations ({len(report.policy_violations)}):")
+        for v in report.policy_violations:
+            print(f"  - [VIOLATION] Rule '{v.rule_id}': {v.message}")
+            print(f"    Evidence: {v.evidence}")
+
+    if report.limitations:
+        print()
+        print("Limitations:")
+        for lim in report.limitations:
+            print(f"  - {lim}")
 
 
 def run_path(
@@ -3048,6 +3385,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.format,
             args.max_depth,
             checklist=getattr(args, "checklist", False),
+            risk=getattr(args, "risk", False),
             allow_refresh=allow_refresh,
         ),
         "change-set": lambda: run_changeset(
@@ -3059,6 +3397,45 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.format,
             args.max_depth,
             checklist=getattr(args, "checklist", False),
+            risk=getattr(args, "risk", False),
+            allow_refresh=allow_refresh,
+        ),
+        "risk": lambda: run_risk(
+            args.paths,
+            getattr(args, "project_path", Path(".")),
+            args.direction,
+            args.relationship_type,
+            args.limit,
+            args.format,
+            args.max_depth,
+            allow_refresh=allow_refresh,
+        ),
+        "change-risk": lambda: run_risk(
+            args.paths,
+            getattr(args, "project_path", Path(".")),
+            args.direction,
+            args.relationship_type,
+            args.limit,
+            args.format,
+            args.max_depth,
+            allow_refresh=allow_refresh,
+        ),
+        "package-boundaries": lambda: run_package_boundaries(
+            getattr(args, "path", Path(".")),
+            args.format,
+            args.limit,
+            allow_refresh=allow_refresh,
+        ),
+        "package-boundary": lambda: run_package_boundaries(
+            getattr(args, "path", Path(".")),
+            args.format,
+            args.limit,
+            allow_refresh=allow_refresh,
+        ),
+        "boundaries": lambda: run_package_boundaries(
+            getattr(args, "path", Path(".")),
+            args.format,
+            args.limit,
             allow_refresh=allow_refresh,
         ),
         "path": lambda: run_path(
