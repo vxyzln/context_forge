@@ -55,6 +55,16 @@ from context_forge.query.path import (
 )
 from context_forge.query.project import ProjectQuery
 from context_forge.query.result import SearchResult, SearchResultType
+from context_forge.query.verification import (
+    DYNAMIC_COVERAGE_DISCLAIMER,
+    ChecklistCategory,
+    ChecklistItem,
+    TestAssociationClassification,
+    TestAssociationItem,
+    VerificationChecklist,
+    generate_verification_checklist,
+    identify_test_associations,
+)
 
 __all__ = [
     "DEFAULT_EXCERPT_MAX_LINES",
@@ -65,11 +75,14 @@ __all__ = [
     "DEFAULT_PATH_MAX_DEPTH",
     "DEFAULT_PATH_MAX_EXPANSIONS",
     "DEFAULT_REPORT_LIMIT",
+    "DYNAMIC_COVERAGE_DISCLAIMER",
     "ArchitectureInventory",
     "ChangeSetImpactItem",
     "ChangeSetImpactResult",
     "ChangeSetInputResolution",
     "ChangeSetProvenance",
+    "ChecklistCategory",
+    "ChecklistItem",
     "ContainmentEdge",
     "DirectImpactItem",
     "DirectImpactResult",
@@ -88,7 +101,10 @@ __all__ = [
     "StructuralIntegrityFinding",
     "TargetCandidate",
     "TargetResolution",
+    "TestAssociationClassification",
+    "TestAssociationItem",
     "UnresolvedImport",
+    "VerificationChecklist",
     "analyze_changeset",
     "build_architecture_report",
     "build_health_report",
@@ -96,7 +112,9 @@ __all__ = [
     "find_impact",
     "find_relationship_path",
     "find_transitive_impact",
+    "generate_verification_checklist",
     "get_source_evidence",
+    "identify_test_associations",
     "locate_and_get_evidence",
     "locate_symbol",
     "resolve_changeset_path",

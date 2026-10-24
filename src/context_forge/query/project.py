@@ -54,6 +54,10 @@ from context_forge.query.path import (
     find_relationship_path,
 )
 from context_forge.query.result import SearchResult, SearchResultType
+from context_forge.query.verification import (
+    VerificationChecklist,
+    generate_verification_checklist,
+)
 from context_forge.reporting.contract import DiagnosticItem, OperationOutcome
 from context_forge.storage.cache import (
     CacheFreshness,
@@ -1160,8 +1164,28 @@ class ProjectQuery:
         relationship_types: set[str] | None = None,
         max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
         limit: int | None = DEFAULT_IMPACT_LIMIT,
+        include_checklist: bool = False,
     ) -> ChangeSetImpactResult:
         return analyze_changeset(
+            self.project,
+            paths,
+            direction=direction,
+            relationship_types=relationship_types,
+            max_depth=max_depth,
+            limit=limit,
+            include_checklist=include_checklist,
+        )
+
+    def generate_verification_checklist(
+        self,
+        paths: Any,
+        *,
+        direction: str = "both",
+        relationship_types: set[str] | None = None,
+        max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+        limit: int | None = DEFAULT_IMPACT_LIMIT,
+    ) -> VerificationChecklist:
+        return generate_verification_checklist(
             self.project,
             paths,
             direction=direction,
