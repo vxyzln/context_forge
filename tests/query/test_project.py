@@ -965,3 +965,27 @@ def test_get_direct_dependencies_returns_empty_list_when_none_exist(
     dependencies = query.get_direct_dependencies(project.files[1].id)
 
     assert dependencies == []
+
+
+def test_project_query_evaluate_structural_rules(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    report = query.evaluate_structural_rules([])
+    assert report.violations_count == 0
+    assert report.unevaluable_count == 0
+
+
+def test_project_query_run_post_change_verification(tmp_path: Path) -> None:
+    from context_forge.pipeline.freshness import FreshnessState, WorkflowFreshness
+
+    project = create_project(tmp_path)
+    query = ProjectQuery(project)
+
+    fresh = WorkflowFreshness(state=FreshnessState.CURRENT, reason="test")
+    report = query.run_post_change_verification(
+        [project.files[0].path],
+        freshness=fresh,
+    )
+    assert report.changeset_impact is not None
+    assert report.comparison_performed is False

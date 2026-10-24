@@ -21,6 +21,7 @@ from context_forge.main import (
     run_inspect,
     run_status,
 )
+from context_forge.models.project import Project
 from context_forge.query.result import SearchResult, SearchResultType
 from context_forge.reporting.errors import (
     IndeterminateFreshnessError,
@@ -53,6 +54,8 @@ def test_main_without_args_prints_help(capsys: pytest.CaptureFixture[str]) -> No
     assert "inspect-change" in captured.out
     assert "risk" in captured.out
     assert "package-boundaries" in captured.out
+    assert "post-change" in captured.out
+    assert "rules" in captured.out
     assert "generate" not in captured.out
     assert "runtime" not in captured.out
     assert "--provider" not in captured.out
@@ -5346,3 +5349,204 @@ def test_memory_symbol_with_filters_and_excerpt(
     assert "Path: src/view.py" in captured.out
     assert "Source excerpt (lines 2-3):" in captured.out
     assert "def display(self):" in captured.out
+
+
+def test_cli_post_change_text(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = Project(
+        name="test_proj",
+        root_path=tmp_path.resolve(),
+        analysis_status="completed",
+    )
+    metadata = type("Metadata", (), {})()
+
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch("context_forge.main.run_post_change_verification") as mock_verify,
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "post-change",
+                "src/view.py",
+                "-p",
+                str(tmp_path),
+            ],
+        ),
+    ):
+        mock_report = type(
+            "Report",
+            (),
+            {
+                "repository_path": str(tmp_path.resolve()),
+                "outcome": type(
+                    "Outcome",
+                    (),
+                    {
+                        "status": type("Status", (), {"value": "success"})(),
+                        "message": "All clean",
+                    },
+                )(),
+                "freshness_state": "current",
+                "refreshed": False,
+                "comparison_status": "not_performed",
+                "change_set": ("src/view.py",),
+                "summary": type(
+                    "Summary",
+                    (),
+                    {
+                        "directly_affected_count": 1,
+                        "downstream_affected_count": 0,
+                        "associated_tests_count": 1,
+                        "suggested_checks_count": 1,
+                        "package_violations_count": 0,
+                        "rule_violations_count": 0,
+                        "rule_unevaluable_count": 0,
+                        "risk_concerns_count": 0,
+                    },
+                )(),
+                "suggested_checks": (
+                    type(
+                        "Check",
+                        (),
+                        {
+                            "category": "unit",
+                            "action": "Run test_view.py",
+                            "target": "tests/test_view.py",
+                            "command": "pytest tests/test_view.py",
+                        },
+                    )(),
+                ),
+                "change_risk": None,
+                "package_boundaries": None,
+                "regression_rules": None,
+                "limitations": (),
+            },
+        )()
+        mock_verify.return_value = mock_report
+
+        main()
+
+    captured = capsys.readouterr()
+    assert "Post-Change Verification: SUCCESS" in captured.out
+    assert "Change Set (1 file(s)):" in captured.out
+    assert "src/view.py" in captured.out
+    assert "Suggested Verification Checks (1, unexecuted):" in captured.out
+    assert "pytest tests/test_view.py" in captured.out
+
+
+def test_cli_post_change_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = Project(
+        name="test_proj",
+        root_path=tmp_path.resolve(),
+        analysis_status="completed",
+    )
+    metadata = type("Metadata", (), {})()
+
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch("context_forge.main.run_post_change_verification") as mock_verify,
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "post-change",
+                "src/view.py",
+                "-p",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+    ):
+        mock_report = type(
+            "Report",
+            (),
+            {
+                "to_dict": lambda self: {
+                    "repository_path": str(tmp_path.resolve()),
+                    "change_set": ["src/view.py"],
+                    "outcome": {"status": "success"},
+                }
+            },
+        )()
+        mock_verify.return_value = mock_report
+
+        main()
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["change_set"] == ["src/view.py"]
+    assert payload["outcome"]["status"] == "success"
+
+
+def test_cli_rules_text(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = Project(
+        name="test_proj",
+        root_path=tmp_path.resolve(),
+        analysis_status="completed",
+    )
+    metadata = type("Metadata", (), {})()
+
+    with (
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(project, metadata)
+        ),
+        patch("context_forge.main.evaluate_structural_rules") as mock_eval,
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "rules",
+                str(tmp_path),
+            ],
+        ),
+    ):
+        mock_report = type(
+            "Report",
+            (),
+            {
+                "repository_path": str(tmp_path.resolve()),
+                "results": (),
+                "no_violations_count": 0,
+                "violations_count": 0,
+                "unevaluable_count": 0,
+                "violations": (),
+                "no_violation_items": (),
+                "unevaluable_items": (),
+                "limitations": (),
+                "outcome": type(
+                    "Outcome",
+                    (),
+                    {
+                        "status": type("Status", (), {"value": "success"})(),
+                        "message": "Passed cleanly",
+                    },
+                )(),
+            },
+        )()
+        mock_eval.return_value = mock_report
+
+        main()
+
+    captured = capsys.readouterr()
+    assert (
+        "Structural Rules Evaluated (0): 0 clean, 0 violation(s), 0 unevaluable"
+        in captured.out
+    )
+    assert "Status: SUCCESS - Passed cleanly" in captured.out

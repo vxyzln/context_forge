@@ -57,6 +57,14 @@ from context_forge.query.path import (
     RelationshipPathResult,
     find_relationship_path,
 )
+from context_forge.query.post_change import (
+    PostChangeVerificationReport,
+    run_post_change_verification,
+)
+from context_forge.query.regression_rules import (
+    StructuralRulesReport,
+    evaluate_structural_rules,
+)
 from context_forge.query.result import SearchResult, SearchResultType
 from context_forge.query.risk import (
     ChangeRiskReport,
@@ -1236,6 +1244,50 @@ class ProjectQuery:
             policy=policy,
             limit=limit,
             relationship_types=relationship_types,
+        )
+
+    def evaluate_structural_rules(
+        self,
+        rules: Any,
+        *,
+        limit: int | None = None,
+        package_policy: Any | None = None,
+    ) -> StructuralRulesReport:
+        return evaluate_structural_rules(
+            self.project,
+            rules,
+            limit=limit,
+            package_policy=package_policy,
+        )
+
+    def run_post_change_verification(
+        self,
+        paths: Any | None = None,
+        *,
+        before_state: Any | None = None,
+        rules: Any | None = None,
+        package_policy: Any | None = None,
+        allow_refresh: bool = True,
+        limit: int = 50,
+        max_depth: int = 5,
+        direction: str = "both",
+        relationship_types: set[str] | None = None,
+        freshness: Any | None = None,
+        guard: Any | None = None,
+    ) -> PostChangeVerificationReport:
+        return run_post_change_verification(
+            self.project,
+            paths=paths,
+            before_state=before_state,
+            rules=rules,
+            package_policy=package_policy,
+            allow_refresh=allow_refresh,
+            limit=limit,
+            max_depth=max_depth,
+            direction=direction,
+            relationship_types=relationship_types,
+            freshness=freshness,
+            guard=guard,
         )
 
     def find_relationship_path(

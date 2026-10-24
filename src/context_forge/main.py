@@ -5,10 +5,15 @@ import json
 import sqlite3
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from context_forge.config.project import PackageBoundaryPolicy
+from context_forge.comparison.models import ComparisonState
+from context_forge.config.project import (
+    PackageBoundaryPolicy,
+    StructuralRule,
+)
 from context_forge.inspection import (
     format_pre_change_inspection_summary,
     inspect_pre_change,
@@ -55,7 +60,15 @@ from context_forge.query.path import (
     DEFAULT_PATH_MAX_EXPANSIONS,
     find_relationship_path,
 )
+from context_forge.query.post_change import (
+    PostChangeVerificationReport,
+    run_post_change_verification,
+)
 from context_forge.query.project import ProjectQuery
+from context_forge.query.regression_rules import (
+    StructuralRulesReport,
+    evaluate_structural_rules,
+)
 from context_forge.query.risk import (
     generate_change_risk_report,
 )
@@ -542,6 +555,76 @@ def create_parser() -> argparse.ArgumentParser:
     _add_output_format_argument(pkg_boundaries_parser)
     _add_refresh_control_argument(pkg_boundaries_parser)
 
+    post_change_parser = subparsers.add_parser(
+        "post-change",
+        aliases=["verify-change", "post_change", "verify"],
+        help="Run consolidated post-change verification across structural changes, tests, risk, boundaries, and rules.",
+    )
+    post_change_parser.add_argument(
+        "paths",
+        nargs="*",
+        default=[],
+        help="Changed file paths to verify. If omitted, attempts detection via Git repository status.",
+    )
+    post_change_parser.add_argument(
+        "--path",
+        "-p",
+        dest="project_path",
+        type=Path,
+        default=Path("."),
+        help="Repository root path (default: current directory).",
+    )
+    post_change_parser.add_argument(
+        "--before",
+        dest="before_state_path",
+        type=Path,
+        default=None,
+        help="Optional path to baseline repository snapshot or directory representing before-change state.",
+    )
+    post_change_parser.add_argument(
+        "--direction",
+        choices=("both", "incoming", "outgoing"),
+        default="both",
+        help="Relationship direction to analyze (default: both).",
+    )
+    post_change_parser.add_argument(
+        "--depth",
+        "--max-depth",
+        dest="max_depth",
+        type=int,
+        default=DEFAULT_IMPACT_MAX_DEPTH,
+        help=f"Maximum traversal depth for impact analysis (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
+    )
+    post_change_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_REPORT_LIMIT,
+        help=f"Maximum number of items displayed (default: {DEFAULT_REPORT_LIMIT}).",
+    )
+    _add_output_format_argument(post_change_parser)
+    _add_refresh_control_argument(post_change_parser)
+
+    rules_parser = subparsers.add_parser(
+        "rules",
+        aliases=["evaluate-rules", "check-rules"],
+        help="Evaluate declarative structural regression rules against repository architecture.",
+    )
+    rules_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path (default: current directory).",
+    )
+    rules_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_REPORT_LIMIT,
+        help=f"Maximum number of items displayed (default: {DEFAULT_REPORT_LIMIT}).",
+    )
+    _add_output_format_argument(rules_parser)
+    _add_refresh_control_argument(rules_parser)
+
     path_parser = subparsers.add_parser(
         "path",
         aliases=["query-path"],
@@ -758,6 +841,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "package-boundaries",
         "package-boundary",
         "boundaries",
+        "post-change",
+        "verify-change",
+        "post_change",
+        "verify",
+        "rules",
+        "evaluate-rules",
+        "check-rules",
         "-h",
         "--help",
     }:
@@ -2703,6 +2793,17 @@ def _load_project_package_policy(root_path: Path) -> PackageBoundaryPolicy | Non
     return None
 
 
+def _load_project_structural_rules(
+    root_path: Path,
+) -> tuple[StructuralRule, ...] | None:
+    from context_forge.config.loading import load_project_configuration
+
+    cfg = load_project_configuration(root_path)
+    if cfg.rules:
+        return cfg.rules
+    return None
+
+
 def run_changeset(
     paths: list[str],
     path: Path,
@@ -3111,6 +3212,206 @@ def run_package_boundaries(
             print(f"  - {lim}")
 
 
+def _print_rules_report(report: StructuralRulesReport) -> None:
+    print(f"Repository: {report.repository_path}")
+    print(
+        f"Structural Rules Evaluated ({len(report.results)}): "
+        f"{report.no_violations_count} clean, {report.violations_count} violation(s), "
+        f"{report.unevaluable_count} unevaluable"
+    )
+    print(f"Status: {report.outcome.status.value.upper()} - {report.outcome.message}")
+
+    if report.violations:
+        print()
+        print(f"Violations ({len(report.violations)}):")
+        for v in report.violations:
+            loc = (
+                f" at {v.source_path}:{v.line}"
+                if v.line
+                else (f" at {v.source_path}" if v.source_path else "")
+            )
+            print(f"  - [VIOLATION] Rule '{v.rule_id}'{loc}: {v.message}")
+            for ev in v.evidence:
+                print(f"    Evidence: {ev}")
+
+    if report.no_violation_items:
+        print()
+        print(f"No Violations Detected ({len(report.no_violation_items)}):")
+        for p in report.no_violation_items:
+            print(f"  - [PASS] Rule '{p.rule_id}': {p.message}")
+
+    if report.unevaluable_items:
+        print()
+        print(f"Unevaluable Rules ({len(report.unevaluable_items)}):")
+        for u in report.unevaluable_items:
+            print(f"  - [UNEVALUABLE] Rule '{u.rule_id}': {u.message}")
+
+    if report.limitations:
+        print()
+        print("Limitations:")
+        for lim in report.limitations:
+            print(f"  - {lim}")
+
+
+def run_rules(
+    path: Path,
+    output_format: str = "text",
+    limit: int = DEFAULT_REPORT_LIMIT,
+    *,
+    allow_refresh: bool = True,
+) -> None:
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("Report limit must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
+
+    rules = _load_project_structural_rules(root_path) or ()
+    policy = _load_project_package_policy(root_path)
+
+    report = evaluate_structural_rules(
+        project,
+        rules=rules,
+        limit=limit,
+        package_policy=policy,
+    )
+
+    if output_format == "json":
+        _emit_json(report.to_dict())
+        return
+
+    _print_rules_report(report)
+
+
+def _print_post_change_report(report: PostChangeVerificationReport) -> None:
+    print(f"Repository: {report.repository_path}")
+    print(f"Post-Change Verification: {report.outcome.status.value.upper()}")
+    print(f"Message: {report.outcome.message}")
+    print(
+        f"Freshness: {report.freshness_state} (Refreshed: {'yes' if report.refreshed else 'no'})"
+    )
+    print(f"Structural Comparison: {report.comparison_status}")
+
+    print()
+    print(f"Change Set ({len(report.change_set)} file(s)):")
+    for cp in report.change_set:
+        print(f"  - {cp}")
+
+    if report.summary:
+        s = report.summary
+        print()
+        print("Summary:")
+        print(f"  Directly affected components: {s.directly_affected_count}")
+        print(f"  Downstream affected components: {s.downstream_affected_count}")
+        print(f"  Associated tests identified: {s.associated_tests_count}")
+        print(f"  Suggested checks (unexecuted): {s.suggested_checks_count}")
+        print(f"  Package boundary violations: {s.package_violations_count}")
+        print(f"  Rule violations: {s.rule_violations_count}")
+        print(f"  Unevaluable rules: {s.rule_unevaluable_count}")
+        print(f"  Risk concerns: {s.risk_concerns_count}")
+
+    if report.suggested_checks:
+        print()
+        print(
+            f"Suggested Verification Checks ({len(report.suggested_checks)}, unexecuted):"
+        )
+        for sc in report.suggested_checks:
+            tgt = f" ({sc.target})" if sc.target else ""
+            print(f"  - [{sc.category}] {sc.action}{tgt}")
+            if sc.command:
+                print(f"    Command: {sc.command}")
+
+    if report.change_risk and report.change_risk.inferred_concerns:
+        print()
+        print(f"Change-Risk Concerns ({len(report.change_risk.inferred_concerns)}):")
+        for c in report.change_risk.inferred_concerns:
+            summary = getattr(c, "summary", None) or getattr(c, "title", "Risk concern")
+            rationale = getattr(c, "rationale", None) or getattr(c, "detail", "")
+            print(f"  - [{c.severity.value.upper()}] {summary}: {rationale}")
+
+    if report.package_boundaries and report.package_boundaries.policy_violations:
+        print()
+        print(
+            f"Package Policy Violations ({len(report.package_boundaries.policy_violations)}):"
+        )
+        for pv in report.package_boundaries.policy_violations:
+            print(f"  - [VIOLATION] Rule '{pv.rule_id}': {pv.message}")
+
+    if report.regression_rules and report.regression_rules.violations:
+        print()
+        print(
+            f"Structural Rule Violations ({len(report.regression_rules.violations)}):"
+        )
+        for rv in report.regression_rules.violations:
+            loc = f" at {rv.source_path}:{rv.line}" if rv.line else ""
+            print(f"  - [VIOLATION] Rule '{rv.rule_id}'{loc}: {rv.message}")
+
+    if report.limitations:
+        print()
+        print("Limitations:")
+        for lim in report.limitations:
+            print(f"  - {lim}")
+
+
+def run_post_change(
+    paths: Sequence[str | Path] | None,
+    path: Path,
+    before_state_path: Path | None = None,
+    direction: str = "both",
+    max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+    limit: int = DEFAULT_REPORT_LIMIT,
+    output_format: str = "text",
+    *,
+    allow_refresh: bool = True,
+) -> None:
+    if isinstance(max_depth, bool) or max_depth < 1:
+        raise ValueError("Traversal depth must be a positive integer")
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("Report limit must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    project, _metadata = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
+
+    before_state = None
+    if before_state_path is not None:
+        before_root = resolve_project_path(before_state_path)
+        before_proj, before_meta = load_fresh_project(before_root, allow_refresh=False)
+        before_state = ComparisonState(
+            project=before_proj,
+            metadata=before_meta,
+            repository_path=before_root,
+        )
+
+    rules = _load_project_structural_rules(root_path) or ()
+    policy = _load_project_package_policy(root_path)
+
+    report = run_post_change_verification(
+        project,
+        paths=paths,
+        before_state=before_state,
+        rules=rules,
+        package_policy=policy,
+        allow_refresh=allow_refresh,
+        limit=limit,
+        max_depth=max_depth,
+        direction=direction,
+    )
+
+    if output_format == "json":
+        _emit_json(report.to_dict())
+        return
+
+    _print_post_change_report(report)
+
+
 def run_path(
     start: str,
     end: str,
@@ -3261,6 +3562,23 @@ def run_context(args: argparse.Namespace) -> None:
 
 def _dispatch_command(args: argparse.Namespace) -> None:
     allow_refresh = not getattr(args, "no_refresh", False)
+
+    post_change_handler = lambda: run_post_change(
+        getattr(args, "paths", []),
+        getattr(args, "project_path", Path(".")),
+        before_state_path=getattr(args, "before_state_path", None),
+        direction=getattr(args, "direction", "both"),
+        max_depth=getattr(args, "max_depth", DEFAULT_IMPACT_MAX_DEPTH),
+        limit=getattr(args, "limit", DEFAULT_REPORT_LIMIT),
+        output_format=getattr(args, "format", "text"),
+        allow_refresh=allow_refresh,
+    )
+    rules_handler = lambda: run_rules(
+        getattr(args, "path", Path(".")),
+        output_format=getattr(args, "format", "text"),
+        limit=getattr(args, "limit", DEFAULT_REPORT_LIMIT),
+        allow_refresh=allow_refresh,
+    )
 
     handlers = {
         "analyze": lambda: run_analyze(args.path, args.format),
@@ -3438,6 +3756,13 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.limit,
             allow_refresh=allow_refresh,
         ),
+        "post-change": post_change_handler,
+        "verify-change": post_change_handler,
+        "post_change": post_change_handler,
+        "verify": post_change_handler,
+        "rules": rules_handler,
+        "evaluate-rules": rules_handler,
+        "check-rules": rules_handler,
         "path": lambda: run_path(
             args.start,
             args.end,

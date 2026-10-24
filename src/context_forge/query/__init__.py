@@ -61,7 +61,21 @@ from context_forge.query.path import (
     RelationshipPathStep,
     find_relationship_path,
 )
+from context_forge.query.post_change import (
+    CheckExecutionStatus,
+    PostChangeSummary,
+    PostChangeVerificationReport,
+    VerificationCheckRecord,
+    run_post_change_verification,
+)
 from context_forge.query.project import ProjectQuery
+from context_forge.query.regression_rules import (
+    RuleEvaluationItem,
+    RuleKind,
+    RuleOutcome,
+    StructuralRulesReport,
+    evaluate_structural_rules,
+)
 from context_forge.query.result import SearchResult, SearchResultType
 from context_forge.query.risk import (
     RISK_REPORT_DISCLAIMER,
@@ -101,6 +115,7 @@ __all__ = [
     "ChangeSetImpactResult",
     "ChangeSetInputResolution",
     "ChangeSetProvenance",
+    "CheckExecutionStatus",
     "ChecklistCategory",
     "ChecklistItem",
     "ContainmentEdge",
@@ -115,6 +130,8 @@ __all__ = [
     "ObservedFact",
     "PackageBoundaryReport",
     "PolicyViolation",
+    "PostChangeSummary",
+    "PostChangeVerificationReport",
     "ProjectQuery",
     "RelationshipPathResult",
     "RelationshipPathStep",
@@ -123,22 +140,28 @@ __all__ = [
     "ResolvedTarget",
     "RiskConcernCategory",
     "RiskFactCategory",
+    "RuleEvaluationItem",
+    "RuleKind",
+    "RuleOutcome",
     "SearchResult",
     "SearchResultType",
     "SourceExcerpt",
     "StructuralFinding",
     "StructuralIntegrityFinding",
+    "StructuralRulesReport",
     "TargetCandidate",
     "TargetResolution",
     "TestAssociationClassification",
     "TestAssociationItem",
     "UnclassifiedDependency",
     "UnresolvedImport",
+    "VerificationCheckRecord",
     "VerificationChecklist",
     "analyze_changeset",
     "analyze_package_boundaries",
     "build_architecture_report",
     "build_health_report",
+    "evaluate_structural_rules",
     "find_direct_impact",
     "find_impact",
     "find_relationship_path",
@@ -151,4 +174,5 @@ __all__ = [
     "locate_symbol",
     "resolve_changeset_path",
     "resolve_impact_target",
+    "run_post_change_verification",
 ]
