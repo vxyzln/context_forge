@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from context_forge.comparison.models import is_terminal_complete_status
 from context_forge.git.navigation import normalize_relative_path
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship
@@ -111,9 +112,12 @@ class RelevantTestItem:
     target_entity_path: str | None
     direction: str
     evidence: str
+    classification: str = "direct"
+    rule: str | None = None
+    target_kind: str = "direct_root"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "direction": self.direction,
             "evidence": self.evidence,
             "relationship_type": self.relationship_type,
@@ -123,6 +127,13 @@ class RelevantTestItem:
             "test_file_id": str(self.test_file_id),
             "test_file_path": self.test_file_path,
         }
+        if self.classification is not None:
+            result["classification"] = self.classification
+        if self.rule is not None:
+            result["rule"] = self.rule
+        if self.target_kind is not None:
+            result["target_kind"] = self.target_kind
+        return result
 
 
 @dataclass(frozen=True)
@@ -141,11 +152,15 @@ class ChangeSetImpactResult:
     direction: str
     relationship_types: tuple[str, ...]
     relevant_tests: tuple[RelevantTestItem, ...] = ()
+    verification_checklist: Any | None = None
     diagnostics: tuple[DiagnosticItem, ...] = ()
     limitations: tuple[str, ...] = ()
     message: str = ""
     outcome: OperationOutcome = field(
         default_factory=lambda: OperationOutcome.success()
+    )
+    _all_items: tuple[ChangeSetImpactItem, ...] | None = field(
+        default=None, repr=False, compare=False
     )
 
     @property
@@ -157,7 +172,7 @@ class ChangeSetImpactResult:
         return tuple(it for it in self.items if it.classification == "downstream")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "depth_reached": self.depth_reached,
             "diagnostics": [d.to_dict() for d in self.diagnostics],
             "direct_count": self.direct_count,
@@ -177,6 +192,13 @@ class ChangeSetImpactResult:
             "total": self.total,
             "truncated": self.truncated,
         }
+        if self.verification_checklist is not None:
+            result["verification_checklist"] = (
+                self.verification_checklist.to_dict()
+                if hasattr(self.verification_checklist, "to_dict")
+                else self.verification_checklist
+            )
+        return result
 
 
 def resolve_changeset_path(
@@ -328,7 +350,11 @@ def analyze_changeset(
     relationship_types: set[str] | None = None,
     max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
     limit: int | None = DEFAULT_IMPACT_LIMIT,
+    include_checklist: bool = False,
+    _include_checklist: bool | None = None,
 ) -> ChangeSetImpactResult:
+    if _include_checklist is not None:
+        include_checklist = _include_checklist
     if direction not in {"incoming", "outgoing", "both"}:
         raise ValueError("Direction must be 'incoming', 'outgoing', or 'both'")
 
@@ -416,7 +442,9 @@ def analyze_changeset(
                 f"Input path '{p_str}' could not be resolved or analyzed"
             )
 
-    is_complete_project = project.analysis_status == "analyzed" and not project.errors
+    is_complete_project = (
+        is_terminal_complete_status(project.analysis_status) and not project.errors
+    )
     if not is_complete_project:
         limitations.append(
             f"Repository analysis status is {project.analysis_status!r}; results may be incomplete"
@@ -690,6 +718,11 @@ def analyze_changeset(
                 target_entity_path=tgt_info[2],
                 direction="outgoing_from_test",
                 evidence=f"Confirmed graph relationship '{rel_type}' from test to affected entity '{tgt_info[1]}'",
+                classification="direct",
+                rule=f"structural_{rel_type}",
+                target_kind="direct_root"
+                if rel.target_id in root_ids
+                else "downstream_affected",
             )
 
         if tgt_is_test and rel.source_id in target_entity_ids:
@@ -704,6 +737,11 @@ def analyze_changeset(
                 target_entity_path=src_info[2],
                 direction="incoming_to_test",
                 evidence=f"Confirmed graph relationship '{rel_type}' from affected entity '{src_info[1]}' to test",
+                classification="direct",
+                rule=f"structural_{rel_type}",
+                target_kind="direct_root"
+                if rel.source_id in root_ids
+                else "downstream_affected",
             )
 
     relevant_tests = tuple(
@@ -761,7 +799,7 @@ def analyze_changeset(
         limitations=tuple(sorted(set(limitations))),
     )
 
-    return ChangeSetImpactResult(
+    res = ChangeSetImpactResult(
         status=status,
         supplied_paths=supplied_paths,
         resolved_inputs=tuple(resolved_inputs),
@@ -776,8 +814,26 @@ def analyze_changeset(
         direction=direction,
         relationship_types=tuple(sorted(types_filter)),
         relevant_tests=relevant_tests,
+        verification_checklist=None,
         diagnostics=final_outcome.diagnostics,
         limitations=final_outcome.limitations,
         message=msg,
         outcome=final_outcome,
+        _all_items=tuple(sorted_items),
     )
+
+    if include_checklist:
+        from context_forge.query.verification import generate_verification_checklist
+
+        chk = generate_verification_checklist(
+            project,
+            paths,
+            impact_result=res,
+            direction=direction,
+            relationship_types=types_filter,
+            max_depth=max_depth,
+            limit=limit,
+        )
+        res = replace(res, verification_checklist=chk)
+
+    return res

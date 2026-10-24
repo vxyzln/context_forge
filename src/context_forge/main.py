@@ -451,6 +451,12 @@ def create_parser() -> argparse.ArgumentParser:
         default=DEFAULT_IMPACT_LIMIT,
         help=f"Maximum number of items displayed (default: {DEFAULT_IMPACT_LIMIT}).",
     )
+    changeset_parser.add_argument(
+        "--checklist",
+        action="store_true",
+        default=False,
+        help="Display verification checklist with test recommendations.",
+    )
     _add_output_format_argument(changeset_parser)
     _add_refresh_control_argument(changeset_parser)
 
@@ -2608,6 +2614,7 @@ def run_changeset(
     output_format: str = "text",
     max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
     *,
+    checklist: bool = False,
     allow_refresh: bool = True,
 ) -> None:
     if not paths:
@@ -2632,6 +2639,7 @@ def run_changeset(
         relationship_types=types_filter,
         max_depth=max_depth,
         limit=limit,
+        include_checklist=checklist,
     )
 
     if output_format == "json":
@@ -2708,6 +2716,62 @@ def run_changeset(
         print("Limitations:")
         for lim in result.limitations:
             print(f"  - {lim}")
+
+    if checklist and result.verification_checklist:
+        chk = result.verification_checklist
+        print()
+        print("Verification checklist:")
+        print(
+            f"  Analysis status: {chk.analysis_status} (freshness: {chk.freshness_state})"
+        )
+        print(f"  Disclaimer: {chk.disclaimer}")
+
+        print()
+        print(
+            f"Category A: Detected structural tests ({len(chk.detected_structural_tests)}):"
+        )
+        if not chk.detected_structural_tests:
+            print("  None detected.")
+        else:
+            for it in chk.detected_structural_tests:
+                cmd_str = f" [{it.suggested_command}]" if it.suggested_command else ""
+                print(f"  - [{it.execution_status}]{cmd_str} {it.action}")
+                print(f"    Rationale: {it.rationale}")
+                for ev in it.supporting_evidence:
+                    print(f"    Evidence: {ev}")
+
+        print()
+        print(f"Category B: Heuristic recommendations ({len(chk.heuristic_tests)}):")
+        if not chk.heuristic_tests:
+            print("  None detected.")
+        else:
+            for it in chk.heuristic_tests:
+                cmd_str = f" [{it.suggested_command}]" if it.suggested_command else ""
+                print(f"  - [{it.execution_status}]{cmd_str} {it.action}")
+                print(f"    Rationale: {it.rationale}")
+                for ev in it.supporting_evidence:
+                    print(f"    Evidence: {ev}")
+
+        print()
+        print(
+            f"Category C: Additional verification ({len(chk.additional_verifications)}):"
+        )
+        if not chk.additional_verifications:
+            print("  None detected.")
+        else:
+            for it in chk.additional_verifications:
+                cmd_str = f" [{it.suggested_command}]" if it.suggested_command else ""
+                print(f"  - [{it.execution_status}]{cmd_str} {it.action}")
+                print(f"    Rationale: {it.rationale}")
+
+        print()
+        print(f"Category D: Unverified areas ({len(chk.unverified_areas)}):")
+        if not chk.unverified_areas:
+            print("  None detected.")
+        else:
+            for it in chk.unverified_areas:
+                print(f"  - [{it.execution_status}] {it.action}")
+                print(f"    Rationale: {it.rationale}")
 
 
 def run_path(
@@ -2983,6 +3047,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.limit,
             args.format,
             args.max_depth,
+            checklist=getattr(args, "checklist", False),
             allow_refresh=allow_refresh,
         ),
         "change-set": lambda: run_changeset(
@@ -2993,6 +3058,7 @@ def _dispatch_command(args: argparse.Namespace) -> None:
             args.limit,
             args.format,
             args.max_depth,
+            checklist=getattr(args, "checklist", False),
             allow_refresh=allow_refresh,
         ),
         "path": lambda: run_path(
