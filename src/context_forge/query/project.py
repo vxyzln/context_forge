@@ -47,6 +47,10 @@ from context_forge.query.locator import (
     locate_and_get_evidence,
     locate_symbol,
 )
+from context_forge.query.package_boundary import (
+    PackageBoundaryReport,
+    analyze_package_boundaries,
+)
 from context_forge.query.path import (
     DEFAULT_PATH_MAX_DEPTH,
     DEFAULT_PATH_MAX_EXPANSIONS,
@@ -54,6 +58,10 @@ from context_forge.query.path import (
     find_relationship_path,
 )
 from context_forge.query.result import SearchResult, SearchResultType
+from context_forge.query.risk import (
+    ChangeRiskReport,
+    generate_change_risk_report,
+)
 from context_forge.query.verification import (
     VerificationChecklist,
     generate_verification_checklist,
@@ -1192,6 +1200,42 @@ class ProjectQuery:
             relationship_types=relationship_types,
             max_depth=max_depth,
             limit=limit,
+        )
+
+    def generate_change_risk_report(
+        self,
+        paths: Any,
+        *,
+        comparison: Any | None = None,
+        direction: str = "both",
+        relationship_types: set[str] | None = None,
+        max_depth: int = DEFAULT_IMPACT_MAX_DEPTH,
+        limit: int | None = DEFAULT_IMPACT_LIMIT,
+        policy: Any | None = None,
+    ) -> ChangeRiskReport:
+        return generate_change_risk_report(
+            self.project,
+            paths,
+            comparison=comparison,
+            direction=direction,
+            relationship_types=relationship_types,
+            max_depth=max_depth,
+            limit=limit,
+            policy=policy,
+        )
+
+    def analyze_package_boundaries(
+        self,
+        *,
+        policy: Any | None = None,
+        limit: int = 50,
+        relationship_types: set[str] | None = None,
+    ) -> PackageBoundaryReport:
+        return analyze_package_boundaries(
+            self.project,
+            policy=policy,
+            limit=limit,
+            relationship_types=relationship_types,
         )
 
     def find_relationship_path(
