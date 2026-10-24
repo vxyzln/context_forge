@@ -6,6 +6,7 @@ from context_forge.config.project import (
     ProjectAnalysisConfiguration,
     ProjectConfiguration,
     ProjectStorageConfiguration,
+    StructuralRule,
 )
 
 
@@ -21,6 +22,7 @@ def validate_project_config(
     storage_data = _section(data, "storage")
     analysis_data = _section(data, "analysis")
     packages_data = _section(data, "packages") or _section(data, "package_policy")
+    rules_data = data.get("rules")
 
     return ProjectConfiguration(
         storage=ProjectStorageConfiguration(
@@ -30,11 +32,12 @@ def validate_project_config(
             max_context_units=_optional_int(analysis_data, "max_context_units"),
         ),
         packages=_validate_packages_policy(packages_data),
+        rules=_validate_structural_rules(rules_data),
     )
 
 
 def _validate_top_level(data: dict[str, Any]) -> None:
-    allowed = {"storage", "analysis", "packages", "package_policy"}
+    allowed = {"storage", "analysis", "packages", "package_policy", "rules"}
 
     unknown = set(data) - allowed
 
@@ -250,3 +253,97 @@ def _validate_packages_policy(section: dict[str, Any]) -> PackageBoundaryPolicy:
         rules=tuple(rules_list),
         default_policy=default_policy,
     )
+
+
+def _validate_structural_rules(raw_rules: Any) -> tuple[StructuralRule, ...]:
+    if raw_rules is None:
+        return ()
+
+    if not isinstance(raw_rules, list):
+        raise ConfigurationValidationError(
+            "Configuration section 'rules' must be a list"
+        )
+
+    rules_list: list[StructuralRule] = []
+    seen_ids: set[str] = set()
+
+    for idx, item in enumerate(raw_rules):
+        if not isinstance(item, dict):
+            raise ConfigurationValidationError(f"Rule #{idx + 1} must be a table")
+        rule_id = item.get("rule_id") or item.get("id")
+        kind = item.get("kind") or item.get("type")
+        source = (
+            item.get("source")
+            or item.get("source_component")
+            or item.get("source_package")
+        )
+        target = (
+            item.get("target")
+            or item.get("target_component")
+            or item.get("target_package")
+        )
+        rel_type = item.get("relationship_type") or item.get("rel_type")
+        desc = item.get("description")
+        severity = item.get("severity", "error")
+
+        if not kind or not isinstance(kind, str) or not kind.strip():
+            raise ConfigurationValidationError(
+                f"Rule #{idx + 1} missing or invalid 'kind'"
+            )
+        kind = kind.strip()
+
+        if not source or not isinstance(source, str) or not source.strip():
+            raise ConfigurationValidationError(
+                f"Rule #{idx + 1} missing or invalid 'source'"
+            )
+        source = source.strip()
+
+        if target is not None:
+            if not isinstance(target, str) or not target.strip():
+                raise ConfigurationValidationError(f"Rule #{idx + 1} invalid 'target'")
+            target = target.strip()
+
+        if rel_type is not None:
+            if not isinstance(rel_type, str) or not rel_type.strip():
+                raise ConfigurationValidationError(
+                    f"Rule #{idx + 1} invalid 'relationship_type'"
+                )
+            rel_type = rel_type.strip()
+
+        if desc is not None and not isinstance(desc, str):
+            raise ConfigurationValidationError(f"Rule #{idx + 1} invalid 'description'")
+        if desc is not None:
+            desc = desc.strip()
+
+        if severity is not None and (
+            not isinstance(severity, str)
+            or severity not in {"error", "warning", "info", "blocker"}
+        ):
+            raise ConfigurationValidationError(
+                f"Rule #{idx + 1} invalid 'severity': {severity!r}"
+            )
+
+        if not rule_id or not isinstance(rule_id, str) or not rule_id.strip():
+            rule_id = f"{kind}:{source}->{target}" if target else f"{kind}:{source}"
+        else:
+            rule_id = rule_id.strip()
+
+        if rule_id in seen_ids:
+            raise ConfigurationValidationError(
+                f"Duplicate structural rule_id: {rule_id!r}"
+            )
+        seen_ids.add(rule_id)
+
+        rules_list.append(
+            StructuralRule(
+                rule_id=rule_id,
+                kind=kind,
+                source=source,
+                target=target,
+                relationship_type=rel_type,
+                description=desc,
+                severity=severity,
+            )
+        )
+
+    return tuple(rules_list)

@@ -1,5 +1,6 @@
 import fnmatch
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,28 @@ class PackageBoundaryPolicy:
 
 
 @dataclass(frozen=True)
+class StructuralRule:
+    rule_id: str
+    kind: str
+    source: str
+    target: str | None = None
+    relationship_type: str | None = None
+    description: str | None = None
+    severity: str = "error"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "description": self.description,
+            "kind": self.kind,
+            "relationship_type": self.relationship_type,
+            "rule_id": self.rule_id,
+            "severity": self.severity,
+            "source": self.source,
+            "target": self.target,
+        }
+
+
+@dataclass(frozen=True)
 class ProjectConfiguration:
     storage: ProjectStorageConfiguration = field(
         default_factory=ProjectStorageConfiguration
@@ -116,3 +139,4 @@ class ProjectConfiguration:
         default_factory=ProjectAnalysisConfiguration
     )
     packages: PackageBoundaryPolicy = field(default_factory=PackageBoundaryPolicy)
+    rules: tuple[StructuralRule, ...] = ()

@@ -218,3 +218,74 @@ def test_validate_project_config_rejects_invalid_deny_string() -> None:
                 }
             }
         )
+
+
+def test_validate_project_config_reads_structural_rules() -> None:
+    cfg = validate_project_config(
+        {
+            "rules": [
+                {
+                    "id": "no-ui-to-db",
+                    "kind": "prohibited_dependency",
+                    "source": "ui",
+                    "target": "storage",
+                    "description": "UI must not depend directly on storage",
+                }
+            ]
+        }
+    )
+    assert len(cfg.rules) == 1
+    rule = cfg.rules[0]
+    assert rule.rule_id == "no-ui-to-db"
+    assert rule.kind == "prohibited_dependency"
+    assert rule.source == "ui"
+    assert rule.target == "storage"
+    assert rule.description == "UI must not depend directly on storage"
+
+
+def test_validate_project_config_rejects_duplicate_structural_rule_id() -> None:
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="Duplicate structural rule_id: 'dup-id'",
+    ):
+        validate_project_config(
+            {
+                "rules": [
+                    {
+                        "id": "dup-id",
+                        "kind": "prohibited_dependency",
+                        "source": "ui",
+                    },
+                    {
+                        "id": "dup-id",
+                        "kind": "isolated_component",
+                        "source": "storage",
+                    },
+                ]
+            }
+        )
+
+
+def test_validate_project_config_rejects_missing_source_in_structural_rule() -> None:
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="Rule #1 missing or invalid 'source'",
+    ):
+        validate_project_config(
+            {
+                "rules": [
+                    {
+                        "id": "r1",
+                        "kind": "prohibited_dependency",
+                    }
+                ]
+            }
+        )
+
+
+def test_validate_project_config_rejects_non_list_rules() -> None:
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="Configuration section 'rules' must be a list",
+    ):
+        validate_project_config({"rules": "invalid"})
