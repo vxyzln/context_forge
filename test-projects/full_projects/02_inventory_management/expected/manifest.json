@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "project_id": "02_inventory_management",
+  "description": "Inventory management application tracking products, stock movements, reorder policies, and valuation reports",
+  "target_directory": "src",
+  "expected": {
+    "file_count": 15,
+    "symbol_count": 113,
+    "relationship_count": 245,
+    "analysis_errors": 0,
+    "source_files": [
+      "inventory/__init__.py",
+      "inventory/application.py",
+      "inventory/domain/__init__.py",
+      "inventory/domain/enums.py",
+      "inventory/domain/movement.py",
+      "inventory/domain/product.py",
+      "inventory/domain/supplier.py",
+      "inventory/operations/__init__.py",
+      "inventory/operations/service.py",
+      "inventory/policies/__init__.py",
+      "inventory/policies/reorder.py",
+      "inventory/reporting/__init__.py",
+      "inventory/reporting/reports.py",
+      "inventory/storage/__init__.py",
+      "inventory/storage/store.py"
+    ],
+    "symbols": [
+      {"name": "InventoryApp", "kind": "class"},
+      {"name": "InventoryService", "kind": "class"},
+      {"name": "InventoryStore", "kind": "class"},
+      {"name": "InventoryReporter", "kind": "class"},
+      {"name": "Product", "kind": "class"},
+      {"name": "Supplier", "kind": "class"},
+      {"name": "StockMovement", "kind": "class"},
+      {"name": "MovementType", "kind": "class"},
+      {"name": "StockStatus", "kind": "class"},
+      {"name": "evaluate_stock_level", "kind": "function"},
+      {"name": "calculate_reorder_quantity", "kind": "function"}
+    ]
+  },
+  "extra_checks": [
+    {
+      "command": ["memory", "dependencies", "inventory/policies/reorder.py", "{target}", "--format", "json"],
+      "expected_exit_code": 0,
+      "expected_json_subset": {
+        "file": "inventory/policies/reorder.py",
+        "status": "ok"
+      }
+    }
+  ],
+  "known_limitations": [
+    "Shared policy calculation functions are imported directly across reporting modules.",
+    "Dynamic quantity formulas or external vendor feeds are not modeled."
+  ]
+}

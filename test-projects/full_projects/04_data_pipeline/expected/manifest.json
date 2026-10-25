@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "project_id": "04_data_pipeline",
+  "description": "Multi-stage data transformation and reporting pipeline processing tabular input records into category summaries",
+  "target_directory": "src",
+  "expected": {
+    "file_count": 15,
+    "symbol_count": 87,
+    "relationship_count": 183,
+    "analysis_errors": 0,
+    "source_files": [
+      "pipeline/__init__.py",
+      "pipeline/aggregation/__init__.py",
+      "pipeline/aggregation/aggregator.py",
+      "pipeline/models/__init__.py",
+      "pipeline/models/record.py",
+      "pipeline/models/summary.py",
+      "pipeline/orchestrator.py",
+      "pipeline/readers/__init__.py",
+      "pipeline/readers/loader.py",
+      "pipeline/reporting/__init__.py",
+      "pipeline/reporting/formatter.py",
+      "pipeline/transforms/__init__.py",
+      "pipeline/transforms/cleaner.py",
+      "pipeline/validation/__init__.py",
+      "pipeline/validation/schema.py"
+    ],
+    "symbols": [
+      {
+        "name": "PipelineOrchestrator",
+        "kind": "class"
+      },
+      {
+        "name": "DataReader",
+        "kind": "class"
+      },
+      {
+        "name": "RecordCleaner",
+        "kind": "class"
+      },
+      {
+        "name": "DataAggregator",
+        "kind": "class"
+      },
+      {
+        "name": "PipelineReporter",
+        "kind": "class"
+      },
+      {
+        "name": "RawRecord",
+        "kind": "class"
+      },
+      {
+        "name": "CleanedRecord",
+        "kind": "class"
+      },
+      {
+        "name": "CategorySummary",
+        "kind": "class"
+      },
+      {
+        "name": "PipelineValidationError",
+        "kind": "class"
+      },
+      {
+        "name": "validate_required_fields",
+        "kind": "function"
+      },
+      {
+        "name": "parse_numeric",
+        "kind": "function"
+      }
+    ]
+  },
+  "extra_checks": [
+    {
+      "command": [
+        "memory",
+        "dependencies",
+        "pipeline/transforms/cleaner.py",
+        "{target}",
+        "--format",
+        "json"
+      ],
+      "expected_exit_code": 0,
+      "expected_json_subset": {
+        "file": "pipeline/transforms/cleaner.py",
+        "status": "ok"
+      }
+    }
+  ],
+  "known_limitations": [
+    "Data pipeline input files (CSV, JSON) are read at application runtime and are not treated as code modules.",
+    "Static analysis indexes class methods, record definitions, and import relationships between pipeline stages."
+  ]
+}

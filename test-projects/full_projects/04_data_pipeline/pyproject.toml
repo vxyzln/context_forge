@@ -1,0 +1,10 @@
+[project]
+name = "data-pipeline"
+version = "0.1.0"
+description = "Deterministic data processing pipeline application fixture"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

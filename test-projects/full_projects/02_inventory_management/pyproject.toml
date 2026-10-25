@@ -1,0 +1,10 @@
+[project]
+name = "inventory-mgmt"
+version = "0.1.0"
+description = "Inventory management domain application fixture"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

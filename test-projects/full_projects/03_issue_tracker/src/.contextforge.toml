@@ -1,0 +1,8 @@
+[packages]
+default_policy = "allow"
+
+[[packages.rules]]
+source = "issues/notifications"
+target = "issues/reporting"
+policy = "deny"
+description = "Notification service must not depend on reporting layer"

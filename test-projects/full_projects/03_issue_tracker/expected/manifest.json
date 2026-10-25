@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "project_id": "03_issue_tracker",
+  "description": "Issue tracking application with rich event auditing and deliberate architectural boundary policy violation",
+  "target_directory": "src",
+  "expected": {
+    "file_count": 15,
+    "symbol_count": 120,
+    "relationship_count": 274,
+    "analysis_errors": 0,
+    "source_files": [
+      ".contextforge.toml",
+      "issues/__init__.py",
+      "issues/application.py",
+      "issues/domain/__init__.py",
+      "issues/domain/enums.py",
+      "issues/domain/event.py",
+      "issues/domain/issue.py",
+      "issues/notifications/__init__.py",
+      "issues/notifications/dispatcher.py",
+      "issues/reporting/__init__.py",
+      "issues/reporting/metrics.py",
+      "issues/repositories/__init__.py",
+      "issues/repositories/issue_repo.py",
+      "issues/services/__init__.py",
+      "issues/services/issue_service.py"
+    ],
+    "symbols": [
+      {
+        "name": "IssueTrackerApp",
+        "kind": "class"
+      },
+      {
+        "name": "IssueService",
+        "kind": "class"
+      },
+      {
+        "name": "IssueRepository",
+        "kind": "class"
+      },
+      {
+        "name": "NotificationDispatcher",
+        "kind": "class"
+      },
+      {
+        "name": "IssueMetricsReporter",
+        "kind": "class"
+      },
+      {
+        "name": "Issue",
+        "kind": "class"
+      },
+      {
+        "name": "IssueEvent",
+        "kind": "class"
+      },
+      {
+        "name": "IssueStatus",
+        "kind": "class"
+      },
+      {
+        "name": "IssuePriority",
+        "kind": "class"
+      },
+      {
+        "name": "IssueSeverity",
+        "kind": "class"
+      },
+      {
+        "name": "WorkflowError",
+        "kind": "class"
+      }
+    ]
+  },
+  "extra_checks": [
+    {
+      "command": [
+        "package-boundaries",
+        "{target}",
+        "--format",
+        "json"
+      ],
+      "expected_exit_code": 0,
+      "expected_json_subset": {
+        "policy_evaluated": true,
+        "total_cross_package_count": 65
+      }
+    }
+  ],
+  "known_limitations": [
+    "The boundary violation (issues/notifications -> issues/reporting) is deliberately included to test policy rule enforcement.",
+    "Notification dispatching uses local test in-memory queues without external network calls."
+  ]
+}

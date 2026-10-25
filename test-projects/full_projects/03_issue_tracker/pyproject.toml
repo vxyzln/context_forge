@@ -1,0 +1,10 @@
+[project]
+name = "issue-tracker"
+version = "0.1.0"
+description = "Issue tracking domain application with architectural boundary enforcement"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "project_id": "01_task_management",
+  "description": "Layered task management application modeling users, projects, tasks, workflows, validation, and reporting",
+  "target_directory": "src",
+  "expected": {
+    "file_count": 20,
+    "symbol_count": 168,
+    "relationship_count": 364,
+    "analysis_errors": 0,
+    "source_files": [
+      "task_mgmt/__init__.py",
+      "task_mgmt/application.py",
+      "task_mgmt/models/__init__.py",
+      "task_mgmt/models/enums.py",
+      "task_mgmt/models/project.py",
+      "task_mgmt/models/task.py",
+      "task_mgmt/models/user.py",
+      "task_mgmt/reporting/__init__.py",
+      "task_mgmt/reporting/summary.py",
+      "task_mgmt/repositories/__init__.py",
+      "task_mgmt/repositories/base.py",
+      "task_mgmt/repositories/project_repo.py",
+      "task_mgmt/repositories/task_repo.py",
+      "task_mgmt/repositories/user_repo.py",
+      "task_mgmt/services/__init__.py",
+      "task_mgmt/services/project_service.py",
+      "task_mgmt/services/task_service.py",
+      "task_mgmt/services/user_service.py",
+      "task_mgmt/validation/__init__.py",
+      "task_mgmt/validation/rules.py"
+    ],
+    "symbols": [
+      {
+        "name": "TaskManagementApp",
+        "kind": "class"
+      },
+      {
+        "name": "TaskService",
+        "kind": "class"
+      },
+      {
+        "name": "ProjectService",
+        "kind": "class"
+      },
+      {
+        "name": "UserService",
+        "kind": "class"
+      },
+      {
+        "name": "TaskRepository",
+        "kind": "class"
+      },
+      {
+        "name": "ProjectRepository",
+        "kind": "class"
+      },
+      {
+        "name": "UserRepository",
+        "kind": "class"
+      },
+      {
+        "name": "BaseRepository",
+        "kind": "class"
+      },
+      {
+        "name": "ProjectReporter",
+        "kind": "class"
+      },
+      {
+        "name": "Task",
+        "kind": "class"
+      },
+      {
+        "name": "Project",
+        "kind": "class"
+      },
+      {
+        "name": "User",
+        "kind": "class"
+      },
+      {
+        "name": "TaskStatus",
+        "kind": "class"
+      },
+      {
+        "name": "TaskPriority",
+        "kind": "class"
+      },
+      {
+        "name": "ProjectStatus",
+        "kind": "class"
+      },
+      {
+        "name": "validate_not_empty",
+        "kind": "function"
+      },
+      {
+        "name": "validate_email",
+        "kind": "function"
+      }
+    ]
+  },
+  "extra_checks": [
+    {
+      "command": [
+        "memory",
+        "symbol",
+        "TaskManagementApp",
+        "{target}",
+        "--format",
+        "json"
+      ],
+      "expected_exit_code": 0,
+      "expected_json_subset": {
+        "query": "TaskManagementApp"
+      }
+    }
+  ],
+  "known_limitations": [
+    "In-memory repositories store transient domain entities for deterministic test execution.",
+    "Relationships represent static AST references and imports across the layered architecture."
+  ]
+}
