@@ -70,6 +70,11 @@ from context_forge.query.risk import (
     ChangeRiskReport,
     generate_change_risk_report,
 )
+from context_forge.query.unused import (
+    DEFAULT_UNUSED_LIMIT,
+    UnusedEntitiesReport,
+    find_unused_candidates,
+)
 from context_forge.query.verification import (
     VerificationChecklist,
     generate_verification_checklist,
@@ -1495,4 +1500,16 @@ class ProjectQuery:
             git_repository=git_repository,
             project=self.project,
             metadata=metadata,
+        )
+
+    def find_unused_candidates(
+        self,
+        *,
+        kind: str | None = "all",
+        limit: int | None = DEFAULT_UNUSED_LIMIT,
+    ) -> UnusedEntitiesReport:
+        return find_unused_candidates(
+            self.project,
+            kind=kind,
+            limit=limit,
         )
