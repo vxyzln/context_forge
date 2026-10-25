@@ -72,6 +72,11 @@ from context_forge.query.regression_rules import (
 from context_forge.query.risk import (
     generate_change_risk_report,
 )
+from context_forge.query.unused import (
+    DEFAULT_UNUSED_LIMIT,
+    UnusedEntitiesReport,
+    find_unused_candidates,
+)
 from context_forge.reporting import (
     ContextForgeError,
     DiagnosticItem,
@@ -624,6 +629,48 @@ def create_parser() -> argparse.ArgumentParser:
     )
     _add_output_format_argument(rules_parser)
     _add_refresh_control_argument(rules_parser)
+
+    unused_parser = subparsers.add_parser(
+        "unused",
+        aliases=["unused-entities", "find-unused"],
+        help="Identify entities with no detected incoming references or usage evidence.",
+    )
+    unused_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root path (default: current directory).",
+    )
+    unused_parser.add_argument(
+        "--kind",
+        choices=(
+            "all",
+            "*",
+            "function",
+            "functions",
+            "method",
+            "methods",
+            "class",
+            "classes",
+            "variable",
+            "variables",
+            "file",
+            "files",
+            "symbol",
+            "symbols",
+        ),
+        default="all",
+        help="Filter entities by kind (default: all).",
+    )
+    unused_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_UNUSED_LIMIT,
+        help=f"Maximum number of items displayed per section (default: {DEFAULT_UNUSED_LIMIT}).",
+    )
+    _add_output_format_argument(unused_parser)
+    _add_refresh_control_argument(unused_parser)
 
     path_parser = subparsers.add_parser(
         "path",
@@ -3287,6 +3334,83 @@ def run_rules(
     _print_rules_report(report)
 
 
+def _print_unused_report(report: UnusedEntitiesReport) -> None:
+    print(f"Repository: {report.repository_path}")
+    print(
+        f"Unused Entities Analysis: {report.summary.total_entities_analyzed} analyzed, "
+        f"{report.summary.candidates_count} candidate(s), {report.summary.unassessable_count} unassessable"
+    )
+    print(f"Status: {report.outcome.status.value.upper()} - {report.outcome.message}")
+
+    if report.summary.by_kind:
+        print()
+        print("Candidates by kind:")
+        for kind, count in sorted(report.summary.by_kind.items()):
+            print(f"  - {kind}: {count}")
+
+    if report.candidates:
+        print()
+        print(f"Apparent unused candidates ({len(report.candidates)}):")
+        for c in report.candidates:
+            loc = f" at {c.path}:{c.start_line}" if c.start_line else f" at {c.path}"
+            print(f"  - [{c.kind.upper()}] {c.name}{loc}")
+            print(f"    Reason: {c.reason}")
+            for ev in c.evidence:
+                print(f"    Evidence: {ev}")
+        if len(report.candidates) < report.summary.candidates_count:
+            print(
+                f"  ... showing {len(report.candidates)} of {report.summary.candidates_count} candidate(s)"
+            )
+
+    if report.unassessable:
+        print()
+        print(f"Unassessable entities ({len(report.unassessable)}):")
+        for u in report.unassessable:
+            loc = f" at {u.path}:{u.start_line}" if u.start_line else f" at {u.path}"
+            print(f"  - [{u.kind.upper()}] {u.name}{loc}: {u.reason}")
+        if len(report.unassessable) < report.summary.unassessable_count:
+            print(
+                f"  ... showing {len(report.unassessable)} of {report.summary.unassessable_count} unassessable entity(ies)"
+            )
+
+    if report.limitations:
+        print()
+        print("Limitations & Caveats:")
+        for lim in report.limitations:
+            print(f"  - {lim}")
+
+
+def run_unused(
+    path: Path,
+    output_format: str = "text",
+    kind: str = "all",
+    limit: int = DEFAULT_UNUSED_LIMIT,
+    *,
+    allow_refresh: bool = True,
+) -> None:
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("Report limit must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    project, _ = (
+        load_fresh_project(root_path)
+        if allow_refresh
+        else load_fresh_project(root_path, allow_refresh=False)
+    )
+
+    report = find_unused_candidates(
+        project,
+        kind=kind,
+        limit=limit,
+    )
+
+    if output_format == "json":
+        _emit_json(report.to_dict())
+        return
+
+    _print_unused_report(report)
+
+
 def _print_post_change_report(report: PostChangeVerificationReport) -> None:
     print(f"Repository: {report.repository_path}")
     print(f"Post-Change Verification: {report.outcome.status.value.upper()}")
@@ -3579,6 +3703,13 @@ def _dispatch_command(args: argparse.Namespace) -> None:
         limit=getattr(args, "limit", DEFAULT_REPORT_LIMIT),
         allow_refresh=allow_refresh,
     )
+    unused_handler = lambda: run_unused(
+        getattr(args, "path", Path(".")),
+        output_format=getattr(args, "format", "text"),
+        kind=getattr(args, "kind", "all"),
+        limit=getattr(args, "limit", DEFAULT_UNUSED_LIMIT),
+        allow_refresh=allow_refresh,
+    )
 
     handlers = {
         "analyze": lambda: run_analyze(args.path, args.format),
@@ -3763,6 +3894,10 @@ def _dispatch_command(args: argparse.Namespace) -> None:
         "rules": rules_handler,
         "evaluate-rules": rules_handler,
         "check-rules": rules_handler,
+        "unused": unused_handler,
+        "unused-entities": unused_handler,
+        "find-unused": unused_handler,
+        "logo": lambda: print(CLI_LOGO),
         "path": lambda: run_path(
             args.start,
             args.end,

@@ -5550,3 +5550,248 @@ def test_cli_rules_text(
         in captured.out
     )
     assert "Status: SUCCESS - Passed cleanly" in captured.out
+
+
+def test_cli_logo_subcommand_and_flag_display_complete_logo_and_exit(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from context_forge.main import CLI_LOGO
+
+    outputs = []
+    invocations = [
+        ["context-forge", "logo"],
+        ["context-forge", "--logo"],
+        ["cf", "logo"],
+        ["cf", "--logo"],
+    ]
+    for argv in invocations:
+        with patch.object(sys, "argv", argv):
+            main()
+
+        captured = capsys.readouterr()
+        # Output exactly matches the logo followed by a newline
+        assert captured.out.strip() == CLI_LOGO.strip()
+        # Verify both CONTEXT and FORGE sections are present
+        assert "████████╗" in captured.out
+        assert "███████╗" in captured.out
+        assert captured.err == ""
+        outputs.append(captured.out)
+
+    # All four invocations produce identical complete output
+    assert len(set(outputs)) == 1
+
+
+def test_cli_logo_does_not_load_or_analyze_project(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch("context_forge.main.load_fresh_project") as mock_fresh,
+        patch("context_forge.main.load_guarded_project") as mock_guarded,
+        patch("context_forge.main.ProjectAnalyzer") as mock_analyzer,
+        patch("context_forge.main.resolve_project_path") as mock_resolve,
+    ):
+        for argv in [["cf", "logo"], ["cf", "--logo"]]:
+            with patch.object(sys, "argv", argv):
+                main()
+
+    mock_fresh.assert_not_called()
+    mock_guarded.assert_not_called()
+    mock_analyzer.assert_not_called()
+    mock_resolve.assert_not_called()
+    captured = capsys.readouterr()
+    assert len(captured.out) > 0
+
+
+def test_cli_logo_with_extra_arguments_is_rejected(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from context_forge.main import CLI_LOGO
+
+    for argv in [
+        ["cf", "--logo", "status"],
+        ["cf", "--logo", "/nonexistent/path"],
+        ["cf", "logo", "extra_arg"],
+    ]:
+        with (
+            patch.object(sys, "argv", argv),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert CLI_LOGO not in captured.out
+        assert (
+            "unrecognized arguments" in captured.err
+            or "not allowed with command" in captured.err
+            or "invalid choice" in captured.err
+        )
+
+
+def test_top_level_help_does_not_include_cli_logo(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from context_forge.main import CLI_LOGO
+
+    for entry in ["context-forge", "cf"]:
+        with (
+            patch.object(sys, "argv", [entry, "--help"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert CLI_LOGO not in captured.out
+        assert "usage: context-forge" in captured.out
+        assert "--logo" in captured.out
+
+
+def test_bare_context_forge_does_not_include_cli_logo(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from context_forge.main import CLI_LOGO
+
+    with patch.object(sys, "argv", ["context-forge"]):
+        main()
+
+    captured = capsys.readouterr()
+    assert CLI_LOGO not in captured.out
+    assert "usage: context-forge" in captured.out
+
+
+def test_subcommand_help_does_not_include_cli_logo(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from context_forge.main import CLI_LOGO
+
+    for subcmd in ["status", "analyze", "unused", "logo"]:
+        with (
+            patch.object(sys, "argv", ["context-forge", subcmd, "--help"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert CLI_LOGO not in captured.out
+        assert f"usage: context-forge {subcmd}" in captured.out
+
+
+def test_unused_cli_command_text_and_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "mod.py").write_text(
+        "def unused_func():\n    pass\n\ndef used_func():\n    pass\n\nused_func()\n",
+        encoding="utf-8",
+    )
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Test text output
+    with patch.object(sys, "argv", ["context-forge", "unused", str(tmp_path)]):
+        main()
+    text_out = capsys.readouterr().out
+    assert "Unused Entities Analysis:" in text_out
+    assert "unused_func" in text_out
+    assert "Limitations & Caveats:" in text_out
+
+    # Test JSON output
+    with patch.object(
+        sys, "argv", ["context-forge", "unused", str(tmp_path), "--format", "json"]
+    ):
+        main()
+    json_out = capsys.readouterr().out
+    data = json.loads(json_out)
+    assert data["summary"]["candidates_count"] >= 1
+    candidate_names = [c["name"] for c in data["candidates"]]
+    assert "unused_func" in candidate_names
+    assert "used_func" not in candidate_names
+
+    # Test alias
+    with patch.object(
+        sys, "argv", ["context-forge", "find-unused", str(tmp_path), "--format", "json"]
+    ):
+        main()
+    alias_out = capsys.readouterr().out
+    assert json.loads(alias_out) == data
+
+
+def test_unused_cli_limit_and_kind_options(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "mod.py").write_text(
+        "def fn1(): pass\ndef fn2(): pass\ndef fn3(): pass\n",
+        encoding="utf-8",
+    )
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    # Test --limit 1 in text mode: prints 'showing 1 of 3 candidate(s)'
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "unused",
+            str(tmp_path),
+            "--limit",
+            "1",
+            "--kind",
+            "function",
+        ],
+    ):
+        main()
+    text_out = capsys.readouterr().out
+    assert "showing 1 of 3 candidate(s)" in text_out
+
+    # Test --limit 1 in JSON mode: truncated is True, candidates list has length 1, summary has candidates_count 3
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "unused",
+            str(tmp_path),
+            "--limit",
+            "1",
+            "--kind",
+            "function",
+            "--format",
+            "json",
+        ],
+    ):
+        main()
+    json_data = json.loads(capsys.readouterr().out)
+    assert json_data["truncated"] is True
+    assert json_data["limit"] == 1
+    assert len(json_data["candidates"]) == 1
+    assert json_data["summary"]["candidates_count"] == 3
+
+    # Test --kind '*' works
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "unused", str(tmp_path), "--kind", "*", "--format", "json"],
+    ):
+        main()
+    json_star = json.loads(capsys.readouterr().out)
+    assert json_star["summary"]["candidates_count"] >= 3
+
+    # Test invalid --kind is rejected
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "unused", str(tmp_path), "--kind", "invalid_kind"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+    assert exc_info.value.code == 2
