@@ -29,3 +29,6 @@ line-length = 88
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 markers = ["integration: tests requiring external services",]
+
+[tool.ruff.lint.per-file-ignores]
+"test-projects/full_projects/01_task_management/src/task_mgmt/repositories/base.py" = ["UP046"]
