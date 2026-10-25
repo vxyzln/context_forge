@@ -122,6 +122,23 @@ def _emit_json(payload: dict, file: Any = None) -> None:
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")), file=target)
 
 
+CLI_LOGO: str = (
+    " ██████╗ ██████╗ ███╗   ██╗████████╗███████╗██╗  ██╗████████╗\n"
+    "██╔════╝██╔═══██╗████╗  ██║╚══██╔══╝██╔════╝╚██╗██╔╝╚══██╔══╝\n"
+    "██║     ██║   ██║██╔██╗ ██║   ██║   █████╗   ╚███╔╝    ██║\n"
+    "██║     ██║   ██║██║╚██╗██║   ██║   ██╔══╝   ██╔██╗    ██║\n"
+    "╚██████╗╚██████╔╝██║ ╚████║   ██║   ███████╗██╔╝ ██╗   ██║\n"
+    " ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝   ╚══════╝╚═╝  ╚═╝   ╚═╝\n"
+    "\n"
+    "███████╗ ██████╗ ██████╗  ██████╗ ███████╗\n"
+    "██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝\n"
+    "█████╗  ██║   ██║██████╔╝██║  ███╗█████╗\n"
+    "██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝\n"
+    "██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗\n"
+    "╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝"
+)
+
+
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="context-forge",
@@ -129,8 +146,18 @@ def create_parser() -> argparse.ArgumentParser:
             "Deterministic repository intelligence and memory for software projects."
         ),
     )
+    parser.add_argument(
+        "--logo",
+        action="store_true",
+        help="Display the Context Forge ASCII logo and exit.",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
+
+    subparsers.add_parser(
+        "logo",
+        help="Display the Context Forge ASCII logo and exit.",
+    )
 
     analyze_parser = subparsers.add_parser(
         "analyze",
@@ -895,6 +922,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "rules",
         "evaluate-rules",
         "check-rules",
+        "unused",
+        "unused-entities",
+        "find-unused",
+        "logo",
+        "--logo",
         "-h",
         "--help",
     }:
@@ -3978,6 +4010,18 @@ def _dispatch_command(args: argparse.Namespace) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+
+    if getattr(args, "logo", False):
+        if args.command is not None:
+            create_parser().error(
+                f"argument --logo: not allowed with command '{args.command}'"
+            )
+        print(CLI_LOGO)
+        return
+
+    if args.command == "logo":
+        print(CLI_LOGO)
+        return
 
     if args.command is None:
         create_parser().print_help()
