@@ -1,9 +1,10 @@
 [project]
-name = "context-forge"
-version = "0.1.0"
-description = "Deterministic, local-first repository intelligence and agent memory for Python projects."
+name = "context-forge-local"
+version = "1.0.0"
+description = "Deterministic, local-first repository intelligence and memory vault for Python projects."
 readme = "README.md"
 requires-python = ">=3.13"
+license = "MIT"
 dependencies = []
 
 [project.scripts]
@@ -22,13 +23,28 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/context_forge"]
+exclude = [
+    "**/.DS_Store",
+    "**/__pycache__/**",
+    "**/*.py[cod]",
+]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+    "src/context_forge",
+]
 
 [tool.ruff]
 line-length = 88
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-markers = ["integration: tests requiring external services",]
+markers = [
+    "integration: tests requiring external services",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "test-projects/full_projects/01_task_management/src/task_mgmt/repositories/base.py" = ["UP046"]
