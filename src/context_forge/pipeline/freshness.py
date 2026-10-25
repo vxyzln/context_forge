@@ -23,7 +23,7 @@ from context_forge.storage.cache import (
     detect_file_changes,
     fingerprint_file,
 )
-from context_forge.storage.database import Database
+from context_forge.storage.database import Database, project_database_path
 from context_forge.storage.repository import ProjectRepository
 
 
@@ -165,7 +165,7 @@ class WorkflowFreshnessGuard:
         current_fingerprints: dict[Path, FileFingerprint] | None = None,
     ) -> WorkflowFreshness:
         root = self.root_path
-        db_path = self.database_path or (root / ".context_forge.db")
+        db_path = self.database_path or project_database_path(root)
         identity = RepositoryIdentity(root)
 
         loaded_project: Project | None = project
@@ -575,7 +575,7 @@ class WorkflowFreshnessGuard:
 
         self._refresh_attempted = True
         root = self.root_path
-        db_path = self.database_path or (root / ".context_forge.db")
+        db_path = self.database_path or project_database_path(root)
 
         try:
             analyzer = self.analyzer or ProjectAnalyzer(root, db_path)

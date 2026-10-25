@@ -1,6 +1,12 @@
 import sqlite3
 from pathlib import Path
 
+DATABASE_FILENAME = ".context_forge.db"
+
+
+def project_database_path(project_root: Path) -> Path:
+    return project_root / DATABASE_FILENAME
+
 
 class Database:
     def __init__(self, path: Path) -> None:

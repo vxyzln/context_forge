@@ -33,7 +33,7 @@ from context_forge.reporting.contract import (
     OperationOutcome,
 )
 from context_forge.storage.cache import RepositoryCacheMetadata, RepositoryIdentity
-from context_forge.storage.database import Database
+from context_forge.storage.database import Database, project_database_path
 from context_forge.storage.repository import ProjectRepository
 
 
@@ -139,7 +139,7 @@ def inspect_pre_change(
             diagnostics=_deduplicate_diagnostics(all_diagnostics),
         )
 
-    db_path = repo_path / ".context_forge.db"
+    db_path = project_database_path(repo_path)
     has_db_file = db_path.exists()
     freshness_guard = guard or WorkflowFreshnessGuard(repo_path, database_path=db_path)
 

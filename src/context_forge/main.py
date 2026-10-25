@@ -91,7 +91,7 @@ from context_forge.storage.cache import (
     RepositoryCacheMetadata,
     RepositoryIdentity,
 )
-from context_forge.storage.database import Database
+from context_forge.storage.database import Database, project_database_path
 from context_forge.storage.repository import ProjectRepository
 
 
@@ -1165,7 +1165,7 @@ def resolve_project_path(path: Path) -> Path:
 
 
 def analyze_project(root_path: Path):
-    database_path = root_path / ".context_forge.db"
+    database_path = project_database_path(root_path)
 
     return ProjectAnalyzer(
         root_path=root_path,
@@ -1174,7 +1174,7 @@ def analyze_project(root_path: Path):
 
 
 def load_project_analysis(root_path: Path):
-    database_path = root_path / ".context_forge.db"
+    database_path = project_database_path(root_path)
     if not database_path.exists():
         raise MissingAnalysisError(
             "No persisted analysis found; run 'context-forge analyze' first",
@@ -1211,7 +1211,7 @@ def load_guarded_project(
     allow_refresh: bool = False,
     database_path: Path | None = None,
 ) -> tuple[Project, RepositoryCacheMetadata, WorkflowFreshness]:
-    db_path = database_path or (root_path / ".context_forge.db")
+    db_path = database_path or project_database_path(root_path)
     repo = None
     proj = None
     meta = None
