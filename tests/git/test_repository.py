@@ -583,3 +583,231 @@ def test_repository_info_is_none_without_commits(
     repository = GitRepository(tmp_path)
 
     assert repository.get_info() is None
+
+
+def test_repository_handles_malformed_iso_timezone_offset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = GitRepository(tmp_path)
+
+    # Simulate git log output with a malformed ISO timestamp (+518:00) alongside a normal commit
+    log_output = (
+        "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8\x1f"
+        "Malformed Author\x1f"
+        "2011-09-08T02:38:50+518:00\x1f"
+        "\x1f"
+        "malformed timestamp commit\x1e"
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\x1f"
+        "Valid Author\x1f"
+        "2023-01-01T12:00:00+00:00\x1f"
+        "\x1f"
+        "valid commit\x1e"
+    )
+
+    fake_log = subprocess.CompletedProcess(
+        args=["git", "log"],
+        returncode=0,
+        stdout=log_output,
+        stderr="",
+    )
+    fake_epoch = subprocess.CompletedProcess(
+        args=[
+            "git",
+            "log",
+            "-1",
+            "--format=%at",
+            "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8",
+        ],
+        returncode=0,
+        stdout="1313584730\n",
+        stderr="",
+    )
+    empty_diff = subprocess.CompletedProcess(
+        args=["git", "diff-tree"],
+        returncode=0,
+        stdout="",
+        stderr="",
+    )
+
+    def mock_run_git(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args and args[0] == "log":
+            if "--format=%at" in args:
+                return fake_epoch
+            return fake_log
+        if args and args[0] == "diff-tree":
+            return empty_diff
+        raise AssertionError(f"Unexpected git call: {args}")
+
+    monkeypatch.setattr(repository, "_run_git", mock_run_git)
+
+    commits = repository.get_commits()
+
+    assert len(commits) == 2
+
+    # Malformed timestamp commit falls back to epoch converted to UTC
+    malformed_commit = commits[0]
+    assert malformed_commit.hash == "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8"
+    assert malformed_commit.timestamp.tzinfo is not None
+    assert malformed_commit.timestamp.utcoffset() is not None
+    assert malformed_commit.timestamp.utcoffset().total_seconds() == 0
+    assert int(malformed_commit.timestamp.timestamp()) == 1313584730
+    assert malformed_commit.timestamp.isoformat() == "2011-08-17T12:38:50+00:00"
+
+    # Normal commit remains properly parsed and converted to UTC
+    valid_commit = commits[1]
+    assert valid_commit.hash == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    assert valid_commit.timestamp.isoformat() == "2023-01-01T12:00:00+00:00"
+
+
+def test_repository_fails_when_epoch_lookup_command_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = GitRepository(tmp_path)
+
+    log_output = (
+        "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8\x1f"
+        "Malformed Author\x1f"
+        "2011-09-08T02:38:50+518:00\x1f"
+        "\x1f"
+        "malformed timestamp commit\x1e"
+    )
+
+    fake_log = subprocess.CompletedProcess(
+        args=["git", "log"],
+        returncode=0,
+        stdout=log_output,
+        stderr="",
+    )
+    failed_epoch = subprocess.CompletedProcess(
+        args=[
+            "git",
+            "log",
+            "-1",
+            "--format=%at",
+            "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8",
+        ],
+        returncode=128,
+        stdout="",
+        stderr="fatal: bad object",
+    )
+
+    def mock_run_git(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args and args[0] == "log":
+            if "--format=%at" in args:
+                return failed_epoch
+            return fake_log
+        raise AssertionError(f"Unexpected git call: {args}")
+
+    monkeypatch.setattr(repository, "_run_git", mock_run_git)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Failed to recover epoch timestamp for commit 5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8: git log returned code 128",
+    ) as exc_info:
+        repository.get_commits()
+
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_repository_fails_when_epoch_output_is_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = GitRepository(tmp_path)
+
+    log_output = (
+        "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8\x1f"
+        "Malformed Author\x1f"
+        "2011-09-08T02:38:50+518:00\x1f"
+        "\x1f"
+        "malformed timestamp commit\x1e"
+    )
+
+    fake_log = subprocess.CompletedProcess(
+        args=["git", "log"],
+        returncode=0,
+        stdout=log_output,
+        stderr="",
+    )
+    empty_epoch = subprocess.CompletedProcess(
+        args=[
+            "git",
+            "log",
+            "-1",
+            "--format=%at",
+            "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8",
+        ],
+        returncode=0,
+        stdout="   \n",
+        stderr="",
+    )
+
+    def mock_run_git(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args and args[0] == "log":
+            if "--format=%at" in args:
+                return empty_epoch
+            return fake_log
+        raise AssertionError(f"Unexpected git call: {args}")
+
+    monkeypatch.setattr(repository, "_run_git", mock_run_git)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Failed to recover epoch timestamp for commit 5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8: empty output from git log",
+    ) as exc_info:
+        repository.get_commits()
+
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_repository_fails_when_epoch_output_is_invalid_integer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = GitRepository(tmp_path)
+
+    log_output = (
+        "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8\x1f"
+        "Malformed Author\x1f"
+        "2011-09-08T02:38:50+518:00\x1f"
+        "\x1f"
+        "malformed timestamp commit\x1e"
+    )
+
+    fake_log = subprocess.CompletedProcess(
+        args=["git", "log"],
+        returncode=0,
+        stdout=log_output,
+        stderr="",
+    )
+    invalid_epoch = subprocess.CompletedProcess(
+        args=[
+            "git",
+            "log",
+            "-1",
+            "--format=%at",
+            "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8",
+        ],
+        returncode=0,
+        stdout="not-a-timestamp\n",
+        stderr="",
+    )
+
+    def mock_run_git(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args and args[0] == "log":
+            if "--format=%at" in args:
+                return invalid_epoch
+            return fake_log
+        raise AssertionError(f"Unexpected git call: {args}")
+
+    monkeypatch.setattr(repository, "_run_git", mock_run_git)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Failed to recover epoch timestamp for commit 5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8: invalid integer 'not-a-timestamp'",
+    ) as exc_info:
+        repository.get_commits()
+
+    assert isinstance(exc_info.value.__cause__, ValueError)

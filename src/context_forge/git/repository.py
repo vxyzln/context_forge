@@ -125,6 +125,39 @@ class GitRepository:
 
             commit_hash, author, timestamp, parents, message = fields
 
+            try:
+                commit_timestamp = datetime.fromisoformat(timestamp).astimezone(UTC)
+            except ValueError as error:
+                epoch_result = self._run_git(
+                    "log",
+                    "-1",
+                    "--format=%at",
+                    commit_hash,
+                    check=False,
+                )
+                if epoch_result.returncode != 0:
+                    raise RuntimeError(
+                        f"Failed to recover epoch timestamp for commit {commit_hash}: git log returned code {epoch_result.returncode}"
+                    ) from error
+
+                epoch_text = epoch_result.stdout.strip()
+                if not epoch_text:
+                    raise RuntimeError(
+                        f"Failed to recover epoch timestamp for commit {commit_hash}: empty output from git log"
+                    ) from error
+
+                try:
+                    epoch_seconds = int(epoch_text)
+                except ValueError as int_error:
+                    raise RuntimeError(
+                        f"Failed to recover epoch timestamp for commit {commit_hash}: invalid integer {epoch_text!r}"
+                    ) from int_error
+
+                commit_timestamp = datetime.fromtimestamp(
+                    epoch_seconds,
+                    tz=UTC,
+                )
+
             changes = self.get_commit_changes(commit_hash)
 
             commits.append(
@@ -132,7 +165,7 @@ class GitRepository:
                     hash=commit_hash,
                     message=message,
                     author=author,
-                    timestamp=datetime.fromisoformat(timestamp).astimezone(UTC),
+                    timestamp=commit_timestamp,
                     parent_hashes=tuple(parent for parent in parents.split() if parent),
                     changes=tuple(changes),
                 )
