@@ -363,19 +363,6 @@ def _validate_definition_header(
     return "stale", None
 
 
-def _is_definition_header_match(
-    excerpt_lines: list[str],
-    target_name: str,
-    target_kind: str | None = None,
-) -> bool:
-    status, _ = _validate_definition_header(
-        excerpt_lines,
-        target_name=target_name,
-        target_kind=target_kind,
-    )
-    return status in ("valid", "unsupported")
-
-
 def get_source_evidence(
     project: Project,
     target: ResolvedTarget | Symbol,

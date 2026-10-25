@@ -94,7 +94,6 @@ def inspect_pre_change(
     query_str = target.strip() if isinstance(target, str) else str(target)
     is_query_empty = not bool(query_str)
 
-    # TODO: consider caching intermediate preflight results across repeated runs
     if preflight_report is None:
         preflight_report = build_preflight_report(repo_path)
 

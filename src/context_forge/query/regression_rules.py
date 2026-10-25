@@ -1,10 +1,3 @@
-"""Declarative structural regression rules and evaluation.
-
-Evaluates bounded, declarative architectural rules against the supported repository
-model and relationship graph with explicit outcomes for violations, clean evaluation,
-and unevaluable conditions.
-"""
-
 from __future__ import annotations
 
 import fnmatch
@@ -156,7 +149,6 @@ def _matches_pattern(candidate: str, pattern: str) -> bool:
     if p_norm == "*" or p_norm == c_norm:
         return True
 
-    # Exact or suffix / prefix match for Python module dots vs slashes
     c_dotted = c_norm.replace("/", ".")
     p_dotted = p_norm.replace("/", ".")
 
@@ -176,11 +168,6 @@ def _resolve_entities_for_pattern(
     symbols_by_id: dict[UUID, Symbol],
     package_directories: set[str],
 ) -> tuple[set[UUID], set[str], bool, str | None]:
-    """Resolve a rule pattern to matching entity IDs and package names.
-
-    Returns:
-        (entity_ids, matched_packages, is_ambiguous, error_message)
-    """
     if not pattern or not pattern.strip():
         return set(), set(), False, "Pattern cannot be empty"
 
@@ -190,21 +177,17 @@ def _resolve_entities_for_pattern(
     matched_ids: set[UUID] = set()
     matched_pkgs: set[str] = set()
 
-    # 1. Match package directories
     for pkg_dir in package_directories:
         if _matches_pattern(pkg_dir, p):
             matched_pkgs.add(pkg_dir)
-            # Add all files in this package directory
             for f_id, rel_path in file_rel_paths.items():
                 if rel_path == pkg_dir or rel_path.startswith(f"{pkg_dir}/"):
                     matched_ids.add(f_id)
 
-    # 2. Match file paths
     for f_id, rel_path in file_rel_paths.items():
         if _matches_pattern(rel_path, p):
             matched_ids.add(f_id)
 
-    # 3. Match symbols
     matched_symbol_ids: set[UUID] = set()
     for s_id, sym in symbols_by_id.items():
         file_path = file_rel_paths.get(sym.file_id, "")
@@ -217,7 +200,6 @@ def _resolve_entities_for_pattern(
             matched_symbol_ids.add(s_id)
             matched_ids.add(s_id)
 
-    # If pattern was an exact symbol reference that matched multiple distinct symbols across different files
     if (
         not is_wildcard
         and not matched_pkgs
@@ -231,7 +213,6 @@ def _resolve_entities_for_pattern(
             f"Ambiguous symbol reference '{pattern}': matches multiple symbols across distinct files",
         )
 
-    # If no matches found, entity reference or wildcard pattern is unresolved
     if not matched_ids and not matched_pkgs:
         if is_wildcard:
             return (
@@ -256,7 +237,6 @@ def _get_entity_info(
     file_rel_paths: dict[UUID, str],
     symbols_by_id: dict[UUID, Symbol],
 ) -> tuple[str, str | None, int | None]:
-    """Get entity name, relative file path, and line number."""
     if entity_id in symbols_by_id:
         sym = symbols_by_id[entity_id]
         path = file_rel_paths.get(sym.file_id)
@@ -278,7 +258,6 @@ def evaluate_structural_rules(
     limit: int | None = None,
     package_policy: PackageBoundaryPolicy | None = None,
 ) -> StructuralRulesReport:
-    """Evaluate structural regression rules against the project model."""
     root_path = project.root_path or Path(".")
     repo_path = root_path.as_posix()
 
@@ -288,7 +267,6 @@ def evaluate_structural_rules(
     }
     symbols_by_id: dict[UUID, Symbol] = {s.id: s for s in project.symbols}
 
-    # Discover package directories (containing __init__.py)
     package_directories: set[str] = set()
     for rel_path in file_rel_paths.values():
         if rel_path.endswith("/__init__.py"):
@@ -296,7 +274,6 @@ def evaluate_structural_rules(
         elif rel_path == "__init__.py":
             package_directories.add(".")
 
-    # Check analysis completeness
     is_analysis_complete = is_terminal_complete_status(project.analysis_status)
     has_analysis_errors = bool(project.errors)
     analysis_limitation: str | None = None
@@ -306,7 +283,6 @@ def evaluate_structural_rules(
             f"with {len(project.errors)} error(s); incomplete evidence may conceal violations"
         )
 
-    # Normalize rules
     normalized_rules: list[StructuralRule] = []
     rule_validation_errors: dict[str, str] = {}
     seen_ids: set[str] = set()
@@ -373,9 +349,7 @@ def evaluate_structural_rules(
             )
         )
 
-    # Evaluate each rule
     for rule in normalized_rules:
-        # Check if rule was malformed during validation
         if rule.rule_id in rule_validation_errors:
             err_msg = rule_validation_errors[rule.rule_id]
             diag = DiagnosticItem.warning(
@@ -398,7 +372,6 @@ def evaluate_structural_rules(
             )
             continue
 
-        # Resolve source endpoints
         src_ids, _src_pkgs, src_ambiguous, src_err = _resolve_entities_for_pattern(
             project,
             rule.source,
@@ -438,7 +411,6 @@ def evaluate_structural_rules(
             )
             continue
 
-        # Resolve target endpoints if target specified
         tgt_ids: set[UUID] = set()
         if rule.target is not None:
             (
@@ -485,7 +457,6 @@ def evaluate_structural_rules(
                 )
                 continue
 
-        # Evaluate rule kind
         violating_relationships: list[Relationship] = []
         evidence_list: list[str] = []
         affected_entities_set: set[str] = set()
@@ -515,7 +486,6 @@ def evaluate_structural_rules(
                 )
                 continue
 
-            # Check all relationships in project where source is in src_ids and target is in tgt_ids
             for rel in project.relationships:
                 rel_type_str = (
                     rel.relationship_type.value
@@ -525,11 +495,9 @@ def evaluate_structural_rules(
                 if rule.relationship_type and rel_type_str != rule.relationship_type:
                     continue
 
-                # Match if rel.source_id is in src_ids and rel.target_id is in tgt_ids
                 source_matched = rel.source_id in src_ids
                 target_matched = rel.target_id in tgt_ids
 
-                # Also match if source entity's file is in src_ids or target entity's file is in tgt_ids
                 if not source_matched and rel.source_id in symbols_by_id:
                     source_matched = symbols_by_id[rel.source_id].file_id in src_ids
                 if not target_matched and rel.target_id in symbols_by_id:
@@ -598,7 +566,6 @@ def evaluate_structural_rules(
                     affected_entities_set.add(tgt_name)
 
         elif rule.kind == RuleKind.ISOLATED_COMPONENT.value:
-            # Component must have no incoming or outgoing dependencies
             for rel in project.relationships:
                 rel_type_str = (
                     rel.relationship_type.value
@@ -635,7 +602,6 @@ def evaluate_structural_rules(
                     affected_entities_set.add(src_name)
                     affected_entities_set.add(tgt_name)
 
-        # Determine outcome
         evidence_list.sort()
         affected_entities = tuple(sorted(affected_entities_set))
 
@@ -682,7 +648,6 @@ def evaluate_structural_rules(
                 )
             )
         elif not is_analysis_complete or has_analysis_errors:
-            # Cannot confirm clean evaluation when evidence is incomplete or has errors
             msg = (
                 f"Rule '{rule.rule_id}' could not be reliably evaluated: "
                 f"repository analysis is incomplete or reported errors"
@@ -722,7 +687,6 @@ def evaluate_structural_rules(
                 )
             )
 
-    # Sort results deterministically by rule_id
     results.sort(key=lambda r: r.rule_id)
 
     violations_count = sum(1 for r in results if r.is_violation)
@@ -735,7 +699,6 @@ def evaluate_structural_rules(
         displayed_results = tuple(results[:limit])
         truncated = True
 
-    # Compute overall outcome
     if not is_analysis_complete:
         outcome_status = OperationStatus.INCOMPLETE
         outcome_msg = (

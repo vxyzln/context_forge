@@ -102,7 +102,7 @@ def _add_output_format_argument(
         "--format",
         choices=("text", "json"),
         default="text",
-        help="Output format (default: text).",
+        help="Format output as human-readable text or machine-readable JSON (choices: text, json; default: text)",
     )
 
 
@@ -113,7 +113,7 @@ def _add_refresh_control_argument(
         "--no-refresh",
         action="store_true",
         default=False,
-        help="Disable automatic command-time refresh on stale repository analysis.",
+        help="Disable automatic background refresh when repository intelligence is stale",
     )
 
 
@@ -139,307 +139,504 @@ CLI_LOGO: str = (
 )
 
 
+class NoTrailingPeriodHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    def _expand_help(self, action: argparse.Action) -> str:
+        text = super()._expand_help(action)
+        if text.endswith(".") and not text.endswith(".."):
+            text = text[:-1]
+        return text
+
+
+COMMAND_CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
+    (
+        "repository analysis & cache",
+        [
+            ("analyze", "Analyze a repository and persist repository intelligence"),
+            ("refresh", "Refresh repository analysis and cached intelligence"),
+            ("status", "Show repository and analysis status"),
+            ("cache", "Show repository cache state and freshness"),
+            ("preflight", "Inspect repository preflight readiness and configuration"),
+        ],
+    ),
+    (
+        "context retrieval & memory",
+        [
+            (
+                "context",
+                "Retrieve deterministic context package for a development task",
+            ),
+            ("inspect", "Inspect persisted repository intelligence summary"),
+            (
+                "locate",
+                "Locate repository symbols precisely with optional source evidence",
+            ),
+            ("memory", "Search and retrieve persistent repository memory"),
+        ],
+    ),
+    (
+        "architecture & relationships",
+        [
+            ("architecture", "Report repository architecture and structural findings"),
+            ("path", "Find bounded relationship path between start and end entities"),
+            (
+                "package-boundaries",
+                "Analyze dependencies crossing package boundaries and evaluate policies",
+            ),
+            (
+                "health",
+                "Report repository health, inventory metrics, and structural findings",
+            ),
+        ],
+    ),
+    (
+        "change analysis & verification",
+        [
+            ("inspect-change", "Perform comprehensive pre-change inspection"),
+            (
+                "impact",
+                "Analyze direct and transitive change impact for a file or symbol",
+            ),
+            (
+                "changeset",
+                "Analyze combined impact for a set of changed repository paths",
+            ),
+            ("risk", "Generate evidence-based change-risk report for changed paths"),
+            (
+                "rules",
+                "Evaluate structural regression rules against repository architecture",
+            ),
+            ("post-change", "Run consolidated post-change verification"),
+        ],
+    ),
+    (
+        "diagnostics & utilities",
+        [
+            ("diagnostics", "Show persisted repository analysis diagnostics"),
+            (
+                "unused",
+                "Identify entities with no detected incoming references or usage evidence",
+            ),
+            ("logo", "Display Context Forge ASCII logo and exit"),
+        ],
+    ),
+]
+
+
+class ContextForgeArgumentParser(argparse.ArgumentParser):
+    _is_root: bool = False
+
+    def format_help(self) -> str:
+        if not self._is_root:
+            return super().format_help()
+        lines: list[str] = [
+            f"usage: {self.prog} [-h] [--logo] <command> ...",
+            "",
+            "Deterministic repository intelligence and memory for software projects",
+            "",
+            "global options:",
+            "  -h, --help            Show this help message and exit",
+            "  --logo                Display Context Forge ASCII logo and exit",
+            "",
+            "command categories:",
+        ]
+        for cat_name, commands in COMMAND_CATEGORIES:
+            lines.append(f"\n  {cat_name}:")
+            for cmd, desc in commands:
+                lines.append(f"    {cmd:<20}{desc}")
+        lines.append("")
+        lines.append(
+            f"Run '{self.prog} <command> --help' for detailed help on a specific command"
+        )
+        lines.append("")
+        return "\n".join(lines)
+
+
 def create_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = ContextForgeArgumentParser(
         prog="context-forge",
-        description=(
-            "Deterministic repository intelligence and memory for software projects."
-        ),
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        add_help=False,
+    )
+    parser._is_root = True
+    parser.add_argument(
+        "-h",
+        "--help",
+        action="help",
+        help="Show this help message and exit",
     )
     parser.add_argument(
         "--logo",
         action="store_true",
-        help="Display the Context Forge ASCII logo and exit.",
+        help="Display Context Forge ASCII logo and exit",
     )
 
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>")
 
     subparsers.add_parser(
         "logo",
-        help="Display the Context Forge ASCII logo and exit.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Display Context Forge ASCII logo and exit",
+        description="Display Context Forge ASCII logo and exit",
     )
 
     analyze_parser = subparsers.add_parser(
         "analyze",
-        help="Analyze a repository and persist repository intelligence.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Analyze a repository and persist repository intelligence",
+        description="Analyze a repository and persist repository intelligence",
     )
-    analyze_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    analyze_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory to analyze (default: current directory)",
+    )
     _add_output_format_argument(analyze_parser)
 
     refresh_parser = subparsers.add_parser(
-        "refresh", help="Refresh repository analysis and cached intelligence."
+        "refresh",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Refresh repository analysis and cached intelligence",
+        description="Refresh repository analysis and cached intelligence",
     )
-    refresh_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    refresh_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory to refresh (default: current directory)",
+    )
     _add_output_format_argument(refresh_parser)
 
     context_parser = subparsers.add_parser(
         "context",
-        help="Retrieve deterministic context package for a development task.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Retrieve deterministic context package for a development task",
+        description="Retrieve deterministic context package for a development task",
     )
-    context_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    context_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory to retrieve context from (default: current directory)",
+    )
     context_parser.add_argument(
         "--task",
         default=None,
-        help="Development task description.",
+        help="Development task description or prompt to guide context extraction",
     )
     context_parser.add_argument(
         "--output",
         type=Path,
         default=None,
-        help="Write context package JSON to a file.",
+        help="File path destination to write synthesized context package JSON",
     )
     _add_refresh_control_argument(context_parser)
 
     status_parser = subparsers.add_parser(
         "status",
-        help="Show repository and analysis status.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Show repository and analysis status",
+        description="Show repository and analysis status",
     )
-    status_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    status_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory to inspect (default: current directory)",
+    )
     _add_output_format_argument(status_parser)
 
     cache_parser = subparsers.add_parser(
         "cache",
-        help="Show repository cache state and freshness.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Show repository cache state and freshness",
+        description="Show repository cache state and freshness",
     )
-    cache_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    cache_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory to check cache freshness for (default: current directory)",
+    )
     _add_output_format_argument(cache_parser)
 
     inspect_parser = subparsers.add_parser(
         "inspect",
-        help="Inspect persisted repository intelligence.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Inspect persisted repository intelligence summary",
+        description="Inspect persisted repository intelligence summary",
     )
-    inspect_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    inspect_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory to inspect intelligence for (default: current directory)",
+    )
     _add_output_format_argument(inspect_parser)
 
     memory_parser = subparsers.add_parser(
         "memory",
-        help="Inspect and retrieve persistent repository memory.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Inspect and retrieve persistent repository memory",
+        description="Inspect and retrieve persistent repository memory",
     )
     memory_subparsers = memory_parser.add_subparsers(
         dest="memory_command",
         required=True,
+        metavar="<subcommand>",
+        help="Persistent memory subcommand to execute",
     )
 
     memory_inspect_parser = memory_subparsers.add_parser(
         "inspect",
-        help="Inspect persisted repository intelligence.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Inspect persisted repository intelligence summary",
+        description="Inspect persisted repository intelligence summary",
     )
     memory_inspect_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
+        help="Repository root directory to inspect (default: current directory)",
     )
     _add_output_format_argument(memory_inspect_parser)
+
     memory_search_parser = memory_subparsers.add_parser(
         "search",
-        help="Search persisted repository memory.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Search persisted repository memory",
+        description="Search persisted repository memory",
     )
     memory_search_parser.add_argument(
         "query",
-        help="Search for a file, directory, or symbol.",
+        help="Search query matching file paths, directory paths, or symbol names",
     )
     memory_search_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
+        help="Repository root directory to search in (default: current directory)",
     )
     _add_output_format_argument(memory_search_parser)
     _add_refresh_control_argument(memory_search_parser)
+
     memory_file_parser = memory_subparsers.add_parser(
         "file",
-        help="Retrieve a file and its defined symbols.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Retrieve a file and its defined symbols",
+        description="Retrieve a file and its defined symbols",
     )
     memory_file_parser.add_argument(
         "file_path",
-        help="Repository-relative path of the file to retrieve.",
+        help="Repository-relative path of the file to retrieve",
     )
     memory_file_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path.",
+        help="Repository root directory containing the file (default: current directory)",
     )
     _add_output_format_argument(memory_file_parser)
     _add_refresh_control_argument(memory_file_parser)
 
     memory_symbol_parser = memory_subparsers.add_parser(
         "symbol",
-        help="Retrieve symbol definitions by exact name.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Retrieve symbol definitions by exact name",
+        description="Retrieve symbol definitions by exact name",
     )
     memory_symbol_parser.add_argument(
         "symbol_name",
-        help="Exact name of the symbol to retrieve.",
+        help="Exact name of the symbol to retrieve",
     )
     memory_symbol_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path.",
+        help="Repository root directory containing the symbol (default: current directory)",
     )
     memory_symbol_parser.add_argument(
         "--file",
         dest="file_path",
         default=None,
-        help="Filter symbol by file path.",
+        help="Filter symbol definitions by repository-relative file path",
     )
     memory_symbol_parser.add_argument(
         "--type",
         dest="symbol_type",
         default=None,
-        help="Filter symbol by type/kind (e.g., class, function, method).",
+        help="Filter symbol definitions by kind such as class, function, or method",
     )
     memory_symbol_parser.add_argument(
         "--excerpt",
         action="store_true",
         default=False,
-        help="Include bounded source evidence excerpt from current source file.",
+        help="Include bounded source code excerpt from current source file",
     )
     memory_symbol_parser.add_argument(
         "--max-lines",
         type=int,
         default=DEFAULT_EXCERPT_MAX_LINES,
-        help="Maximum lines for source excerpt (default: 50).",
+        help=f"Maximum lines included in source evidence excerpt (default: {DEFAULT_EXCERPT_MAX_LINES})",
     )
     _add_output_format_argument(memory_symbol_parser)
     _add_refresh_control_argument(memory_symbol_parser)
 
     memory_references_parser = memory_subparsers.add_parser(
         "references",
-        help="Show indexed references to a symbol.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Show indexed references to a symbol",
+        description="Show indexed references to a symbol",
     )
     memory_references_parser.add_argument(
         "symbol_name",
-        help="Exact symbol name or qualified name.",
+        help="Exact or qualified symbol name to locate inbound references for",
     )
     memory_references_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path.",
+        help="Repository root directory containing the symbol (default: current directory)",
     )
     _add_output_format_argument(memory_references_parser)
     _add_refresh_control_argument(memory_references_parser)
 
     memory_relationships_parser = memory_subparsers.add_parser(
         "relationships",
-        help="Inspect indexed relationships for a file or symbol.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Inspect indexed relationships for a file or symbol",
+        description="Inspect indexed relationships for a file or symbol",
     )
     memory_relationships_parser.add_argument(
         "entity_name",
-        help="Repository-relative file path, symbol name, or qualified name.",
+        help="Repository-relative file path, symbol name, or qualified name",
     )
     memory_relationships_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path.",
+        help="Repository root directory containing the entity (default: current directory)",
     )
     memory_relationships_parser.add_argument(
         "--direction",
         choices=("both", "incoming", "outgoing"),
         default="both",
-        help="Relationship direction (default: both).",
+        help="Direction of relationships to include (choices: both, incoming, outgoing; default: both)",
     )
     memory_relationships_parser.add_argument(
         "--type",
         dest="relationship_type",
         choices=("defines", "contains", "imports", "references", "inherits"),
         default=None,
-        help=(
-            "Filter by a currently supported relationship type. "
-            "'calls' and 'depends_on' are not currently generated."
-        ),
+        help="Filter relationships by type (choices: defines, contains, imports, references, inherits)",
     )
     _add_output_format_argument(memory_relationships_parser)
     _add_refresh_control_argument(memory_relationships_parser)
 
     memory_dependencies_parser = memory_subparsers.add_parser(
         "dependencies",
-        help="Show direct dependencies and dependents for a file.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Show direct dependencies and dependents for a file",
+        description="Show direct dependencies and dependents for a file",
     )
     memory_dependencies_parser.add_argument(
         "file_path",
-        help="Repository-relative path of the file to inspect.",
+        help="Repository-relative path of the file to inspect",
     )
     memory_dependencies_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path.",
+        help="Repository root directory containing the file (default: current directory)",
     )
     memory_dependencies_parser.add_argument(
         "--direction",
         choices=("both", "dependencies", "dependents"),
         default="both",
-        help="Which direct dependency relationships to show (default: both).",
+        help="Filter direct file dependencies (choices: both, dependencies, dependents; default: both)",
     )
     _add_output_format_argument(memory_dependencies_parser)
     _add_refresh_control_argument(memory_dependencies_parser)
 
     diagnostics_parser = subparsers.add_parser(
         "diagnostics",
-        help="Show persisted repository analysis diagnostics.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Show persisted repository analysis diagnostics",
+        description="Show persisted repository analysis diagnostics",
     )
-    diagnostics_parser.add_argument("path", nargs="?", type=Path, default=Path("."))
+    diagnostics_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory to show analysis diagnostics for (default: current directory)",
+    )
     _add_output_format_argument(diagnostics_parser)
 
     architecture_parser = subparsers.add_parser(
         "architecture",
-        help="Report repository architecture and structural findings.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Report repository architecture and structural findings",
+        description="Report repository architecture and structural findings",
     )
     architecture_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path.",
+        help="Repository root directory to analyze architecture for (default: current directory)",
     )
     architecture_parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_REPORT_LIMIT,
-        help=(
-            "Maximum number of items displayed per report section "
-            f"(default: {DEFAULT_REPORT_LIMIT})."
-        ),
+        help=f"Maximum items displayed per report section (default: {DEFAULT_REPORT_LIMIT})",
     )
     _add_output_format_argument(architecture_parser)
     _add_refresh_control_argument(architecture_parser)
 
     impact_parser = subparsers.add_parser(
         "impact",
-        help="Analyze direct and transitive change impact for a file or symbol target.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Analyze direct and transitive change impact for a file or symbol target",
+        description="Analyze direct and transitive change impact for a file or symbol target",
     )
     impact_parser.add_argument(
         "target",
-        help="Repository-relative file path, symbol name, or qualified name.",
+        help="Repository-relative file path, symbol name, or qualified name to analyze impact for",
     )
     impact_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path.",
+        help="Repository root directory containing the target (default: current directory)",
     )
     impact_parser.add_argument(
         "--direction",
         choices=("both", "incoming", "outgoing"),
         default="both",
-        help="Relationship direction to analyze (default: both).",
+        help="Direction of impact graph traversal (choices: both, incoming, outgoing; default: both)",
     )
     impact_parser.add_argument(
         "--type",
         dest="relationship_type",
         choices=("imports", "references", "inherits", "calls", "depends_on"),
         default=None,
-        help="Filter by relationship type.",
+        help="Filter traversed relationships by type",
     )
     impact_parser.add_argument(
         "--depth",
@@ -447,13 +644,13 @@ def create_parser() -> argparse.ArgumentParser:
         dest="max_depth",
         type=int,
         default=DEFAULT_IMPACT_MAX_DEPTH,
-        help=f"Maximum traversal depth for impact analysis (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
+        help=f"Maximum graph traversal depth for impact discovery (default: {DEFAULT_IMPACT_MAX_DEPTH})",
     )
     impact_parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_IMPACT_LIMIT,
-        help=f"Maximum number of items displayed (default: {DEFAULT_IMPACT_LIMIT}).",
+        help=f"Maximum affected entities displayed in the report (default: {DEFAULT_IMPACT_LIMIT})",
     )
     _add_output_format_argument(impact_parser)
     _add_refresh_control_argument(impact_parser)
@@ -461,12 +658,14 @@ def create_parser() -> argparse.ArgumentParser:
     changeset_parser = subparsers.add_parser(
         "changeset",
         aliases=["change-set"],
-        help="Analyze combined impact for a set of changed repository paths.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Analyze combined impact for a set of changed repository paths",
+        description="Analyze combined impact for a set of changed repository paths\n\naliases: change-set",
     )
     changeset_parser.add_argument(
         "paths",
         nargs="+",
-        help="Changed file paths to analyze together.",
+        help="One or more changed file paths to analyze together",
     )
     changeset_parser.add_argument(
         "--path",
@@ -474,20 +673,20 @@ def create_parser() -> argparse.ArgumentParser:
         dest="project_path",
         type=Path,
         default=Path("."),
-        help="Repository root path (default: current directory).",
+        help="Repository root directory containing changed files (default: current directory)",
     )
     changeset_parser.add_argument(
         "--direction",
         choices=("both", "incoming", "outgoing"),
         default="both",
-        help="Relationship direction to analyze (default: both).",
+        help="Direction of impact graph traversal (choices: both, incoming, outgoing; default: both)",
     )
     changeset_parser.add_argument(
         "--type",
         dest="relationship_type",
         choices=("imports", "references", "inherits", "calls", "depends_on"),
         default=None,
-        help="Filter by relationship type.",
+        help="Filter traversed relationships by type",
     )
     changeset_parser.add_argument(
         "--depth",
@@ -495,25 +694,25 @@ def create_parser() -> argparse.ArgumentParser:
         dest="max_depth",
         type=int,
         default=DEFAULT_IMPACT_MAX_DEPTH,
-        help=f"Maximum traversal depth for impact analysis (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
+        help=f"Maximum graph traversal depth for impact discovery (default: {DEFAULT_IMPACT_MAX_DEPTH})",
     )
     changeset_parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_IMPACT_LIMIT,
-        help=f"Maximum number of items displayed (default: {DEFAULT_IMPACT_LIMIT}).",
+        help=f"Maximum affected entities displayed in the report (default: {DEFAULT_IMPACT_LIMIT})",
     )
     changeset_parser.add_argument(
         "--checklist",
         action="store_true",
         default=False,
-        help="Display verification checklist with test recommendations.",
+        help="Include verification checklist with test recommendations in output",
     )
     changeset_parser.add_argument(
         "--risk",
         action="store_true",
         default=False,
-        help="Display change-risk evidence report.",
+        help="Include evidence-based change risk report in output",
     )
     _add_output_format_argument(changeset_parser)
     _add_refresh_control_argument(changeset_parser)
@@ -521,12 +720,14 @@ def create_parser() -> argparse.ArgumentParser:
     risk_parser = subparsers.add_parser(
         "risk",
         aliases=["change-risk"],
-        help="Generate an evidence-based change-risk report for changed paths.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Generate an evidence-based change-risk report for changed paths",
+        description="Generate an evidence-based change-risk report for changed paths\n\naliases: change-risk",
     )
     risk_parser.add_argument(
         "paths",
         nargs="+",
-        help="Changed file paths to assess risk for.",
+        help="One or more changed file paths to assess risk for",
     )
     risk_parser.add_argument(
         "--path",
@@ -534,20 +735,20 @@ def create_parser() -> argparse.ArgumentParser:
         dest="project_path",
         type=Path,
         default=Path("."),
-        help="Repository root path (default: current directory).",
+        help="Repository root directory containing changed files (default: current directory)",
     )
     risk_parser.add_argument(
         "--direction",
         choices=("both", "incoming", "outgoing"),
         default="both",
-        help="Relationship direction to analyze (default: both).",
+        help="Direction of impact graph traversal (choices: both, incoming, outgoing; default: both)",
     )
     risk_parser.add_argument(
         "--type",
         dest="relationship_type",
         choices=("imports", "references", "inherits", "calls", "depends_on"),
         default=None,
-        help="Filter by relationship type.",
+        help="Filter traversed relationships by type",
     )
     risk_parser.add_argument(
         "--depth",
@@ -555,13 +756,13 @@ def create_parser() -> argparse.ArgumentParser:
         dest="max_depth",
         type=int,
         default=DEFAULT_IMPACT_MAX_DEPTH,
-        help=f"Maximum traversal depth for impact analysis (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
+        help=f"Maximum graph traversal depth for impact discovery (default: {DEFAULT_IMPACT_MAX_DEPTH})",
     )
     risk_parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_IMPACT_LIMIT,
-        help=f"Maximum number of items displayed (default: {DEFAULT_IMPACT_LIMIT}).",
+        help=f"Maximum affected entities displayed in the report (default: {DEFAULT_IMPACT_LIMIT})",
     )
     _add_output_format_argument(risk_parser)
     _add_refresh_control_argument(risk_parser)
@@ -569,20 +770,22 @@ def create_parser() -> argparse.ArgumentParser:
     pkg_boundaries_parser = subparsers.add_parser(
         "package-boundaries",
         aliases=["package-boundary", "boundaries"],
-        help="Analyze dependencies crossing package boundaries and evaluate boundary policies.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Analyze dependencies crossing package boundaries and evaluate boundary policies",
+        description="Analyze dependencies crossing package boundaries and evaluate boundary policies\n\naliases: package-boundary, boundaries",
     )
     pkg_boundaries_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path (default: current directory).",
+        help="Repository root directory to evaluate boundary rules against (default: current directory)",
     )
     pkg_boundaries_parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_REPORT_LIMIT,
-        help=f"Maximum number of items displayed (default: {DEFAULT_REPORT_LIMIT}).",
+        help=f"Maximum cross-package dependency violations displayed (default: {DEFAULT_REPORT_LIMIT})",
     )
     _add_output_format_argument(pkg_boundaries_parser)
     _add_refresh_control_argument(pkg_boundaries_parser)
@@ -590,13 +793,15 @@ def create_parser() -> argparse.ArgumentParser:
     post_change_parser = subparsers.add_parser(
         "post-change",
         aliases=["verify-change", "post_change", "verify"],
-        help="Run consolidated post-change verification across structural changes, tests, risk, boundaries, and rules.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Run consolidated post-change verification across structural changes, tests, risk, boundaries, and rules",
+        description="Run consolidated post-change verification across structural changes, tests, risk, boundaries, and rules\n\naliases: verify-change, post_change, verify",
     )
     post_change_parser.add_argument(
         "paths",
         nargs="*",
         default=[],
-        help="Changed file paths to verify. If omitted, attempts detection via Git repository status.",
+        help="Changed file paths to verify; if omitted, automatically detects changes via Git status",
     )
     post_change_parser.add_argument(
         "--path",
@@ -604,20 +809,20 @@ def create_parser() -> argparse.ArgumentParser:
         dest="project_path",
         type=Path,
         default=Path("."),
-        help="Repository root path (default: current directory).",
+        help="Repository root directory to verify changes in (default: current directory)",
     )
     post_change_parser.add_argument(
         "--before",
         dest="before_state_path",
         type=Path,
         default=None,
-        help="Optional path to baseline repository snapshot or directory representing before-change state.",
+        help="Baseline repository directory or snapshot representing state prior to changes",
     )
     post_change_parser.add_argument(
         "--direction",
         choices=("both", "incoming", "outgoing"),
         default="both",
-        help="Relationship direction to analyze (default: both).",
+        help="Direction of impact graph traversal (choices: both, incoming, outgoing; default: both)",
     )
     post_change_parser.add_argument(
         "--depth",
@@ -625,13 +830,13 @@ def create_parser() -> argparse.ArgumentParser:
         dest="max_depth",
         type=int,
         default=DEFAULT_IMPACT_MAX_DEPTH,
-        help=f"Maximum traversal depth for impact analysis (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
+        help=f"Maximum graph traversal depth for impact discovery (default: {DEFAULT_IMPACT_MAX_DEPTH})",
     )
     post_change_parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_REPORT_LIMIT,
-        help=f"Maximum number of items displayed (default: {DEFAULT_REPORT_LIMIT}).",
+        help=f"Maximum verification items displayed per category (default: {DEFAULT_REPORT_LIMIT})",
     )
     _add_output_format_argument(post_change_parser)
     _add_refresh_control_argument(post_change_parser)
@@ -639,20 +844,22 @@ def create_parser() -> argparse.ArgumentParser:
     rules_parser = subparsers.add_parser(
         "rules",
         aliases=["evaluate-rules", "check-rules"],
-        help="Evaluate declarative structural regression rules against repository architecture.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Evaluate declarative structural regression rules against repository architecture",
+        description="Evaluate declarative structural regression rules against repository architecture\n\naliases: evaluate-rules, check-rules",
     )
     rules_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path (default: current directory).",
+        help="Repository root directory to evaluate structural regression rules against (default: current directory)",
     )
     rules_parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_REPORT_LIMIT,
-        help=f"Maximum number of items displayed (default: {DEFAULT_REPORT_LIMIT}).",
+        help=f"Maximum rule evaluation results displayed (default: {DEFAULT_REPORT_LIMIT})",
     )
     _add_output_format_argument(rules_parser)
     _add_refresh_control_argument(rules_parser)
@@ -660,14 +867,16 @@ def create_parser() -> argparse.ArgumentParser:
     unused_parser = subparsers.add_parser(
         "unused",
         aliases=["unused-entities", "find-unused"],
-        help="Identify entities with no detected incoming references or usage evidence.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Identify entities with no detected incoming references or usage evidence",
+        description="Identify entities with no detected incoming references or usage evidence\n\naliases: unused-entities, find-unused",
     )
     unused_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path (default: current directory).",
+        help="Repository root directory to scan for unused entity candidates (default: current directory)",
     )
     unused_parser.add_argument(
         "--kind",
@@ -688,13 +897,13 @@ def create_parser() -> argparse.ArgumentParser:
             "symbols",
         ),
         default="all",
-        help="Filter entities by kind (default: all).",
+        help="Filter unused entities by kind (choices: all, function, method, class, variable, file, symbol; default: all)",
     )
     unused_parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_UNUSED_LIMIT,
-        help=f"Maximum number of items displayed per section (default: {DEFAULT_UNUSED_LIMIT}).",
+        help=f"Maximum unused candidates displayed per category (default: {DEFAULT_UNUSED_LIMIT})",
     )
     _add_output_format_argument(unused_parser)
     _add_refresh_control_argument(unused_parser)
@@ -702,15 +911,17 @@ def create_parser() -> argparse.ArgumentParser:
     path_parser = subparsers.add_parser(
         "path",
         aliases=["query-path"],
-        help="Find and report a bounded relationship path between start and end entities.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Find and report a bounded relationship path between start and end entities",
+        description="Find and report a bounded relationship path between start and end entities\n\naliases: query-path",
     )
     path_parser.add_argument(
         "start",
-        help="Start entity (file path, symbol name, qualified name, or UUID).",
+        help="Starting entity as file path, symbol name, qualified name, or UUID",
     )
     path_parser.add_argument(
         "end",
-        help="End entity (file path, symbol name, qualified name, or UUID).",
+        help="Destination entity as file path, symbol name, qualified name, or UUID",
     )
     path_parser.add_argument(
         "--path",
@@ -718,20 +929,20 @@ def create_parser() -> argparse.ArgumentParser:
         dest="project_path",
         type=Path,
         default=Path("."),
-        help="Repository root path (default: current directory).",
+        help="Repository root directory to traverse (default: current directory)",
     )
     path_parser.add_argument(
         "--direction",
         choices=("both", "incoming", "outgoing"),
         default="both",
-        help="Relationship direction to traverse (default: both).",
+        help="Direction of relationship traversal (choices: both, incoming, outgoing; default: both)",
     )
     path_parser.add_argument(
         "--type",
         dest="relationship_type",
         choices=("imports", "references", "inherits", "calls", "depends_on"),
         default=None,
-        help="Filter by relationship type.",
+        help="Filter traversed relationships by type",
     )
     path_parser.add_argument(
         "--depth",
@@ -739,90 +950,93 @@ def create_parser() -> argparse.ArgumentParser:
         dest="max_depth",
         type=int,
         default=DEFAULT_PATH_MAX_DEPTH,
-        help=f"Maximum traversal depth for path search (default: {DEFAULT_PATH_MAX_DEPTH}).",
+        help=f"Maximum graph traversal depth for shortest path search (default: {DEFAULT_PATH_MAX_DEPTH})",
     )
     path_parser.add_argument(
         "--max-expansions",
         type=int,
         default=DEFAULT_PATH_MAX_EXPANSIONS,
-        help=f"Maximum number of entities expanded during search (default: {DEFAULT_PATH_MAX_EXPANSIONS}).",
+        help=f"Maximum graph nodes expanded before terminating search (default: {DEFAULT_PATH_MAX_EXPANSIONS})",
     )
     _add_output_format_argument(path_parser)
     _add_refresh_control_argument(path_parser)
 
     health_parser = subparsers.add_parser(
         "health",
-        help="Report repository health, inventory metrics, and structural findings.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Report repository health, inventory metrics, and structural findings",
+        description="Report repository health, inventory metrics, and structural findings",
     )
     health_parser.add_argument(
         "path",
         nargs="?",
         type=Path,
         default=Path("."),
-        help="Repository root path.",
+        help="Repository root directory to compute health report for (default: current directory)",
     )
     health_parser.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_HEALTH_LIMIT,
-        help=(
-            "Maximum number of findings displayed per category "
-            f"(default: {DEFAULT_HEALTH_LIMIT})."
-        ),
+        help=f"Maximum structural health findings displayed per category (default: {DEFAULT_HEALTH_LIMIT})",
     )
     _add_output_format_argument(health_parser)
 
     preflight_parser = subparsers.add_parser(
         "preflight",
-        help="Perform read-only repository preflight readiness and configuration audit.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Perform read-only repository preflight readiness and configuration audit",
+        description="Perform read-only repository preflight readiness and configuration audit",
     )
     preflight_parser.add_argument(
         "path",
         nargs="?",
         default=".",
         type=Path,
-        help="Repository root path (default: current directory).",
+        help="Repository root directory to audit for preflight readiness (default: current directory)",
     )
     _add_output_format_argument(preflight_parser)
 
     locate_parser = subparsers.add_parser(
         "locate",
-        help="Locate repository symbols precisely with optional source evidence.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Locate repository symbols precisely with optional source evidence",
+        description="Locate repository symbols precisely with optional source evidence",
     )
     locate_parser.add_argument(
         "symbol_name",
-        help="Symbol name or qualified name to locate.",
+        help="Exact or qualified symbol name to locate in repository",
     )
     locate_parser.add_argument(
         "path",
         nargs="?",
         default=".",
         type=Path,
-        help="Repository root path (default: current directory).",
+        help="Repository root directory to locate symbols within (default: current directory)",
     )
     locate_parser.add_argument(
         "--file",
         dest="file_path",
         default=None,
-        help="Filter symbol by file path.",
+        help="Filter symbol matches by repository-relative file path",
     )
     locate_parser.add_argument(
         "--type",
         dest="symbol_type",
         default=None,
-        help="Filter symbol by type/kind (e.g., class, function, method).",
+        help="Filter symbol matches by kind such as class, function, or method",
     )
     locate_parser.add_argument(
         "--excerpt",
         action="store_true",
         default=False,
-        help="Include bounded source evidence excerpt from current source file.",
+        help="Include bounded source code excerpt for located symbol",
     )
     locate_parser.add_argument(
         "--max-lines",
         type=int,
         default=DEFAULT_EXCERPT_MAX_LINES,
-        help="Maximum lines for source excerpt (default: 50).",
+        help=f"Maximum lines included in source evidence excerpt (default: {DEFAULT_EXCERPT_MAX_LINES})",
     )
     _add_output_format_argument(locate_parser)
     _add_refresh_control_argument(locate_parser)
@@ -830,36 +1044,38 @@ def create_parser() -> argparse.ArgumentParser:
     inspect_change_parser = subparsers.add_parser(
         "inspect-change",
         aliases=["pre-change"],
-        help="Perform read-only pre-change inspection composing preflight, target resolution, freshness, evidence, and Git context.",
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Perform read-only pre-change inspection composing preflight, target resolution, freshness, evidence, and Git context",
+        description="Perform read-only pre-change inspection composing preflight, target resolution, freshness, evidence, and Git context\n\naliases: pre-change",
     )
     inspect_change_parser.add_argument(
         "target",
-        help="Target symbol name or qualified name to inspect.",
+        help="Target symbol name, qualified name, or file path to inspect before making changes",
     )
     inspect_change_parser.add_argument(
         "path",
         nargs="?",
         default=".",
         type=Path,
-        help="Repository root path (default: current directory).",
+        help="Repository root directory to inspect pre-change state for (default: current directory)",
     )
     inspect_change_parser.add_argument(
         "--file",
         dest="file_path",
         default=None,
-        help="Filter symbol by file path.",
+        help="Filter target symbol by repository-relative file path",
     )
     inspect_change_parser.add_argument(
         "--type",
         dest="symbol_type",
         default=None,
-        help="Filter symbol by type/kind (e.g., class, function, method).",
+        help="Filter target symbol by kind such as class, function, or method",
     )
     inspect_change_parser.add_argument(
         "--direction",
         choices=("both", "incoming", "outgoing"),
         default="both",
-        help="Traversal direction for structural impact (default: both).",
+        help="Direction of structural impact analysis (choices: both, incoming, outgoing; default: both)",
     )
     inspect_change_parser.add_argument(
         "--depth",
@@ -867,19 +1083,19 @@ def create_parser() -> argparse.ArgumentParser:
         dest="max_depth",
         type=int,
         default=DEFAULT_IMPACT_MAX_DEPTH,
-        help=f"Maximum traversal depth for structural impact (default: {DEFAULT_IMPACT_MAX_DEPTH}).",
+        help=f"Maximum traversal depth for structural impact discovery (default: {DEFAULT_IMPACT_MAX_DEPTH})",
     )
     inspect_change_parser.add_argument(
         "--max-lines",
         type=int,
         default=DEFAULT_EXCERPT_MAX_LINES,
-        help=f"Maximum lines for source excerpt (default: {DEFAULT_EXCERPT_MAX_LINES}).",
+        help=f"Maximum lines included in source evidence excerpt (default: {DEFAULT_EXCERPT_MAX_LINES})",
     )
     inspect_change_parser.add_argument(
         "--no-git",
         action="store_true",
         default=False,
-        help="Disable Git context inspection.",
+        help="Disable Git working tree and status inspection",
     )
     _add_output_format_argument(inspect_change_parser)
 
@@ -1102,9 +1318,6 @@ def load_fresh_project(
         database_path=database_path,
     )
     return project, metadata
-
-
-load_generation_project = load_fresh_project
 
 
 def print_analysis_summary(project, output_format: str = "text") -> None:

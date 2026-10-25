@@ -1,10 +1,3 @@
-"""Change-risk evidence report.
-
-Explains the possible implications of a structural change using observable
-structural evidence, test associations, package boundary crossings, and explicit
-uncertainty without defect prediction or arbitrary scoring.
-"""
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -212,7 +205,6 @@ def generate_change_risk_report(
 
     supplied_paths: list[str] = [str(p) for p in paths]
 
-    # Incorporate comparison changes if provided
     comparison_facts: list[ObservedFact] = []
     comparison_limitations: list[str] = []
     if comparison is not None:
@@ -294,7 +286,6 @@ def generate_change_risk_report(
             outcome=outcome,
         )
 
-    # 1. Execute changeset impact and checklist analysis
     impact = analyze_changeset(
         project,
         supplied_paths,
@@ -307,7 +298,6 @@ def generate_change_risk_report(
 
     checklist = impact.verification_checklist
 
-    # 2. Execute package boundary analysis
     pkg_report = analyze_package_boundaries(
         project,
         policy=policy,
@@ -319,7 +309,6 @@ def generate_change_risk_report(
     concerns: list[InferredConcern] = []
     missing_evidence: list[MissingEvidenceItem] = []
 
-    # Map files to packages for cross-package impact detection
     file_to_pkg: dict[str, str] = {}
     for pkg_dir in pkg_report.packages:
         for f in project.files:
@@ -329,7 +318,6 @@ def generate_change_risk_report(
             ):
                 file_to_pkg[p_posix] = pkg_dir
 
-    # Extract direct roots
     direct_root_facts: list[ObservedFact] = []
     unresolved_input_facts: list[ObservedFact] = []
     root_paths: set[str] = set()
@@ -364,7 +352,6 @@ def generate_change_risk_report(
             unresolved_input_facts.append(fact)
             facts.append(fact)
 
-    # Extract downstream and directly impacted components
     direct_impact_facts: list[ObservedFact] = []
     downstream_facts: list[ObservedFact] = []
     downstream_packages: set[str] = set()
@@ -418,7 +405,6 @@ def generate_change_risk_report(
             downstream_facts.append(fact)
             facts.append(fact)
 
-        # Record shortest path evidence if available
         if item.shortest_path:
             step_descriptions = [
                 f"{step.from_name} -[{step.relationship_type}]-> {step.to_name}"
@@ -439,7 +425,6 @@ def generate_change_risk_report(
                 )
             )
 
-    # Extract test associations evidence
     associated_tests_count = 0
     unassociated_targets_count = 0
     unassociated_names: list[str] = []
@@ -503,7 +488,6 @@ def generate_change_risk_report(
                         unassociated_facts.append(fact)
                         facts.append(fact)
 
-    # Extract package boundary facts
     cross_package_facts: list[ObservedFact] = []
     affected_paths = root_paths | {item.path for item in all_affected_items}
 
@@ -530,7 +514,6 @@ def generate_change_risk_report(
             cross_package_facts.append(fact)
             facts.append(fact)
 
-    # Freshness & analysis status facts
     freshness_state = checklist.freshness_state if checklist else "indeterminate"
     analysis_status = (
         checklist.analysis_status if checklist else project.analysis_status
@@ -556,11 +539,6 @@ def generate_change_risk_report(
         )
     )
 
-    # -------------------------------------------------------------------------
-    # Derive Inferred Concerns (each strictly tied to supporting facts)
-    # -------------------------------------------------------------------------
-
-    # Concern 1: Broad downstream impact
     if downstream_facts:
         count = len(downstream_facts)
         severity = DiagnosticSeverity.WARNING if count >= 3 else DiagnosticSeverity.INFO
@@ -580,7 +558,6 @@ def generate_change_risk_report(
             )
         )
 
-    # Concern 2: Unverified areas / Missing test coverage
     if unassociated_facts:
         count = len(unassociated_facts)
         concerns.append(
@@ -599,7 +576,6 @@ def generate_change_risk_report(
             )
         )
 
-    # Concern 3: Cross-package impact
     cross_pkg_count = len(cross_package_facts)
     if cross_pkg_count > 0:
         distinct_source_pkgs = sorted(
@@ -632,7 +608,6 @@ def generate_change_risk_report(
             )
         )
 
-    # Concern 4: Policy violations
     for v in pkg_report.policy_violations:
         if v.source_file_path in affected_paths or v.target_file_path in affected_paths:
             v_fact_id = f"pkg_boundary:{v.source_package}->{v.target_package}:{v.source_file_path}->{v.target_file_path}"
@@ -678,7 +653,6 @@ def generate_change_risk_report(
             )
         )
 
-    # Concern 5: Stale repository analysis
     if freshness_state == "stale":
         concerns.append(
             InferredConcern(
@@ -696,7 +670,6 @@ def generate_change_risk_report(
             )
         )
 
-    # Concern 6: Incomplete analysis
     if not is_complete_project:
         err_msg = f" (recorded errors: {len(project.errors)})" if project.errors else ""
         concerns.append(
@@ -715,7 +688,6 @@ def generate_change_risk_report(
             )
         )
 
-    # Concern 7: Unresolved inputs
     if unresolved_input_facts:
         unres_count = len(unresolved_input_facts)
         concerns.append(
@@ -734,9 +706,6 @@ def generate_change_risk_report(
             )
         )
 
-    # -------------------------------------------------------------------------
-    # Record Missing Evidence
-    # -------------------------------------------------------------------------
     if unassociated_names:
         missing_evidence.append(
             MissingEvidenceItem(
@@ -781,7 +750,6 @@ def generate_change_risk_report(
                 )
             )
 
-    # Deterministic sorting
     sorted_facts = tuple(
         sorted(
             facts,
@@ -808,7 +776,6 @@ def generate_change_risk_report(
         )
     )
 
-    # Limitations & Diagnostics
     limitations: list[str] = list(impact.limitations)
     limitations.extend(comparison_limitations)
     limitations.append(RISK_REPORT_DISCLAIMER)
@@ -832,7 +799,6 @@ def generate_change_risk_report(
                 )
             )
 
-    # Deduplicate diagnostics
     seen_diag: set[tuple[str, str, str, str]] = set()
     unique_diagnostics: list[DiagnosticItem] = []
     for d in diagnostics:
@@ -848,7 +814,6 @@ def generate_change_risk_report(
         )
     )
 
-    # Determine overall status
     if len(unresolved_input_facts) == len(supplied_paths):
         status = OperationStatus.FAILED
         message = "Change-risk assessment failed: all input paths could not be resolved"

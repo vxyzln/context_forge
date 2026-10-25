@@ -285,10 +285,12 @@ def compare_states(
     }
 
     before_files_by_path: dict[str, File] = {
-        path: f for f, path in zip(before_project.files, before_file_paths.values())
+        _normalize_rel_path(before_project.root_path, f.path): f
+        for f in before_project.files
     }
     after_files_by_path: dict[str, File] = {
-        path: f for f, path in zip(after_project.files, after_file_paths.values())
+        _normalize_rel_path(after_project.root_path, f.path): f
+        for f in after_project.files
     }
 
     before_fps: dict[str, str] = {}

@@ -5795,3 +5795,161 @@ def test_unused_cli_limit_and_kind_options(
     ):
         main()
     assert exc_info.value.code == 2
+
+
+def test_redesigned_top_level_help_structure() -> None:
+    from context_forge.main import COMMAND_CATEGORIES, create_parser
+
+    parser = create_parser()
+    help_text = parser.format_help()
+
+    assert "usage: context-forge [-h] [--logo] <command> ..." in help_text
+    assert (
+        "Deterministic repository intelligence and memory for software projects"
+        in help_text
+    )
+    assert "global options:" in help_text
+    assert "--logo" in help_text
+    assert "command categories:" in help_text
+
+    for cat_name, commands in COMMAND_CATEGORIES:
+        assert cat_name in help_text
+        for cmd, desc in commands:
+            assert cmd in help_text
+            assert not desc.endswith(".")
+
+    assert (
+        "Run 'context-forge <command> --help' for detailed help on a specific command"
+        in help_text
+    )
+
+    excluded_top_level_aliases = [
+        "change-set",
+        "change-risk",
+        "package-boundary",
+        "boundaries",
+        "verify-change",
+        "post_change",
+        "verify",
+        "evaluate-rules",
+        "check-rules",
+        "unused-entities",
+        "find-unused",
+        "query-path",
+        "pre-change",
+    ]
+    for alias in excluded_top_level_aliases:
+        assert f"    {alias} " not in help_text
+
+
+def test_cli_help_no_trailing_periods() -> None:
+    import argparse
+
+    from context_forge.main import create_parser
+
+    parser = create_parser()
+
+    subparsers_action = next(
+        a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
+    )
+
+    for cmd_name, sub in subparsers_action.choices.items():
+        for act in sub._actions:
+            if act.help:
+                assert not act.help.endswith("."), (
+                    f"Command '{cmd_name}', option '{act.dest}' has trailing period: {act.help}"
+                )
+
+    memory_parser = subparsers_action.choices["memory"]
+    memory_subparsers = next(
+        a for a in memory_parser._actions if isinstance(a, argparse._SubParsersAction)
+    )
+    for sub_name, mem_sub in memory_subparsers.choices.items():
+        for act in mem_sub._actions:
+            if act.help:
+                assert not act.help.endswith("."), (
+                    f"Memory subcommand '{sub_name}', option '{act.dest}' has trailing period: {act.help}"
+                )
+
+
+def test_all_subcommands_provide_valid_help_and_show_aliases(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    commands_to_test = [
+        ("changeset", "aliases: change-set"),
+        ("risk", "aliases: change-risk"),
+        ("package-boundaries", "aliases: package-boundary, boundaries"),
+        ("post-change", "aliases: verify-change, post_change, verify"),
+        ("rules", "aliases: evaluate-rules, check-rules"),
+        ("unused", "aliases: unused-entities, find-unused"),
+        ("path", "aliases: query-path"),
+        ("inspect-change", "aliases: pre-change"),
+    ]
+
+    for cmd, expected_alias_line in commands_to_test:
+        with (
+            patch.object(sys, "argv", ["context-forge", cmd, "--help"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert expected_alias_line in captured.out
+        assert f"usage: context-forge {cmd}" in captured.out
+
+
+def test_all_exposed_options_have_meaningful_descriptions() -> None:
+    import argparse
+
+    from context_forge.main import create_parser
+
+    parser = create_parser()
+    subparsers_action = next(
+        a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
+    )
+
+    for cmd_name, sub in subparsers_action.choices.items():
+        for act in sub._actions:
+            if act.dest != "help":
+                assert act.help is not None, (
+                    f"Command '{cmd_name}', option '{act.dest}' has help=None"
+                )
+                assert len(act.help.strip()) > 5, (
+                    f"Command '{cmd_name}', option '{act.dest}' has trivial description: '{act.help}'"
+                )
+
+
+def test_obsolete_symbols_and_dead_code_removed() -> None:
+    import context_forge.main as main_mod
+    import context_forge.query.locator as locator_mod
+    import context_forge.query.verification as verification_mod
+
+    assert not hasattr(main_mod, "load_generation_project")
+    assert not hasattr(locator_mod, "_is_definition_header_match")
+    assert not hasattr(verification_mod, "_is_test_path_str")
+
+
+def test_comparison_files_by_path_handles_empty_and_normal_states() -> None:
+    from context_forge.comparison.models import ComparisonState
+    from context_forge.comparison.service import compare_states
+    from context_forge.models.project import Project
+
+    repo_dir = Path("/tmp/proj")
+    project_a = Project(name="proj", root_path=repo_dir, analysis_status="analyzed")
+    project_b = Project(name="proj", root_path=repo_dir, analysis_status="analyzed")
+
+    state_a = ComparisonState(
+        project=project_a,
+        state_id="state_a",
+        repository_path=repo_dir,
+    )
+    state_b = ComparisonState(
+        project=project_b,
+        state_id="state_b",
+        repository_path=repo_dir,
+    )
+
+    diff = compare_states(state_a, state_b)
+    assert diff.is_complete
+    assert len(diff.added_files) == 0
+    assert len(diff.removed_files) == 0

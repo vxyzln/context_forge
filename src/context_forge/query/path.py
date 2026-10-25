@@ -32,7 +32,7 @@ class RelationshipPathStep:
     relationship_type: str
     stored_source_id: UUID
     stored_target_id: UUID
-    traversal_direction: str  # "outgoing" or "incoming"
+    traversal_direction: str
     from_id: UUID
     to_id: UUID
     from_name: str
@@ -168,9 +168,7 @@ def find_relationship_path(
     ]
     diagnostics: list[DiagnosticItem] = []
 
-    # 1. Resolve start endpoint
     start_resolution = resolve_impact_target(project, start)
-    # 2. Resolve end endpoint
     end_resolution = resolve_impact_target(project, end)
 
     endpoint_failed = False
@@ -239,7 +237,6 @@ def find_relationship_path(
         if project.errors:
             limitations.append("Repository analysis contains recorded errors")
 
-    # 3. Check start equals end
     if start_id == end_id:
         msg = f"Start and end endpoints are identical ('{start_target.name}'); zero-edge path."
         outcome = (
@@ -276,7 +273,6 @@ def find_relationship_path(
             outcome=outcome,
         )
 
-    # Index graph edges
     files_by_id = {f.id: f for f in project.files}
     symbols_by_id = {s.id: s for s in project.symbols}
 
@@ -306,8 +302,6 @@ def find_relationship_path(
             )
         return ("unknown", str(eid), None, None, None)
 
-    # 4. BFS search for shortest path
-    # Queue entries: (current_entity_id, current_path, current_depth)
     queue: deque[tuple[UUID, tuple[RelationshipPathStep, ...], int]] = deque()
     queue.append((start_id, (), 0))
     visited: set[UUID] = {start_id}
@@ -325,9 +319,7 @@ def find_relationship_path(
         u_id, u_path, u_depth = queue.popleft()
         expansions_used += 1
 
-        # Check if u_depth is at limit
         if u_depth >= max_depth:
-            # Check if there were any eligible outgoing/incoming unvisited edges
             has_unvisited_neighbors = False
             if direction in ("outgoing", "both"):
                 for rel in outgoing_by_id.get(u_id, []):
@@ -345,7 +337,6 @@ def find_relationship_path(
 
         _u_type, u_name, u_path_str, u_kind, _ = _entity_info(u_id)
 
-        # Collect neighbors in deterministic order
         neighbor_steps: list[tuple[UUID, RelationshipPathStep]] = []
 
         if direction in ("outgoing", "both"):
@@ -396,7 +387,6 @@ def find_relationship_path(
                 )
                 neighbor_steps.append((v_id, step))
 
-        # Deterministic sorting for tie-breaking
         neighbor_steps.sort(
             key=lambda item: (
                 0 if item[1].traversal_direction == "outgoing" else 1,
@@ -422,11 +412,9 @@ def find_relationship_path(
         if reached_target:
             break
 
-    # Also check if any remaining elements in queue exceed depth limit
     if not found_path and queue and any(d >= max_depth for _, _, d in queue):
         stopped_by_depth = True
 
-    # Build final result
     if found_path is not None:
         path_length = len(found_path)
         msg = (
@@ -465,7 +453,6 @@ def find_relationship_path(
             outcome=final_outcome,
         )
 
-    # No path found cases: distinguish exhaustive vs depth-limited vs expansion-limited
     if stopped_by_expansions:
         status_label = "expansion_limited"
         msg = (

@@ -1,9 +1,3 @@
-"""Verification checklist and test association evidence models.
-
-Provides deterministic, evidence-based test-to-code association discovery
-and verification checklist generation for change sets.
-"""
-
 from __future__ import annotations
 
 import sqlite3
@@ -201,7 +195,6 @@ class VerificationChecklist:
 
 
 def _is_test_file_entity(file: File, project: Project | None = None) -> bool:
-    """Determine if a File is a test file based on type, directory, or filename patterns."""
     if file.file_type == FileType.TEST:
         return True
 
@@ -224,25 +217,9 @@ def _is_test_file_entity(file: File, project: Project | None = None) -> bool:
     )
 
 
-def _is_test_path_str(path_str: str) -> bool:
-    norm = normalize_relative_path(path_str).lower()
-    parts = norm.split("/")
-    filename = parts[-1]
-    if any(d in TEST_DIRECTORIES for d in parts):
-        return True
-    if any(filename.startswith(p) for p in TEST_FILE_PREFIXES):
-        return True
-    return bool(
-        any(filename.endswith(s) for s in TEST_FILE_SUFFIXES)
-        or filename.endswith("_test")
-    )
-
-
 def identify_test_associations(
     project: Project,
-    targets: Sequence[
-        tuple[UUID, str, str | None, str]
-    ],  # (id, name, path, target_kind)
+    targets: Sequence[tuple[UUID, str, str | None, str]],
     *,
     relationship_types: set[str] | None = None,
 ) -> tuple[
@@ -250,11 +227,6 @@ def identify_test_associations(
     tuple[TestAssociationItem, ...],
     tuple[TestAssociationItem, ...],
 ]:
-    """Identify direct, heuristic, and unknown test-to-code associations for the given targets.
-
-    Returns:
-        (direct_associations, heuristic_associations, unknown_associations)
-    """
     files_by_id: dict[UUID, File] = {f.id: f for f in project.files}
     symbols_by_id: dict[UUID, Symbol] = {s.id: s for s in project.symbols}
     test_files: list[File] = [
@@ -262,7 +234,6 @@ def identify_test_associations(
     ]
     test_file_ids: set[UUID] = {f.id for f in test_files}
 
-    # Group symbols by file_id for quick symbol-level lookup
     symbols_by_file: dict[UUID, list[Symbol]] = {}
     for s in project.symbols:
         symbols_by_file.setdefault(s.file_id, []).append(s)
@@ -278,8 +249,6 @@ def identify_test_associations(
         t[0]: t for t in targets
     }
 
-    # 1. Direct Structural Associations from project.relationships
-    # Group by (test_file_id, target_entity_id) to aggregate multiple/duplicate relationships
     direct_rels_by_pair: dict[tuple[UUID, UUID], list[tuple[str, str, str]]] = {}
     direct_test_files: dict[UUID, File] = {}
     direct_targets_info: dict[UUID, tuple[UUID, str, str | None, str]] = {}
@@ -296,19 +265,16 @@ def identify_test_associations(
         src_is_test = rel.source_id in test_file_ids
         tgt_is_test = rel.target_id in test_file_ids
 
-        # If source is in test file (symbol or file)
         if not src_is_test:
             src_sym = symbols_by_id.get(rel.source_id)
             if src_sym and src_sym.file_id in test_file_ids:
                 src_is_test = True
 
-        # If target is in test file (symbol or file)
         if not tgt_is_test:
             tgt_sym = symbols_by_id.get(rel.target_id)
             if tgt_sym and tgt_sym.file_id in test_file_ids:
                 tgt_is_test = True
 
-        # Check if source is a test pointing to an affected target
         if src_is_test and rel.target_id in target_ids:
             tgt_info = targets_by_id[rel.target_id]
             test_f = files_by_id.get(rel.source_id)
@@ -327,7 +293,6 @@ def identify_test_associations(
                 direct_test_files[test_f.id] = test_f
                 direct_targets_info[rel.target_id] = tgt_info
 
-        # Check if target is a test receiving a relationship from an affected target
         if tgt_is_test and rel.source_id in target_ids:
             tgt_info = targets_by_id[rel.source_id]
             test_f = files_by_id.get(rel.target_id)
@@ -349,7 +314,6 @@ def identify_test_associations(
     direct_associations: list[TestAssociationItem] = []
     direct_keys: set[tuple[str, UUID]] = set()
 
-    # Sort pairs deterministically: test_file_path, target_name, target_id.hex
     sorted_pairs = sorted(
         direct_rels_by_pair.keys(),
         key=lambda pair: (
@@ -361,14 +325,12 @@ def identify_test_associations(
 
     for test_f_id, tgt_id in sorted_pairs:
         raw_rels = direct_rels_by_pair[(test_f_id, tgt_id)]
-        # Deduplicate exact duplicate relationship tuples while preserving insertion order
         unique_rels = list(dict.fromkeys(raw_rels))
 
         test_f = direct_test_files[test_f_id]
         tgt_info = direct_targets_info[tgt_id]
         tf_path = test_f.path.as_posix()
 
-        # Suppress heuristic matching for this test and target
         direct_keys.add((tf_path, tgt_id))
 
         distinct_rel_types = sorted({r[0] for r in unique_rels})
@@ -401,10 +363,6 @@ def identify_test_associations(
             )
         )
 
-    # 2. Heuristic Associations
-    # Rules:
-    # A) naming_convention: Test file stem matches target file stem (e.g. test_foo.py / foo_test.py for foo.py)
-    # B) symbol_name_match: Test symbol in test file matches target symbol (e.g. test_bar for bar)
     heuristic_associations: list[TestAssociationItem] = []
     heuristic_keys: set[tuple[str, UUID]] = set()
 
@@ -416,14 +374,12 @@ def identify_test_associations(
             p = Path(tgt_path)
             target_stem = p.stem.lower()
 
-        # Check if target itself is a symbol
         sym = symbols_by_id.get(tgt_id)
         if sym:
             target_sym_names.add(sym.name.lower())
             if not target_stem and sym.file_id in files_by_id:
                 target_stem = files_by_id[sym.file_id].path.stem.lower()
         elif tgt_id in files_by_id:
-            # File target: gather all symbol names in this file
             file_syms = symbols_by_file.get(tgt_id, [])
             for fs in file_syms:
                 target_sym_names.add(fs.name.lower())
@@ -438,7 +394,6 @@ def identify_test_associations(
             matched_rule: str | None = None
             evidence_str: str | None = None
 
-            # Heuristic Rule 1: Naming convention match
             if target_stem:
                 candidate_test_stems = {
                     f"test_{target_stem}",
@@ -451,7 +406,6 @@ def identify_test_associations(
                         f"target '{tgt_name}' (rule: naming_convention)"
                     )
 
-            # Heuristic Rule 2: Symbol name match (if naming convention didn't match)
             if not matched_rule and target_sym_names:
                 tf_symbols = symbols_by_file.get(tf.id, [])
                 for tfs in tf_symbols:
@@ -488,7 +442,6 @@ def identify_test_associations(
                     )
                 )
 
-    # 3. Unknown / Unassociated Targets
     unknown_associations: list[TestAssociationItem] = []
     associated_target_ids = {k[1] for k in direct_keys} | {k[1] for k in heuristic_keys}
 
@@ -512,7 +465,6 @@ def identify_test_associations(
                 )
             )
 
-    # Sort deterministically
     sorted_direct = tuple(
         sorted(
             direct_associations,
@@ -545,12 +497,10 @@ def generate_verification_checklist(
     max_depth: int = 2,
     limit: int | None = 100,
 ) -> VerificationChecklist:
-    """Generate a deterministic verification checklist for the given changed paths."""
     from context_forge.query.changeset import analyze_changeset
 
     supplied_paths = tuple(str(p) for p in paths)
 
-    # If impact_result is not passed, compute it via analyze_changeset with include_checklist=False
     if impact_result is None:
         impact = analyze_changeset(
             project,
@@ -564,7 +514,6 @@ def generate_verification_checklist(
     else:
         impact = impact_result
 
-    # Freshness assessment
     freshness_state = FreshnessState.INDETERMINATE.value
     freshness_diagnostics: list[DiagnosticItem] = []
     freshness_limitations: list[str] = []
@@ -608,7 +557,6 @@ def generate_verification_checklist(
     )
     analysis_status = project.analysis_status if is_complete_project else "incomplete"
 
-    # Gather targets: direct roots and downstream impacted items
     targets: list[tuple[UUID, str, str | None, str]] = []
     seen_target_ids: set[UUID] = set()
 
@@ -621,7 +569,6 @@ def generate_verification_checklist(
             seen_target_ids.add(r.target.id)
             targets.append((r.target.id, r.target.name, r.target.path, "root"))
 
-    # Reuse full computed affected items if available (Defect C: Truncation guarantee)
     all_downstream_items = (
         impact._all_items
         if hasattr(impact, "_all_items") and impact._all_items is not None
@@ -640,8 +587,6 @@ def generate_verification_checklist(
 
     checklist_items: list[ChecklistItem] = []
 
-    # Category A: Detected Structural Relationships
-    # Deduplicate by test_file_path across all targets
     direct_by_test: dict[str, list[TestAssociationItem]] = {}
     for da in direct_assocs:
         direct_by_test.setdefault(da.test_file_path, []).append(da)
@@ -669,8 +614,6 @@ def generate_verification_checklist(
             )
         )
 
-    # Category B: Heuristic Recommendations
-    # Deduplicate by test_file_path, excluding tests already in Category A
     heuristic_by_test: dict[str, list[TestAssociationItem]] = {}
     for ha in heuristic_assocs:
         if ha.test_file_path not in direct_by_test:
@@ -701,8 +644,6 @@ def generate_verification_checklist(
             )
         )
 
-    # Category C: Additional Verification
-    # 1. Author tests for modified root components lacking any test associations
     unassociated_roots = [ua for ua in unknown_assocs if ua.target_kind == "root"]
     for ua in sorted(unassociated_roots, key=lambda u: u.target_entity_name):
         checklist_items.append(
@@ -724,7 +665,6 @@ def generate_verification_checklist(
             )
         )
 
-    # 2. Consolidated test suite command if 2 or more distinct test files exist
     all_test_files = sorted(set(direct_by_test.keys()) | set(heuristic_by_test.keys()))
     if len(all_test_files) >= 2:
         checklist_items.append(
@@ -750,8 +690,6 @@ def generate_verification_checklist(
             )
         )
 
-    # Category D: Unverified Areas & Diagnostics
-    # 1. Unresolved input paths
     for r in impact.resolved_inputs:
         if not r.is_resolved:
             checklist_items.append(
@@ -770,7 +708,6 @@ def generate_verification_checklist(
                 )
             )
 
-    # 2. Incomplete analysis state
     if not is_complete_project:
         error_count = len(project.errors)
         checklist_items.append(
@@ -792,7 +729,6 @@ def generate_verification_checklist(
             )
         )
 
-    # 3. Freshness state handling for non-current states (Defect A)
     if freshness_state == FreshnessState.STALE.value:
         stale_reason = wf.reason if wf else "source changes detected"
         checklist_items.append(
@@ -854,7 +790,6 @@ def generate_verification_checklist(
             )
         )
 
-    # 4. Truncated impact coverage handling (Defect C)
     if impact.truncated:
         if hasattr(impact, "_all_items") and impact._all_items is not None:
             freshness_limitations.append(
@@ -885,7 +820,6 @@ def generate_verification_checklist(
                 )
             )
 
-    # 5. Unassociated targets note
     if unknown_assocs:
         unassoc_names = sorted({ua.target_entity_name for ua in unknown_assocs})
         checklist_items.append(
@@ -910,7 +844,6 @@ def generate_verification_checklist(
             )
         )
 
-    # Category ordering for deterministic sorting:
     category_rank = {
         ChecklistCategory.DETECTED_STRUCTURAL.value: 1,
         ChecklistCategory.HEURISTIC_RECOMMENDATION.value: 2,
@@ -925,7 +858,6 @@ def generate_verification_checklist(
         )
     )
 
-    # Aggregate limitations
     limitations_list: list[str] = list(impact.limitations)
     limitations_list.extend(freshness_limitations)
     limitations_list.append(DYNAMIC_COVERAGE_DISCLAIMER)
@@ -940,7 +872,6 @@ def generate_verification_checklist(
             f"or heuristic test associations."
         )
 
-    # Combine diagnostics without putting DiagnosticItem in a set (details is a dict)
     all_diagnostics = list(impact.diagnostics) + freshness_diagnostics
     seen_diag: set[tuple[str, str, str, str]] = set()
     unique_diagnostics: list[DiagnosticItem] = []

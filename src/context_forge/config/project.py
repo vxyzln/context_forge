@@ -57,7 +57,6 @@ class PackageBoundaryPolicy:
     def evaluate(
         self, source_package: str, target_package: str
     ) -> tuple[str, PackageDependencyRule | None]:
-        # 1. Exact matches take precedence
         exact_rules = [
             r
             for r in self.rules
@@ -71,7 +70,6 @@ class PackageBoundaryPolicy:
                 pol = "prohibited" if rule.policy in {"deny", "prohibit"} else "allowed"
                 return pol, rule
 
-        # 2. Check wildcard patterns
         pattern_rules = [
             r for r in self.rules if "*" in r.source_package or "*" in r.target_package
         ]
@@ -100,7 +98,6 @@ class PackageBoundaryPolicy:
             decision = decisions.pop()
             return decision, matching_patterns[0]
 
-        # 3. Default fallback
         if self.default_policy in {"deny", "prohibit"}:
             return "prohibited", None
         if self.default_policy == "allow":

@@ -1,5 +1,3 @@
-"""Tests for package-boundary analysis and policy evaluation."""
-
 from __future__ import annotations
 
 import json

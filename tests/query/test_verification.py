@@ -1,5 +1,3 @@
-"""Tests for test-to-code association evidence models and verification checklist generation."""
-
 from __future__ import annotations
 
 import json

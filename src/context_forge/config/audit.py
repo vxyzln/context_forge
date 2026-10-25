@@ -224,7 +224,6 @@ def audit_configuration(
         }
         status = "valid" if (p_present or g_present) else "default"
 
-    # TODO: add validation for custom configuration schema extensions
     return ConfigurationAuditResult(
         status=status,
         resolved=resolved,

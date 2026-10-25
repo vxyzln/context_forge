@@ -1,10 +1,3 @@
-"""Package-boundary analysis and policy evaluation.
-
-Identifies resolved dependencies that cross package boundaries, determines
-dependency direction, aggregates repeated relationships, and evaluates explicit
-package boundary policies.
-"""
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -362,7 +355,6 @@ def analyze_package_boundaries(
             )
         )
 
-    # Sort cross-package dependencies deterministically
     sorted_cross_deps = tuple(
         sorted(
             cross_deps_raw,
@@ -376,7 +368,6 @@ def analyze_package_boundaries(
         )
     )
 
-    # Aggregate repeated patterns: group by (source_package, target_package, relationship_type)
     pattern_groups: dict[tuple[str, str, str], list[CrossPackageDependency]] = (
         defaultdict(list)
     )

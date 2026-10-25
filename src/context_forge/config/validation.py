@@ -161,7 +161,6 @@ def _validate_packages_policy(section: dict[str, Any]) -> PackageBoundaryPolicy:
         seen_rule_ids.add(rule.rule_id)
         rules_list.append(rule)
 
-    # Rules can be specified in `rules` or `deny` / `prohibit`
     raw_rules = section.get("rules", [])
     if not isinstance(raw_rules, list):
         raise ConfigurationValidationError("Package policy 'rules' must be a list")
@@ -205,7 +204,6 @@ def _validate_packages_policy(section: dict[str, Any]) -> PackageBoundaryPolicy:
             r_id=rule_id.strip() if rule_id else None,
         )
 
-    # Deny shortcut list: e.g. deny = ["pkg_a -> pkg_b", ...] or deny = [{"source": "...", "target": "..."}]
     raw_deny = section.get("deny") or section.get("prohibit")
     if raw_deny is not None:
         if not isinstance(raw_deny, list):

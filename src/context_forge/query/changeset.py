@@ -220,7 +220,6 @@ def resolve_changeset_path(
 
     is_windows_abs = len(norm) >= 2 and norm[1] == ":" and norm[0].isalpha()
     if norm.startswith("/") or is_windows_abs or ".." in segments:
-        # Check if absolute path within project root
         p = Path(raw)
         if p.is_absolute():
             try:
@@ -251,7 +250,6 @@ def resolve_changeset_path(
 
     if len(matching_files) == 1:
         f = matching_files[0]
-        # Check if file has sufficient evidence or exists
         exists_on_disk = (root_path / f.path).is_file()
         limitations: list[str] = []
         if not exists_on_disk:
@@ -292,7 +290,6 @@ def resolve_changeset_path(
             limitations=(f"Ambiguous path mapping for '{norm}'",),
         )
 
-    # If no file matched, try general target resolution (e.g. non-file entity or module)
     res = resolve_impact_target(project, raw)
     if res.is_resolved and res.target is not None:
         return ChangeSetInputResolution(
@@ -313,7 +310,6 @@ def resolve_changeset_path(
             limitations=(f"Target query '{raw}' resolved to multiple entities",),
         )
 
-    # Path is not found in project inventory. Check if file exists on disk
     exists_on_disk = (root_path / norm).exists()
     reason = (
         f"Path '{norm}' exists on disk but is not part of the analyzed inventory (unsupported or unindexed)"
@@ -416,7 +412,6 @@ def analyze_changeset(
             outcome=outcome,
         )
 
-    # Resolve each supplied path
     resolved_inputs: list[ChangeSetInputResolution] = []
     analyzable_targets: dict[UUID, ResolvedTarget] = {}
     target_to_input_paths: dict[UUID, list[str]] = {}
@@ -481,7 +476,6 @@ def analyze_changeset(
             )
         return ("unknown", str(eid), None, None, None)
 
-    # Compute multi-file impact per analyzable root
     root_ids: set[UUID] = set(analyzable_targets.keys())
     entity_provenance: dict[UUID, list[ChangeSetProvenance]] = {}
     entity_best_paths: dict[UUID, list[tuple[ImpactPathStep, ...]]] = {}
@@ -576,7 +570,6 @@ def analyze_changeset(
                 visited_for_root.add(v_id)
                 next_frontier.append(v_id)
 
-                # Record provenance
                 classification = "direct" if current_depth == 1 else "downstream"
                 prov = ChangeSetProvenance(
                     root_path=root_path_label,
@@ -610,12 +603,6 @@ def analyze_changeset(
             f"Traversal depth was limited to {max_depth} hop(s); deeper components were not explored"
         )
 
-    # Consolidate affected entities
-    # Overlapping roots rule:
-    # If an affected entity is itself one of the supplied changed roots, it is classified as "root",
-    # preserving set-level consistency while retaining root reachability in provenance.
-    # Non-root entities reached at depth 1 from ANY root are classified as "direct";
-    # non-root entities reached only at depth > 1 are classified as "downstream".
     consolidated_items: list[ChangeSetImpactItem] = []
 
     for entity_id in sorted(entity_provenance.keys(), key=lambda eid: eid.hex):
@@ -654,7 +641,6 @@ def analyze_changeset(
             )
         )
 
-    # Sort items deterministically: min_depth, classification, path, name, entity_id
     sorted_items = sorted(
         consolidated_items,
         key=lambda it: (
@@ -684,9 +670,6 @@ def analyze_changeset(
         1 for it in sorted_items if it.classification == "downstream"
     )
 
-    # Evidence-based relevant test identification
-    # A test is relevant ONLY if there is an actual resolved relationship in the graph
-    # connecting the test file to a changed root or affected entity!
     relevant_tests_map: dict[tuple[UUID, UUID, str], RelevantTestItem] = {}
 
     target_entity_ids = root_ids | set(entity_provenance.keys())
@@ -695,7 +678,6 @@ def analyze_changeset(
         if rel_type not in types_filter:
             continue
 
-        # Check if source or target is a test file
         src_is_test = False
         tgt_is_test = False
         src_file = files_by_id.get(rel.source_id)
@@ -756,7 +738,6 @@ def analyze_changeset(
             "Test relevance could not be established from available repository relationship evidence"
         )
 
-    # Determine status and outcome
     resolved_count = len(analyzable_targets)
     all_resolved = len(analyzable_targets) == len(supplied_paths)
 

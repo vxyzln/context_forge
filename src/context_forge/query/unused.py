@@ -1,11 +1,3 @@
-"""Unused-entity candidate reporting.
-
-Identifies entities (functions, methods, classes, variables, files) that have no
-detected incoming references or usage evidence in the analyzed project, distinguishing
-likely candidates from entities that cannot be assessed reliably, and reporting
-evidence and limitations with strict non-presumptive honesty.
-"""
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -47,19 +39,15 @@ STANDARD_ENTRY_POINT_FILENAMES: frozenset[str] = frozenset(
     }
 )
 
-# Standard Python data model protocol methods recognized by runtime language syntax
 PYTHON_DATA_MODEL_METHODS: frozenset[str] = frozenset(
     {
-        # Object creation & destruction
         "__new__",
         "__init__",
         "__del__",
-        # String / representation
         "__repr__",
         "__str__",
         "__bytes__",
         "__format__",
-        # Comparisons & hashing
         "__lt__",
         "__le__",
         "__eq__",
@@ -68,22 +56,18 @@ PYTHON_DATA_MODEL_METHODS: frozenset[str] = frozenset(
         "__ge__",
         "__hash__",
         "__bool__",
-        # Attribute access
         "__getattr__",
         "__getattribute__",
         "__setattr__",
         "__delattr__",
         "__dir__",
-        # Descriptors
         "__get__",
         "__set__",
         "__delete__",
         "__set_name__",
-        # Class customization
         "__init_subclass__",
         "__class_getitem__",
         "__mro_entries__",
-        # Containers & sequences
         "__len__",
         "__length_hint__",
         "__getitem__",
@@ -94,17 +78,13 @@ PYTHON_DATA_MODEL_METHODS: frozenset[str] = frozenset(
         "__next__",
         "__reversed__",
         "__contains__",
-        # Callables
         "__call__",
-        # Context managers
         "__enter__",
         "__exit__",
         "__aenter__",
         "__aexit__",
-        # Async iterators
         "__aiter__",
         "__anext__",
-        # Numeric / arithmetic operations
         "__add__",
         "__sub__",
         "__mul__",
@@ -158,7 +138,6 @@ PYTHON_DATA_MODEL_METHODS: frozenset[str] = frozenset(
         "__trunc__",
         "__floor__",
         "__ceil__",
-        # Dataclasses & copy/pickle
         "__post_init__",
         "__copy__",
         "__deepcopy__",
@@ -229,21 +208,6 @@ class UnusedEntitiesSummary:
 
 @dataclass(frozen=True)
 class UnusedEntitiesReport:
-    """Report describing apparent unused entity candidates and unassessable entities.
-
-    Attributes:
-        repository_path: Target repository path.
-        analysis_status: Analysis status of the scanned project.
-        candidates: Apparent unused candidates, capped per section by limit.
-        unassessable: Unassessable entities, capped per section by limit.
-        summary: True repository-wide summary counts independent of displayed item limits.
-        truncated: True if either candidates or unassessable sections exceeded limit.
-        limit: Display limit applied per section, or None if unlimited.
-        diagnostics: Collection of diagnostic notices.
-        limitations: Explicit caveats and limitations of static analysis.
-        outcome: Operation outcome status and summary.
-    """
-
     repository_path: str
     analysis_status: str
     candidates: tuple[UnusedCandidateItem, ...] = ()
@@ -304,14 +268,12 @@ def _is_convention_uncertainty(
     file: File | None,
     file_path: str,
 ) -> tuple[bool, str]:
-    # 1. Standard Python data-model methods on classes
     if symbol.kind == "method" and symbol.name in PYTHON_DATA_MODEL_METHODS:
         return (
             True,
             "Python data-model protocol method; may be invoked implicitly by runtime syntax without static call references.",
         )
 
-    # 2. Test functions and test classes in test files
     if _is_test_path(file_path):
         if symbol.kind in ("function", "method") and symbol.name.startswith("test_"):
             return (
@@ -324,7 +286,6 @@ def _is_convention_uncertainty(
                 "Potential test suite class; may be discovered dynamically by test framework without static call references.",
             )
 
-    # 3. 'main' functions in recognized entry-point files
     if (
         symbol.name == "main"
         and file is not None
@@ -357,11 +318,6 @@ SUPPORTED_KINDS: dict[str, str] = {
 
 
 def _normalize_kind_filter(kind: str | None) -> set[str]:
-    """Normalize and validate entity kind filter.
-
-    Supports 'all', '*', singular and plural entity kinds, or None.
-    Raises ValueError for unsupported kind filters.
-    """
     if kind is None or not kind.strip() or kind.strip().lower() in ("all", "*"):
         return {"all"}
 
@@ -402,11 +358,6 @@ PATH_DELIMITERS: frozenset[str] = frozenset(
 
 
 def _contains_path_token(text: str, path_str: str) -> bool:
-    """Check if path_str appears in text bounded by path delimiters.
-
-    Prevents false substring matches where path_str is part of a longer path
-    component or different filename (e.g. 'src/a.py' in 'sub/src/a.py' or 'src/a.py.bak').
-    """
     if not path_str or not text:
         return False
     start = 0
@@ -424,7 +375,6 @@ def _contains_path_token(text: str, path_str: str) -> bool:
 
 
 def _is_error_location(err_norm: str, rel_path: str, abs_path: str | None) -> bool:
-    """Check if a file path appears at the primary error location prefix."""
     variants = [rel_path, "./" + rel_path]
     if abs_path:
         variants.append(abs_path)
@@ -437,7 +387,6 @@ def _is_error_location(err_norm: str, rel_path: str, abs_path: str | None) -> bo
                 stripped_line = stripped_line[len(tag) :].strip()
 
         for var in variants:
-            # Standard compiler prefix: var(:line)?(:col)?: or var\s
             if stripped_line.startswith(var):
                 rest = stripped_line[len(var) :]
                 if (
@@ -448,7 +397,6 @@ def _is_error_location(err_norm: str, rel_path: str, abs_path: str | None) -> bo
                     return True
             lower_line = stripped_line.lower()
             var_lower = var.lower()
-            # File "var" or File 'var'
             if lower_line.startswith(
                 (
                     f'file "{var_lower}"',
@@ -457,7 +405,6 @@ def _is_error_location(err_norm: str, rel_path: str, abs_path: str | None) -> bo
                 )
             ):
                 return True
-            # in file var, error in var, etc.
             for prefix in (
                 "in file ",
                 "in ",
@@ -473,12 +420,6 @@ def _is_error_location(err_norm: str, rel_path: str, abs_path: str | None) -> bo
 
 
 def _index_file_errors(project: Project) -> tuple[dict[str, list[str]], list[str]]:
-    """Attribute analysis errors to files using precise path matching.
-
-    Avoids false positives across files that share the same basename or appear together
-    in error messages by prioritizing normalized relative paths and identifiable error locations.
-    Returns (file_errors_by_repo_rel_path, ambiguous_errors).
-    """
     file_errors: dict[str, list[str]] = defaultdict(list)
     ambiguous_errors: list[str] = []
     if not project.errors:
@@ -506,10 +447,9 @@ def _index_file_errors(project: Project) -> tuple[dict[str, list[str]], list[str
         err_str = str(err)
         err_norm = err_str.replace("\\", "/").strip()
 
-        # 1. Exact path matches (relative, dot-slash, or absolute)
         matched_rel_paths: set[str] = set()
 
-        for rel_path, f in files_by_rel_path.items():
+        for rel_path in files_by_rel_path:
             if _contains_path_token(err_norm, rel_path) or _contains_path_token(
                 err_norm, f"./{rel_path}"
             ):
@@ -520,12 +460,9 @@ def _index_file_errors(project: Project) -> tuple[dict[str, list[str]], list[str
                 matched_rel_paths.add(_to_repo_relative_path(f.path, project.root_path))
 
         if len(matched_rel_paths) == 1:
-            # Unambiguous single file match
             file_errors[next(iter(matched_rel_paths))].append(err_str)
             continue
         elif len(matched_rel_paths) > 1:
-            # Multiple distinct repository files matched.
-            # Do NOT assign to multiple files unless the primary failing file location is identifiable.
             loc_matched: list[str] = []
             for rel_p in matched_rel_paths:
                 f = files_by_rel_path[rel_p]
@@ -538,14 +475,11 @@ def _index_file_errors(project: Project) -> tuple[dict[str, list[str]], list[str
                     loc_matched.append(rel_p)
 
             if len(loc_matched) == 1:
-                # Exactly one matched file is at the primary error location
                 file_errors[loc_matched[0]].append(err_str)
             else:
-                # Multiple files mentioned and primary location cannot be established reliably
                 ambiguous_errors.append(err_str)
             continue
 
-        # 2. Basename fallback if no exact path matched
         matched_basenames = [
             name for name in files_by_basename if _contains_path_token(err_norm, name)
         ]
@@ -572,20 +506,6 @@ def find_unused_candidates(
     kind: str | None = "all",
     limit: int | None = DEFAULT_UNUSED_LIMIT,
 ) -> UnusedEntitiesReport:
-    """Identify entities with no detected incoming references or usage evidence.
-
-    Args:
-        project: Analyzed project model containing files, symbols, and relationships.
-        kind: Entity kind filter ('all', '*', 'function', 'functions', 'method',
-            'methods', 'class', 'classes', 'variable', 'variables', 'file', 'files',
-            'symbol', 'symbols'). Unsupported values raise ValueError.
-        limit: Maximum number of items displayed per section ('candidates' and
-            'unassessable'). If None, all items are retained without section-level truncation.
-
-    Returns:
-        UnusedEntitiesReport with capped candidate and unassessable sections,
-        full summary counts, and non-presumptive evidence and limitations.
-    """
     if limit is not None and (
         isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
     ):
@@ -605,10 +525,8 @@ def find_unused_candidates(
 
     files_by_id: dict[UUID, File] = {f.id: f for f in project.files}
 
-    # Index errors with precise path attribution
     file_errors, ambiguous_errors = _index_file_errors(project)
 
-    # Index incoming relationships by target_id
     incoming_rels: dict[UUID, list[Relationship]] = defaultdict(list)
     for rel in project.relationships:
         incoming_rels[rel.target_id].append(rel)
@@ -629,7 +547,6 @@ def find_unused_candidates(
     total_entities_analyzed = 0
     any_missing_provenance = False
 
-    # 1. Analyze symbols
     if include_symbols:
         for symbol in project.symbols:
             if symbol.kind == "import":
@@ -650,7 +567,6 @@ def find_unused_candidates(
                 else "<unknown>"
             )
 
-            # Check unassessable conditions: missing file
             if file is None:
                 any_missing_provenance = True
                 unassessable_list.append(
@@ -672,7 +588,6 @@ def find_unused_candidates(
                 )
                 continue
 
-            # Check unassessable conditions: analysis error in containing file
             if file_path in file_errors:
                 unassessable_list.append(
                     UnusedCandidateItem(
@@ -693,7 +608,6 @@ def find_unused_candidates(
                 )
                 continue
 
-            # Check unassessable conditions: invalid source line bounds
             if symbol.start_line <= 0 or symbol.end_line < symbol.start_line:
                 any_missing_provenance = True
                 unassessable_list.append(
@@ -715,7 +629,6 @@ def find_unused_candidates(
                 )
                 continue
 
-            # Evaluate incoming relationships
             incoming = incoming_rels.get(symbol.id, [])
             external_usage: list[Relationship] = []
             self_refs_count = 0
@@ -736,14 +649,11 @@ def find_unused_candidates(
                 if rtype not in usage_rel_types:
                     continue
 
-                # Direct self-reference where source is the symbol itself
                 if rel.source_id == symbol.id:
                     self_refs_count += 1
                     continue
 
                 if rel.source_id == symbol.file_id:
-                    # Same-file reference.
-                    # Verify whether reference line metadata exists and is within symbol boundaries.
                     line_str = rel.metadata.get("line")
                     if not line_str or not str(line_str).isdigit():
                         has_ambiguous_line_metadata = True
@@ -751,18 +661,14 @@ def find_unused_candidates(
 
                     line_num = int(str(line_str))
                     if symbol.start_line <= line_num <= symbol.end_line:
-                        # Edge line is inside the symbol (internal recursion / reference).
                         self_refs_count += 1
                         continue
                     else:
-                        # Line is outside symbol bounds: caller is a different function in same file!
                         external_usage.append(rel)
                         continue
 
-                # Reference from a different file or symbol
                 external_usage.append(rel)
 
-            # Check if graph builder deduplication masked a coexisting same-file caller
             if not external_usage and not has_ambiguous_line_metadata:
                 for ref in project.references:
                     if (
@@ -788,7 +694,6 @@ def find_unused_candidates(
                                     )
                                 )
                             elif ref.qualified_name:
-                                # Reference explicitly names a different qualified symbol
                                 pass
                             else:
                                 has_ambiguous_same_name_reference = True
@@ -806,7 +711,6 @@ def find_unused_candidates(
                             )
 
             if not external_usage:
-                # If incoming same-file reference had ambiguous line metadata, classify conservatively
                 if has_ambiguous_line_metadata:
                     any_missing_provenance = True
                     unassessable_list.append(
@@ -849,7 +753,6 @@ def find_unused_candidates(
                     )
                     continue
 
-                # Check runtime protocol / dynamic discovery / entry-point conventions
                 is_uncertain, convention_reason = _is_convention_uncertainty(
                     symbol, file, file_path
                 )
@@ -873,7 +776,6 @@ def find_unused_candidates(
                     )
                     continue
 
-                # Confirmed apparent unused candidate
                 evidence_items: list[str] = [
                     "No external incoming references, calls, or inheritance relationships detected in AST."
                 ]
@@ -898,13 +800,11 @@ def find_unused_candidates(
                     )
                 )
 
-    # 2. Analyze files
     if include_files:
         for file in project.files:
             if file.is_ignored or file.is_generated:
                 continue
 
-            # Only analyze source files (e.g. Python modules)
             if file.extension not in (".py", ".pyi"):
                 continue
 
@@ -928,7 +828,6 @@ def find_unused_candidates(
                 )
                 continue
 
-            # Check incoming imports to this file
             incoming_file_rels = incoming_rels.get(file.id, [])
             incoming_imports = [
                 r
@@ -940,7 +839,6 @@ def find_unused_candidates(
                 and r.source_id != file.id
             ]
 
-            # Check if any symbol in this file has external usage
             symbols_in_file = [
                 s
                 for s in project.symbols
@@ -959,7 +857,6 @@ def find_unused_candidates(
                     break
 
             if not incoming_imports and not symbol_has_external_usage:
-                # Check if entry point or test file convention
                 if file.name in STANDARD_ENTRY_POINT_FILENAMES:
                     unassessable_list.append(
                         UnusedCandidateItem(
@@ -1010,7 +907,6 @@ def find_unused_candidates(
                     )
                 )
 
-    # Deterministic sort: (path, start_line or 0, name, kind)
     candidates_list.sort(
         key=lambda item: (
             item.path,
@@ -1028,7 +924,6 @@ def find_unused_candidates(
         )
     )
 
-    # Count by kind
     by_kind: dict[str, int] = defaultdict(int)
     for c in candidates_list:
         by_kind[c.kind] += 1
@@ -1052,7 +947,6 @@ def find_unused_candidates(
         by_kind=dict(by_kind),
     )
 
-    # Determine diagnostics and outcome status directly without string checks
     outcome_status = OperationStatus.SUCCESS
     outcome_message = f"Found {total_candidates_found} unused candidate(s)"
 

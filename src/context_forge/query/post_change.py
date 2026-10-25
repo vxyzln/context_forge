@@ -1,10 +1,3 @@
-"""Post-change verification workflow and orchestration.
-
-Composes repository freshness, structural comparison, changeset impact analysis,
-test recommendations, change-risk evidence, package-boundary findings, and structural
-regression rules into a consolidated post-change verification report.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -182,7 +175,6 @@ class PostChangeVerificationReport:
 
 
 def _discover_changed_paths_from_git(root: Path) -> list[str]:
-    """Attempt to discover modified or untracked paths from Git repository."""
     try:
         from context_forge.git.repository import GitRepository
 
@@ -214,7 +206,6 @@ def run_post_change_verification(
     freshness: WorkflowFreshness | None = None,
     guard: WorkflowFreshnessGuard | None = None,
 ) -> PostChangeVerificationReport:
-    """Orchestrates comprehensive post-change verification across all analysis capabilities."""
     root_path = project.root_path or Path(".")
     repo_path = root_path.as_posix()
 
@@ -222,7 +213,6 @@ def run_post_change_verification(
     workflow_limitations: list[str] = []
     incomplete_operations = 0
 
-    # 1. Freshness assessment and truthful refresh
     freshness_state_str = "current"
     refreshed = False
     freshness_guard = guard or WorkflowFreshnessGuard(root_path)
@@ -289,12 +279,10 @@ def run_post_change_verification(
         elif freshness.state == FreshnessState.INDETERMINATE:
             workflow_limitations.append("Repository freshness status is indeterminate")
 
-    # 2. Change set determination
     change_paths: list[str] = []
     if paths:
         change_paths = [str(p) for p in paths]
     else:
-        # Discover changed paths from Git
         git_discovered = _discover_changed_paths_from_git(root_path)
         if git_discovered:
             change_paths = git_discovered
@@ -310,7 +298,6 @@ def run_post_change_verification(
                 )
             )
 
-    # 3. Structural Comparison
     comparison_performed = False
     comparison_status = "not_performed"
     structural_comparison: StructuralComparisonResult | None = None
@@ -352,7 +339,6 @@ def run_post_change_verification(
                 "Structural comparison failed with an exception"
             )
     else:
-        # Explicit honesty: Before-state was not provided; comparison was not performed.
         comparison_performed = False
         comparison_status = "not_performed"
         workflow_limitations.append(
@@ -366,7 +352,6 @@ def run_post_change_verification(
             )
         )
 
-    # 4. Changeset Impact & Verification Checklist
     changeset_impact: ChangeSetImpactResult | None = None
     verification_checklist: VerificationChecklist | None = None
     resolved_inputs: tuple[ChangeSetInputResolution, ...] = ()
@@ -406,7 +391,6 @@ def run_post_change_verification(
                 "Changeset impact analysis failed with an exception"
             )
 
-    # 5. Suggested Checks (Strictly unexecuted)
     suggested_checks: list[VerificationCheckRecord] = []
 
     if verification_checklist and verification_checklist.items:
@@ -426,7 +410,6 @@ def run_post_change_verification(
             )
             suggested_checks.append(check_rec)
 
-    # 6. Change-Risk Report
     change_risk: ChangeRiskReport | None = None
     if change_paths:
         try:
@@ -460,7 +443,6 @@ def run_post_change_verification(
             workflow_diagnostics.append(diag)
             workflow_limitations.append("Change risk analysis failed with an exception")
 
-    # 7. Package Boundaries
     package_boundaries: PackageBoundaryReport | None = None
     try:
         package_boundaries = analyze_package_boundaries(
@@ -491,7 +473,6 @@ def run_post_change_verification(
             "Package boundary analysis failed with an exception"
         )
 
-    # 8. Structural Regression Rules
     regression_rules: StructuralRulesReport | None = None
     if rules:
         try:
@@ -523,7 +504,6 @@ def run_post_change_verification(
                 "Structural rule evaluation failed with an exception"
             )
 
-    # 9. Summary & Outcome Computation
     direct_count = changeset_impact.direct_count if changeset_impact else 0
     downstream_count = changeset_impact.downstream_count if changeset_impact else 0
     associated_tests = (
@@ -549,7 +529,6 @@ def run_post_change_verification(
         incomplete_operations_count=incomplete_operations,
     )
 
-    # Compute overall workflow status
     has_blockers = any(
         d.severity == DiagnosticSeverity.BLOCKER for d in workflow_diagnostics
     )
@@ -625,7 +604,6 @@ def run_post_change_verification(
         overall_status = OperationStatus.SUCCESS
         overall_msg = "Post-change verification completed cleanly"
 
-    # Deduplicate diagnostics preserving order
     seen_diag: set[tuple[str, str, str | None]] = set()
     dedup_diagnostics: list[DiagnosticItem] = []
     for d in workflow_diagnostics:

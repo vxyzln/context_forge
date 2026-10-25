@@ -1,5 +1,3 @@
-"""Tests for change-risk evidence report."""
-
 from __future__ import annotations
 
 import json
