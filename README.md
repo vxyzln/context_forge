@@ -1,13 +1,16 @@
 # Context Forge
 
 - [![Architecture diagram on Git](https://gitdiagram.com/diagram-badge.svg)](https://gitdiagram.com/vxyzln/context_forge?utm_source=readme&utm_medium=badge)
-
 - [Context Forge on Stardance Project](https://stardance.hackclub.com/projects/52744)
 - [Context Forge on PyPI](https://pypi.org/project/context-forge-local/)
 
 **Context Forge** is a local-first command-line interface (CLI) tool built in Python that helps developers understand and navigate Python repositories. It analyzes code structure, records supported relationships between code elements, and provides commands to explore symbols, dependencies, repository architecture, and potential change impacts. Repository information is stored locally using SQLite, allowing supported commands to reuse persisted analysis data during development.
 
 Context Forge is designed to support repository exploration and change investigation. It provides evidence to help developers make informed decisions; it does not replace code review, testing, or developer judgment.
+
+# Context Forge v1.0.1 — Main Release
+
+Version `1.0.0` was the initial test release. Version `1.0.1` is the main release, which has  the finalized project documentation and updated PyPI package metadata.
 
 ## Table of Contents
 
