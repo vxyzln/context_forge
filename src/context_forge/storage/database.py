@@ -155,6 +155,24 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_imports_file
                 ON imports(file_id);
+
+                CREATE TABLE IF NOT EXISTS execution_history (
+                    id TEXT PRIMARY KEY,
+                    command TEXT NOT NULL,
+                    repository_path TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    duration_seconds REAL,
+                    outcome TEXT NOT NULL,
+                    error_type TEXT,
+                    error_message TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_execution_history_order
+                ON execution_history(started_at DESC, id DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_execution_history_repo
+                ON execution_history(repository_path, started_at DESC);
                 """
             )
 

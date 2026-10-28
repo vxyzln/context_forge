@@ -2066,3 +2066,265 @@ def test_is_missing_imports_table_error_matches_exact_table_only(
 ) -> None:
     exc = sqlite3.OperationalError(message)
     assert _is_missing_imports_table_error(exc) is expected
+
+
+def test_database_initializes_execution_history_table(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    db.initialize()
+
+    with db.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert "execution_history" in tables
+
+
+def test_existing_database_remains_compatible_with_execution_history(
+    tmp_path: Path,
+) -> None:
+    db_file = tmp_path / "legacy.db"
+    # Create a database with only the projects table
+    with sqlite3.connect(db_file) as conn:
+        conn.execute(
+            """
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                root_path TEXT NOT NULL,
+                analysis_status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO projects VALUES ('p1', 'proj', '/tmp', 'analyzed', '2026-01-01', '2026-01-01')"
+        )
+
+    # Initialize should upgrade schema non-destructively
+    db = Database(db_file)
+    db.initialize()
+
+    with db.connect() as conn:
+        row = conn.execute("SELECT name FROM projects WHERE id='p1'").fetchone()
+        assert row[0] == "proj"
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "execution_history" in tables
+
+
+def test_execution_history_records_independent_runs_and_outcomes(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "test.db")
+    repo = ProjectRepository(db)
+
+    # Run 1: success
+    id1 = repo.record_execution_start("analyze", tmp_path)
+    repo.record_execution_finish(
+        execution_id=id1,
+        outcome="success",
+        duration_seconds=1.234,
+        finished_at="2026-10-28T10:00:02+00:00",
+    )
+
+    # Run 2: failed
+    id2 = repo.record_execution_start("refresh", tmp_path)
+    repo.record_execution_finish(
+        execution_id=id2,
+        outcome="failed",
+        duration_seconds=0.456,
+        finished_at="2026-10-28T10:00:05+00:00",
+        error_type="RuntimeError",
+        error_message="corrupt AST",
+    )
+
+    # Run 3: incomplete (process terminated before finish)
+    id3 = repo.record_execution_start("analyze", tmp_path)
+
+    history = repo.get_execution_history(repository_path=tmp_path, limit=10)
+    assert len(history) == 3
+
+    # All three executions are retained independently
+    ids = {rec.id for rec in history}
+    assert ids == {id1, id2, id3}
+
+    rec1 = next(r for r in history if r.id == id1)
+    assert rec1.command == "analyze"
+    assert rec1.outcome == "success"
+    assert rec1.duration_seconds == 1.234
+    assert rec1.finished_at == "2026-10-28T10:00:02+00:00"
+
+    rec2 = next(r for r in history if r.id == id2)
+    assert rec2.command == "refresh"
+    assert rec2.outcome == "failed"
+    assert rec2.error_type == "RuntimeError"
+    assert rec2.error_message == "corrupt AST"
+
+    rec3 = next(r for r in history if r.id == id3)
+    assert rec3.command == "analyze"
+    assert rec3.outcome == "incomplete"
+    assert rec3.finished_at is None
+    assert rec3.duration_seconds is None
+
+
+def test_execution_history_repository_isolation(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    repo = ProjectRepository(db)
+
+    repo_a = tmp_path / "repo_a"
+    repo_b = tmp_path / "repo_b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+
+    id_a = repo.record_execution_start("analyze", repo_a)
+    repo.record_execution_finish(id_a, outcome="success")
+
+    id_b = repo.record_execution_start("refresh", repo_b)
+    repo.record_execution_finish(id_b, outcome="success")
+
+    history_a = repo.get_execution_history(repository_path=repo_a)
+    history_b = repo.get_execution_history(repository_path=repo_b)
+
+    assert len(history_a) == 1
+    assert history_a[0].id == id_a
+    assert history_a[0].repository_path == str(repo_a.resolve())
+
+    assert len(history_b) == 1
+    assert history_b[0].id == id_b
+    assert history_b[0].repository_path == str(repo_b.resolve())
+
+
+def test_execution_history_deterministic_ordering(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    repo = ProjectRepository(db)
+
+    # Insert executions with distinct and tied timestamps
+    id_old = repo.record_execution_start(
+        "analyze",
+        tmp_path,
+        execution_id="id-001",
+        started_at="2026-10-28T10:00:00+00:00",
+    )
+    id_mid1 = repo.record_execution_start(
+        "analyze",
+        tmp_path,
+        execution_id="id-002",
+        started_at="2026-10-28T10:00:01+00:00",
+    )
+    id_mid2 = repo.record_execution_start(
+        "analyze",
+        tmp_path,
+        execution_id="id-003",
+        started_at="2026-10-28T10:00:01+00:00",
+    )
+    id_new = repo.record_execution_start(
+        "analyze",
+        tmp_path,
+        execution_id="id-004",
+        started_at="2026-10-28T10:00:02+00:00",
+    )
+
+    history = repo.get_execution_history(repository_path=tmp_path, limit=10)
+    returned_ids = [r.id for r in history]
+
+    # Newest first; on timestamp tie, deterministic id tie-break (DESC)
+    assert returned_ids == [id_new, id_mid2, id_mid1, id_old]
+
+
+def test_execution_history_invalid_limit(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    repo = ProjectRepository(db)
+
+    with pytest.raises(ValueError, match="History limit must be a positive integer"):
+        repo.get_execution_history(limit=0)
+
+    with pytest.raises(ValueError, match="History limit must be a positive integer"):
+        repo.get_execution_history(limit=-5)
+
+    with pytest.raises(ValueError, match="History limit must be a positive integer"):
+        repo.get_execution_history(limit=True)  # type: ignore[arg-type]
+
+
+def test_execution_history_read_only_does_not_create_database(
+    tmp_path: Path,
+) -> None:
+    non_existent = tmp_path / "does_not_exist.db"
+    assert not non_existent.exists()
+
+    db = Database(non_existent)
+    repo = ProjectRepository(db)
+
+    # Calling get_execution_history must return empty list without creating the database file
+    history = repo.get_execution_history(repository_path=tmp_path)
+    assert history == []
+    assert not non_existent.exists()
+
+
+def test_execution_history_error_message_bounding(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    repo = ProjectRepository(db)
+
+    long_error = "x" * 1500
+    exec_id = repo.record_execution_start("analyze", tmp_path)
+    repo.record_execution_finish(
+        exec_id,
+        outcome="failed",
+        error_type="MassiveError",
+        error_message=long_error,
+    )
+
+    history = repo.get_execution_history(repository_path=tmp_path)
+    assert len(history) == 1
+    assert len(history[0].error_message) == 500
+    assert history[0].error_message == "x" * 500
+
+
+def test_record_execution_finish_nonexistent_id_and_invalid_outcome(
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "test.db")
+    repo = ProjectRepository(db)
+    valid_id = repo.record_execution_start("analyze", tmp_path)
+
+    with pytest.raises(KeyError, match="Execution record not found"):
+        repo.record_execution_finish("nonexistent-id", outcome="success")
+
+    # Valid execution must remain untouched in incomplete state
+    history = repo.get_execution_history(repository_path=tmp_path)
+    assert len(history) == 1
+    assert history[0].id == valid_id
+    assert history[0].outcome == "incomplete"
+
+    with pytest.raises(ValueError, match="Invalid execution outcome"):
+        repo.record_execution_finish(valid_id, outcome="bogus_outcome")
+
+
+def test_get_execution_history_legacy_database_without_table_is_read_only(
+    tmp_path: Path,
+) -> None:
+    db_file = tmp_path / "legacy.db"
+    with sqlite3.connect(db_file) as conn:
+        conn.execute("CREATE TABLE dummy (id TEXT PRIMARY KEY, val TEXT)")
+        conn.execute("INSERT INTO dummy VALUES ('1', 'hello')")
+
+    repo = ProjectRepository(Database(db_file))
+    history = repo.get_execution_history(repository_path=tmp_path)
+    assert history == []
+
+    # Verify no execution_history table was created
+    with sqlite3.connect(db_file) as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert "execution_history" not in tables

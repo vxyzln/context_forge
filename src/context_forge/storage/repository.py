@@ -1,8 +1,8 @@
 import json
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from context_forge.git.models import GitActivitySummary
 from context_forge.models.directory import Directory
@@ -17,6 +17,7 @@ from context_forge.storage.cache import (
     CACHE_SCHEMA_VERSION,
     CacheFreshness,
     CacheInvalidation,
+    ExecutionRecord,
     FileFingerprint,
     RepositoryCacheMetadata,
     determine_cache_invalidation,
@@ -1007,3 +1008,127 @@ class ProjectRepository:
         project.errors.extend(row["message"] for row in error_rows)
 
         return project
+
+    def record_execution_start(
+        self,
+        command: str,
+        repository_path: Path | str,
+        execution_id: str | None = None,
+        started_at: str | None = None,
+    ) -> str:
+        self.database.initialize()
+        record_id = execution_id or str(uuid4())
+        timestamp = started_at or datetime.now(UTC).isoformat()
+        resolved_repo = str(Path(repository_path).resolve())
+
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO execution_history (
+                    id, command, repository_path, started_at, outcome
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (record_id, command, resolved_repo, timestamp, "incomplete"),
+            )
+            connection.commit()
+
+        return record_id
+
+    def record_execution_finish(
+        self,
+        execution_id: str,
+        outcome: str,
+        duration_seconds: float | None = None,
+        finished_at: str | None = None,
+        error_type: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        if outcome not in {"success", "failed", "interrupted"}:
+            raise ValueError(f"Invalid execution outcome: {outcome!r}")
+
+        timestamp = finished_at or datetime.now(UTC).isoformat()
+        bounded_message = error_message[:500] if error_message else None
+
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE execution_history
+                SET finished_at = ?,
+                    duration_seconds = ?,
+                    outcome = ?,
+                    error_type = ?,
+                    error_message = ?
+                WHERE id = ?
+                """,
+                (
+                    timestamp,
+                    duration_seconds,
+                    outcome,
+                    error_type,
+                    bounded_message,
+                    execution_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"Execution record not found: {execution_id}")
+            connection.commit()
+
+    def get_execution_history(
+        self,
+        repository_path: Path | str | None = None,
+        limit: int = 10,
+    ) -> list[ExecutionRecord]:
+        if isinstance(limit, bool) or limit < 1:
+            raise ValueError("History limit must be a positive integer")
+
+        if not self.database.path.exists():
+            return []
+
+        try:
+            with self.database.connect() as connection:
+                if repository_path is not None:
+                    resolved_repo = str(Path(repository_path).resolve())
+                    cursor = connection.execute(
+                        """
+                        SELECT id, command, repository_path, started_at,
+                               finished_at, duration_seconds, outcome,
+                               error_type, error_message
+                        FROM execution_history
+                        WHERE repository_path = ?
+                        ORDER BY started_at DESC, id DESC
+                        LIMIT ?
+                        """,
+                        (resolved_repo, limit),
+                    )
+                else:
+                    cursor = connection.execute(
+                        """
+                        SELECT id, command, repository_path, started_at,
+                               finished_at, duration_seconds, outcome,
+                               error_type, error_message
+                        FROM execution_history
+                        ORDER BY started_at DESC, id DESC
+                        LIMIT ?
+                        """,
+                        (limit,),
+                    )
+                rows = cursor.fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table: execution_history" in str(exc):
+                return []
+            raise
+
+        return [
+            ExecutionRecord(
+                id=row["id"],
+                command=row["command"],
+                repository_path=row["repository_path"],
+                started_at=row["started_at"],
+                finished_at=row["finished_at"],
+                duration_seconds=row["duration_seconds"],
+                outcome=row["outcome"],
+                error_type=row["error_type"],
+                error_message=row["error_message"],
+            )
+            for row in rows
+        ]

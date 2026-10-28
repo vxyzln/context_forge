@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 CACHE_SCHEMA_VERSION = 2
@@ -60,6 +61,32 @@ class CacheInvalidation:
     full: bool
     paths: frozenset[Path]
     reason: str
+
+
+@dataclass(frozen=True)
+class ExecutionRecord:
+    id: str
+    command: str
+    repository_path: str
+    started_at: str
+    outcome: str
+    finished_at: str | None = None
+    duration_seconds: float | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command": self.command,
+            "duration_seconds": self.duration_seconds,
+            "error_message": self.error_message,
+            "error_type": self.error_type,
+            "finished_at": self.finished_at,
+            "id": self.id,
+            "outcome": self.outcome,
+            "repository_path": self.repository_path,
+            "started_at": self.started_at,
+        }
 
 
 def validate_cache_freshness(
