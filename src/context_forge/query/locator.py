@@ -106,6 +106,19 @@ class SourceExcerpt:
         }
 
 
+def _module_parts(file: File) -> list[str]:
+    parts = list(file.path.parts)
+    if not parts:
+        return []
+    filename = parts.pop()
+    if filename != "__init__.py" and filename.endswith(".py"):
+        parts.append(filename[:-3])
+
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+    return parts
+
+
 def locate_symbol(
     project: Project,
     name: str,
@@ -129,12 +142,27 @@ def locate_symbol(
 
     files_by_id: dict[UUID, File] = {f.id: f for f in project.files}
 
+    def _matches_qualified(s: Symbol, q: str) -> bool:
+        s_qual = getattr(s, "qualified_name", None)
+        if s_qual == q:
+            return True
+        f = files_by_id.get(s.file_id)
+        if f is not None and hasattr(f, "path"):
+            mod = ".".join(_module_parts(f))
+            if mod:
+                symbol_qual = s_qual if s_qual else getattr(s, "name", "")
+                if f"{mod}.{symbol_qual}" == q:
+                    return True
+        return False
+
     candidate_symbols: list[Symbol]
     if qualified_name is not None:
         q_target = qualified_name.strip()
-        candidate_symbols = [s for s in project.symbols if s.qualified_name == q_target]
+        candidate_symbols = [
+            s for s in project.symbols if _matches_qualified(s, q_target)
+        ]
     elif "." in query:
-        q_matches = [s for s in project.symbols if s.qualified_name == query]
+        q_matches = [s for s in project.symbols if _matches_qualified(s, query)]
         if q_matches:
             candidate_symbols = q_matches
         else:
@@ -179,6 +207,11 @@ def locate_symbol(
         candidate_symbols = [
             s for s in candidate_symbols if s.kind.lower() == target_type
         ]
+
+    if symbol_type is None or symbol_type.strip().lower() != "import":
+        defs = [s for s in candidate_symbols if getattr(s, "kind", "") != "import"]
+        if defs:
+            candidate_symbols = defs
 
     if not candidate_symbols:
         filter_details: list[str] = []

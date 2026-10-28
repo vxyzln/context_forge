@@ -335,13 +335,8 @@ def _module_parts(file: File) -> list[str]:
     if filename != "__init__.py" and filename.endswith(".py"):
         parts.append(filename[:-3])
 
-    package_start = None
-    for index, part in enumerate(parts):
-        if part == "src":
-            package_start = index + 1
-            break
-    if package_start is not None:
-        parts = parts[package_start:]
+    if parts and parts[0] == "src":
+        parts = parts[1:]
     return parts
 
 
@@ -444,8 +439,21 @@ def resolve_impact_target(
 
     matching_symbols: list[Symbol] = []
 
+    def _matches_qualified(s: Symbol, q: str) -> bool:
+        s_qual = getattr(s, "qualified_name", None)
+        if s_qual == q:
+            return True
+        f = files_by_id.get(s.file_id)
+        if f is not None and hasattr(f, "path"):
+            mod = ".".join(_module_parts(f))
+            if mod:
+                symbol_qual = s_qual if s_qual else getattr(s, "name", "")
+                if f"{mod}.{symbol_qual}" == q:
+                    return True
+        return False
+
     if "." in query:
-        qualified_matches = [s for s in project.symbols if s.qualified_name == query]
+        qualified_matches = [s for s in project.symbols if _matches_qualified(s, query)]
         if qualified_matches:
             matching_symbols = qualified_matches
         else:
@@ -480,6 +488,13 @@ def resolve_impact_target(
                         kind="file",
                     ),
                 )
+
+    if matching_symbols:
+        defs = [s for s in matching_symbols if getattr(s, "kind", "") != "import"]
+        if defs:
+            matching_symbols = defs
+        elif any(getattr(s, "kind", "") == "import" for s in matching_symbols):
+            matching_symbols = []
 
     if not matching_symbols:
         return TargetResolution(
