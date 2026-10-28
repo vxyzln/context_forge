@@ -92,7 +92,21 @@ class ProjectQuery:
         self.project = project
 
     def get_file(self, path: str) -> File | None:
-        normalized_path = path.replace("\\", "/")
+        normalized_path = path.replace("\\", "/").strip()
+        normalized_path = normalized_path.removeprefix("./")
+
+        root_path = getattr(self.project, "root_path", None)
+        if root_path is not None:
+            as_path = Path(path)
+            if as_path.is_absolute():
+                try:
+                    normalized_path = (
+                        as_path.resolve()
+                        .relative_to(Path(root_path).resolve())
+                        .as_posix()
+                    )
+                except ValueError:
+                    return None
 
         for file in self.project.files:
             if file.path.as_posix() == normalized_path:
