@@ -1522,10 +1522,12 @@ def test_memory_file_reports_missing_file(
             return_value=(type("Project", (), {"files": [], "symbols": []})(), None),
         ),
         patch("context_forge.main.ProjectQuery") as query_mock,
+        pytest.raises(SystemExit) as exc_info,
     ):
         query_mock.return_value.get_file.return_value = None
         main()
 
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
 
     assert captured.err == ""
@@ -1607,6 +1609,7 @@ def test_memory_symbol_reports_all_matching_definitions(
             return_value=(project, None),
         ),
         patch("context_forge.main.ProjectQuery") as query_mock,
+        pytest.raises(SystemExit) as exc_info,
     ):
         query_mock.return_value.find_symbols.return_value = [
             symbol_one,
@@ -1614,6 +1617,7 @@ def test_memory_symbol_reports_all_matching_definitions(
         ]
         main()
 
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
 
     assert captured.err == ""
@@ -1936,10 +1940,12 @@ def test_memory_references_reports_missing_symbol(
             return_value=(project, None),
         ),
         patch("context_forge.main.ProjectQuery") as query_mock,
+        pytest.raises(SystemExit) as exc_info,
     ):
         query_mock.return_value.find_symbols.return_value = []
         main()
 
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
 
     assert captured.err == ""
@@ -2664,8 +2670,10 @@ def test_memory_file_json_reports_missing_file(
         ],
     )
 
-    main()
+    with pytest.raises(SystemExit) as exc_info:
+        main()
 
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
@@ -2705,8 +2713,10 @@ def test_memory_symbol_json_reports_no_matches(
         ],
     )
 
-    main()
+    with pytest.raises(SystemExit) as exc_info:
+        main()
 
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
@@ -2949,8 +2959,10 @@ def test_memory_symbol_json_returns_ordered_matches(
         ],
     )
 
-    main()
+    with pytest.raises(SystemExit) as exc_info:
+        main()
 
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
@@ -3010,10 +3022,12 @@ def test_memory_references_json_reports_missing_symbol(
             return_value=(project, None),
         ),
         patch("context_forge.main.ProjectQuery") as query_mock,
+        pytest.raises(SystemExit) as exc_info,
     ):
         query_mock.return_value.find_symbols.return_value = []
         main()
 
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
@@ -3905,32 +3919,40 @@ def test_impact_command_missing_target(
         main()
     capsys.readouterr()
 
-    with patch.object(
-        sys,
-        "argv",
-        ["context-forge", "impact", "nonexistent_target", str(tmp_path)],
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "impact", "nonexistent_target", str(tmp_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
     ):
         main()
 
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
     assert captured.err == ""
     assert "Status: Target not found." in captured.out
     assert "not found in repository" in captured.out
 
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "context-forge",
-            "impact",
-            "nonexistent_target",
-            str(tmp_path),
-            "--format",
-            "json",
-        ],
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "context-forge",
+                "impact",
+                "nonexistent_target",
+                str(tmp_path),
+                "--format",
+                "json",
+            ],
+        ),
+        pytest.raises(SystemExit) as exc_info,
     ):
         main()
 
+    assert exc_info.value.code == 1
     json_captured = capsys.readouterr()
     data = json.loads(json_captured.out)
     assert data["status"] == "not_found"
@@ -3948,25 +3970,34 @@ def test_impact_command_ambiguous_target(
         main()
     capsys.readouterr()
 
-    with patch.object(
-        sys,
-        "argv",
-        ["context-forge", "impact", "Config", str(tmp_path)],
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "impact", "Config", str(tmp_path)],
+        ),
+        pytest.raises(SystemExit) as exc_info,
     ):
         main()
 
+    assert exc_info.value.code == 1
     captured = capsys.readouterr()
     assert captured.err == ""
     assert "Status: Ambiguous target." in captured.out
     assert "Candidates (2):" in captured.out
     assert "[class] Config" in captured.out
 
-    with patch.object(
-        sys,
-        "argv",
-        ["context-forge", "impact", "Config", str(tmp_path), "--format", "json"],
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "impact", "Config", str(tmp_path), "--format", "json"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
     ):
         main()
+
+    assert exc_info.value.code == 1
 
     json_captured = capsys.readouterr()
     data = json.loads(json_captured.out)

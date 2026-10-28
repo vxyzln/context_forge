@@ -49,6 +49,7 @@ from context_forge.query.impact import (
 )
 from context_forge.query.locator import (
     DEFAULT_EXCERPT_MAX_LINES,
+    _module_parts,
     get_source_evidence,
     locate_and_get_evidence,
 )
@@ -1126,56 +1127,41 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _is_likely_project_path(arg: str, recognized_commands: set[str]) -> bool:
+    if not arg or arg.startswith("-") or arg in recognized_commands:
+        return False
+    if (
+        arg in {".", ".."}
+        or arg.startswith(("./", "../", "/", "~/", "~"))
+        or "/" in arg
+        or "\\" in arg
+    ):
+        return True
+    try:
+        return Path(arg).expanduser().is_dir()
+    except (OSError, ValueError):
+        return False
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if argv is None:
         argv = sys.argv[1:]
 
-    if argv and argv[0] not in {
-        "analyze",
-        "refresh",
-        "context",
-        "status",
-        "cache",
-        "history",
-        "execution-history",
-        "inspect",
-        "memory",
-        "diagnostics",
-        "architecture",
-        "impact",
-        "changeset",
-        "change-set",
-        "path",
-        "query-path",
-        "health",
-        "preflight",
-        "locate",
-        "inspect-change",
-        "pre-change",
-        "risk",
-        "change-risk",
-        "package-boundaries",
-        "package-boundary",
-        "boundaries",
-        "post-change",
-        "verify-change",
-        "post_change",
-        "verify",
-        "rules",
-        "evaluate-rules",
-        "check-rules",
-        "unused",
-        "unused-entities",
-        "find-unused",
-        "logo",
-        "--logo",
-        "-h",
-        "--help",
-    }:
+    parser = create_parser()
+
+    subparsers_action = next(
+        (a for a in parser._actions if isinstance(a, argparse._SubParsersAction)),
+        None,
+    )
+    recognized_commands: set[str] = (
+        set(subparsers_action.choices.keys()) if subparsers_action else set()
+    )
+
+    if argv and _is_likely_project_path(argv[0], recognized_commands):
         # Default a bare repository path to the status command.
         argv = ["status", *argv]
 
-    return create_parser().parse_args(argv)
+    return parser.parse_args(argv)
 
 
 def resolve_project_path(path: Path) -> Path:
@@ -1890,16 +1876,22 @@ def run_memory_file(
                     "requested_path": normalized_file_path,
                 }
             )
-            return
+            raise SystemExit(1)
 
         print(f"Repository: {root}")
         print(f"File: {normalized_file_path}")
         print("File not found.")
-        return
+        raise SystemExit(1)
 
     symbols = sorted(
         query.find_symbols_in_file(file.id),
         key=lambda symbol: (symbol.start_line, symbol.name),
+    )
+
+    resolved_path = (
+        file.path.as_posix()
+        if hasattr(file, "path") and hasattr(file.path, "as_posix")
+        else str(getattr(file, "path", normalized_file_path))
     )
 
     if output_format == "json":
@@ -1908,7 +1900,7 @@ def run_memory_file(
                 "file": {
                     "extension": file.extension,
                     "name": file.name,
-                    "path": normalized_file_path,
+                    "path": resolved_path,
                     "size": int(file.size),
                     "symbols": [
                         {
@@ -1976,18 +1968,39 @@ def run_memory_symbol(
     )
     query = ProjectQuery(project)
 
+    files_by_id = {file.id: file for file in getattr(project, "files", [])}
+
+    def _matches_qualified(s: Any, q: str) -> bool:
+        s_qual = getattr(s, "qualified_name", None)
+        if s_qual == q:
+            return True
+        f = files_by_id.get(s.file_id)
+        if f is not None and hasattr(f, "path"):
+            mod = ".".join(_module_parts(f))
+            if mod:
+                symbol_qual = s_qual if s_qual else getattr(s, "name", "")
+                if f"{mod}.{symbol_qual}" == q:
+                    return True
+        return False
+
     if "." in normalized_name:
         symbols = query.find_symbols_by_qualified_name(normalized_name)
-        if not symbols:
-            symbols = query.find_symbols(normalized_name)
+        if not symbols or all(getattr(s, "kind", "") == "import" for s in symbols):
+            module_matches = [
+                s
+                for s in getattr(project, "symbols", [])
+                if _matches_qualified(s, normalized_name)
+            ]
+            if module_matches:
+                symbols = module_matches
+            elif not symbols:
+                symbols = query.find_symbols(normalized_name)
     else:
         symbols = query.find_symbols(normalized_name)
 
-    files_by_id = {file.id: file for file in project.files}
-
     if file_path is not None:
         raw_fp = file_path.strip().replace("\\", "/").removeprefix("./")
-        if project.root_path is not None:
+        if getattr(project, "root_path", None) is not None:
             as_p = Path(raw_fp)
             if as_p.is_absolute():
                 try:
@@ -2000,27 +2013,50 @@ def run_memory_symbol(
             for s in symbols
             if s.file_id in files_by_id
             and (
-                files_by_id[s.file_id].path.as_posix() == raw_fp
-                or (is_basename and files_by_id[s.file_id].name == raw_fp)
+                (
+                    hasattr(files_by_id[s.file_id].path, "as_posix")
+                    and files_by_id[s.file_id].path.as_posix() == raw_fp
+                )
+                or str(files_by_id[s.file_id].path) == raw_fp
+                or (
+                    is_basename
+                    and getattr(files_by_id[s.file_id], "name", "") == raw_fp
+                )
             )
         ]
 
     if symbol_type is not None:
         target_kind = symbol_type.strip().lower()
-        symbols = [s for s in symbols if s.kind.lower() == target_kind]
+        symbols = [
+            s
+            for s in symbols
+            if getattr(s.kind, "value", s.kind).lower() == target_kind
+        ]
+
+    if symbol_type is None or symbol_type.strip().lower() != "import":
+        defs = [s for s in symbols if getattr(s, "kind", "") != "import"]
+        if defs:
+            symbols = defs
 
     symbols = sorted(
         symbols,
         key=lambda symbol: (
-            files_by_id[symbol.file_id].path if symbol.file_id in files_by_id else "",
-            symbol.start_line,
+            files_by_id[symbol.file_id].path.as_posix()
+            if symbol.file_id in files_by_id
+            and hasattr(files_by_id[symbol.file_id].path, "as_posix")
+            else str(files_by_id[symbol.file_id].path)
+            if symbol.file_id in files_by_id
+            else "",
+            getattr(symbol, "start_line", 0) or 0,
             symbol.name,
         ),
     )
 
     evidence_dict = None
-    if excerpt and symbols:
-        evidence = get_source_evidence(project, symbols[0], max_lines=max_lines)
+    if excerpt and len(symbols) == 1:
+        evidence = get_source_evidence(
+            project, symbols[0], root_path=root, max_lines=max_lines
+        )
         evidence_dict = evidence.to_dict()
 
     if output_format == "json":
@@ -2031,7 +2067,10 @@ def run_memory_symbol(
                     "kind": getattr(symbol.kind, "value", symbol.kind),
                     "name": symbol.name,
                     "path": (
-                        str(files_by_id[symbol.file_id].path)
+                        files_by_id[symbol.file_id].path.as_posix()
+                        if symbol.file_id in files_by_id
+                        and hasattr(files_by_id[symbol.file_id].path, "as_posix")
+                        else str(files_by_id[symbol.file_id].path)
                         if symbol.file_id in files_by_id
                         else None
                     ),
@@ -2044,9 +2083,11 @@ def run_memory_symbol(
             "query": normalized_name,
             "repository": str(root),
         }
-        if excerpt:
+        if excerpt and len(symbols) == 1:
             payload["excerpt"] = evidence_dict
         _emit_json(payload)
+        if len(symbols) != 1:
+            raise SystemExit(1)
         return
 
     print(f"Repository: {root}")
@@ -2055,7 +2096,7 @@ def run_memory_symbol(
 
     if not symbols:
         print("No matching symbol found.")
-        return
+        raise SystemExit(1)
 
     if len(symbols) > 1:
         print("Multiple definitions found:")
@@ -2065,13 +2106,20 @@ def run_memory_symbol(
         print(f"- [{symbol.kind}] {display_name}")
 
         file = files_by_id.get(symbol.file_id)
-        print(f"  Path: {file.path if file else 'Unknown'}")
+        path_str = (
+            file.path.as_posix()
+            if file and hasattr(file.path, "as_posix")
+            else str(file.path)
+            if file
+            else "Unknown"
+        )
+        print(f"  Path: {path_str}")
         print(f"  Lines: {symbol.start_line}-{symbol.end_line}")
 
         if symbol.signature:
             print(f"  Signature: {symbol.signature}")
 
-        if excerpt and evidence_dict is not None and symbol == symbols[0]:
+        if excerpt and evidence_dict is not None and len(symbols) == 1:
             print(
                 f"  Source excerpt (lines {evidence_dict['start_line']}-{evidence_dict['end_line']}):"
             )
@@ -2081,6 +2129,9 @@ def run_memory_symbol(
                 print(f"    [Truncated to {evidence_dict['total_lines']} lines]")
             if evidence_dict.get("status") == "stale_location":
                 print(f"    Warning: {evidence_dict['message']}")
+
+    if len(symbols) > 1:
+        raise SystemExit(1)
 
 
 def run_locate(
@@ -2201,12 +2252,43 @@ def run_inspect_change(
 
 
 def _find_memory_symbols(query: ProjectQuery, name: str):
+    project = getattr(query, "project", None)
+    files_by_id = {file.id: file for file in getattr(project, "files", [])}
+
+    def _matches_qualified(s: Any, q: str) -> bool:
+        s_qual = getattr(s, "qualified_name", None)
+        if s_qual == q:
+            return True
+        f = files_by_id.get(s.file_id)
+        if f is not None and hasattr(f, "path"):
+            mod = ".".join(_module_parts(f))
+            if mod:
+                symbol_qual = s_qual if s_qual else getattr(s, "name", "")
+                if f"{mod}.{symbol_qual}" == q:
+                    return True
+        return False
+
     if "." in name:
         symbols = query.find_symbols_by_qualified_name(name)
-        if symbols:
-            return symbols
+        if (
+            not symbols or all(getattr(s, "kind", "") == "import" for s in symbols)
+        ) and project is not None:
+            module_matches = [
+                s
+                for s in getattr(project, "symbols", [])
+                if _matches_qualified(s, name)
+            ]
+            if module_matches:
+                defs = [s for s in module_matches if getattr(s, "kind", "") != "import"]
+                return defs or module_matches
 
-    return query.find_symbols(name)
+        if symbols:
+            defs = [s for s in symbols if getattr(s, "kind", "") != "import"]
+            return defs or symbols
+
+    symbols = query.find_symbols(name)
+    defs = [s for s in symbols if getattr(s, "kind", "") != "import"]
+    return defs or symbols
 
 
 def _relationship_type_name(relationship) -> str:
@@ -2386,7 +2468,7 @@ def run_memory_references(
                     "references": [],
                 }
             )
-            return
+            raise SystemExit(1)
 
         if len(symbols) > 1:
             matches = sorted(
@@ -2394,8 +2476,11 @@ def run_memory_references(
                 key=lambda item: (
                     files_by_id[item.file_id].path.as_posix()
                     if item.file_id in files_by_id
+                    and hasattr(files_by_id[item.file_id].path, "as_posix")
+                    else str(files_by_id[item.file_id].path)
+                    if item.file_id in files_by_id
                     else "",
-                    item.start_line,
+                    getattr(item, "start_line", 0) or 0,
                     item.name,
                 ),
             )
@@ -2410,7 +2495,7 @@ def run_memory_references(
                     "references": [],
                 }
             )
-            return
+            raise SystemExit(1)
 
         symbol = symbols[0]
         relationships = query.get_incoming_relationships(
@@ -2422,9 +2507,12 @@ def run_memory_references(
             key=lambda item: (
                 files_by_id[item.source_id].path.as_posix()
                 if item.source_id in files_by_id
+                and hasattr(files_by_id[item.source_id].path, "as_posix")
+                else str(files_by_id[item.source_id].path)
+                if item.source_id in files_by_id
                 else "",
                 _relationship_line_number(item.metadata.get("line", "0")),
-                item.id.hex,
+                item.id.hex if hasattr(item.id, "hex") else str(item.id),
             ),
         )
 
@@ -2448,13 +2536,13 @@ def run_memory_references(
 
     if not symbols:
         print("No matching symbol found.")
-        return
+        raise SystemExit(1)
 
     if len(symbols) > 1:
         print("Multiple definitions found:")
         _print_matching_symbols(symbols, files_by_id)
         print("Use a qualified name to narrow the results.")
-        return
+        raise SystemExit(1)
 
     symbol = symbols[0]
     relationships = query.get_incoming_relationships(
@@ -3138,6 +3226,8 @@ def run_impact(
 
     if output_format == "json":
         _emit_json(result.to_dict())
+        if result.status != "resolved":
+            raise SystemExit(1)
         return
 
     print(f"Repository: {root_path}")
@@ -3146,7 +3236,7 @@ def run_impact(
     if result.status == "not_found":
         print("Status: Target not found.")
         print(f"Message: {result.message}")
-        return
+        raise SystemExit(1)
 
     if result.status == "ambiguous":
         print("Status: Ambiguous target.")
@@ -3160,7 +3250,7 @@ def run_impact(
             )
             qual = f" ({candidate.qualified_name})" if candidate.qualified_name else ""
             print(f"  - [{candidate.kind}] {candidate.name}{qual} at {loc}")
-        return
+        raise SystemExit(1)
 
     assert result.target is not None
     tgt = result.target
