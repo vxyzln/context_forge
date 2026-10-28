@@ -303,6 +303,159 @@ def test_analyze_command_reports_failure(
     log_failed.assert_called_once()
 
 
+def test_analyze_command_succeeds_even_when_operational_logging_fails(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": Path("/tmp/project"),
+            "files": [1, 2, 3],
+            "symbols": [1, 2],
+            "relationships": [1, 2, 3, 4],
+            "analysis_status": "analyzed",
+        },
+    )()
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", "."]),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch(
+            "context_forge.operational_logging.global_config_directory",
+            side_effect=PermissionError("permission denied on log directory"),
+        ),
+    ):
+        analyzer.return_value.analyze.return_value = project
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.out == (
+        "Analyzed: /tmp/project\n"
+        "Files: 3\n"
+        "Symbols: 2\n"
+        "Relationships: 4\n"
+        "Status: analyzed\n"
+    )
+    assert captured.err == ""
+
+
+def test_analyze_command_preserves_analysis_failure_when_logging_fails(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", "."]),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch(
+            "context_forge.operational_logging.global_config_directory",
+            side_effect=PermissionError("permission denied on log directory"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        analyzer.return_value.analyze.side_effect = RuntimeError("AST parse error")
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Error: AST parse error\n"
+
+
+def test_analyze_command_succeeds_even_when_record_write_fails(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from logging.handlers import RotatingFileHandler
+
+    from context_forge.operational_logging import get_logger
+
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": Path("/tmp/project"),
+            "files": [1, 2, 3],
+            "symbols": [1, 2],
+            "relationships": [1, 2, 3, 4],
+            "analysis_status": "analyzed",
+        },
+    )()
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", "."]),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch(
+            "context_forge.operational_logging.global_config_directory",
+            return_value=tmp_path,
+        ),
+    ):
+        analyzer.return_value.analyze.return_value = project
+
+        logger = get_logger()
+        rotating_handlers = [
+            h for h in logger.handlers if isinstance(h, RotatingFileHandler)
+        ]
+        assert len(rotating_handlers) == 1
+        handler = rotating_handlers[0]
+
+        with patch.object(
+            handler.stream,
+            "write",
+            side_effect=OSError(28, "No space left on device"),
+        ):
+            main()
+
+    captured = capsys.readouterr()
+    assert captured.out == (
+        "Analyzed: /tmp/project\n"
+        "Files: 3\n"
+        "Symbols: 2\n"
+        "Relationships: 4\n"
+        "Status: analyzed\n"
+    )
+    assert "Logging error" in captured.err
+
+
+def test_analyze_command_preserves_analysis_failure_when_record_write_fails(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from logging.handlers import RotatingFileHandler
+
+    from context_forge.operational_logging import get_logger
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", "."]),
+        patch("context_forge.main.ProjectAnalyzer") as analyzer,
+        patch(
+            "context_forge.operational_logging.global_config_directory",
+            return_value=tmp_path,
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        analyzer.return_value.analyze.side_effect = RuntimeError("AST parse error")
+
+        logger = get_logger()
+        rotating_handlers = [
+            h for h in logger.handlers if isinstance(h, RotatingFileHandler)
+        ]
+        assert len(rotating_handlers) == 1
+        handler = rotating_handlers[0]
+
+        with patch.object(
+            handler.stream,
+            "write",
+            side_effect=OSError(28, "No space left on device"),
+        ):
+            main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Error: AST parse error\n" in captured.err
+    assert "Logging error" in captured.err
+
+
 def test_run_status_does_not_analyze(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

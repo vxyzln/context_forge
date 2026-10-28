@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -10,6 +11,7 @@ _LOGGER_NAME = "context_forge"
 _LOG_FILENAME = "context-forge.log"
 _MAX_BYTES = 5 * 1024 * 1024
 _BACKUP_COUNT = 3
+_OPERATIONAL_HANDLER_TAG = "_context_forge_operational"
 
 
 def log_path() -> Path:
@@ -22,14 +24,28 @@ def get_logger() -> logging.Logger:
     logger.setLevel(logging.INFO)
     logger.propagate = False
 
-    destination = log_path()
+    destination = log_path().resolve()
+
+    matching_handler: RotatingFileHandler | None = None
+    stale_handlers: list[RotatingFileHandler] = []
 
     for handler in logger.handlers:
-        if (
-            isinstance(handler, RotatingFileHandler)
-            and Path(handler.baseFilename).resolve() == destination.resolve()
-        ):
-            return logger
+        if isinstance(handler, logging.handlers.RotatingFileHandler):
+            handler_path = Path(handler.baseFilename).resolve()
+            if handler_path == destination:
+                if matching_handler is None:
+                    matching_handler = handler
+                else:
+                    stale_handlers.append(handler)
+            elif getattr(handler, _OPERATIONAL_HANDLER_TAG, False):
+                stale_handlers.append(handler)
+
+    for stale in stale_handlers:
+        stale.close()
+        logger.removeHandler(stale)
+
+    if matching_handler is not None:
+        return logger
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -39,6 +55,7 @@ def get_logger() -> logging.Logger:
         backupCount=_BACKUP_COUNT,
         encoding="utf-8",
     )
+    setattr(handler, _OPERATIONAL_HANDLER_TAG, True)
 
     handler.setFormatter(
         logging.Formatter(
