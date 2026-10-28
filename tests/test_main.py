@@ -456,6 +456,369 @@ def test_analyze_command_preserves_analysis_failure_when_record_write_fails(
     assert "Logging error" in captured.err
 
 
+def test_analyze_records_execution_in_history(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+
+    capsys.readouterr()
+
+    # Query history via CLI
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "history", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["total"] == 1
+    assert data["repository"] == str(tmp_path.resolve())
+    exec_record = data["executions"][0]
+    assert exec_record["command"] == "analyze"
+    assert exec_record["outcome"] == "success"
+    assert exec_record["duration_seconds"] is not None
+    assert exec_record["duration_seconds"] >= 0.0
+    assert exec_record["finished_at"] is not None
+
+
+def test_refresh_records_execution_in_history(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with patch.object(sys, "argv", ["context-forge", "refresh", str(tmp_path)]):
+        main()
+
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "history", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["total"] == 1
+    exec_record = data["executions"][0]
+    assert exec_record["command"] == "refresh"
+    assert exec_record["outcome"] == "success"
+
+
+def test_failed_analyze_records_failure_in_history(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]),
+        patch(
+            "context_forge.main.ProjectAnalyzer.analyze",
+            side_effect=RuntimeError("critical parse error"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "history", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["total"] == 1
+    exec_record = data["executions"][0]
+    assert exec_record["command"] == "analyze"
+    assert exec_record["outcome"] == "failed"
+    assert exec_record["error_type"] == "RuntimeError"
+    assert "critical parse error" in exec_record["error_message"]
+
+
+def test_interrupted_analyze_records_interrupted_in_history(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]),
+        patch(
+            "context_forge.main.ProjectAnalyzer.analyze",
+            side_effect=KeyboardInterrupt(),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 130
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "history", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["total"] == 1
+    exec_record = data["executions"][0]
+    assert exec_record["command"] == "analyze"
+    assert exec_record["outcome"] == "interrupted"
+
+
+def test_history_command_text_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+
+    capsys.readouterr()
+
+    with patch.object(sys, "argv", ["context-forge", "history", str(tmp_path)]):
+        main()
+
+    captured = capsys.readouterr()
+    assert f"Repository: {tmp_path.resolve()}" in captured.out
+    assert "Executions (1):" in captured.out
+    assert "analyze - success" in captured.out
+
+
+def test_history_command_empty_when_no_db(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_file = tmp_path / ".context_forge.db"
+    assert not db_file.exists()
+
+    with patch.object(sys, "argv", ["context-forge", "history", str(tmp_path)]):
+        main()
+
+    captured = capsys.readouterr()
+    assert f"Repository: {tmp_path.resolve()}" in captured.out
+    assert "No execution history found." in captured.out
+    # Must not create database file
+    assert not db_file.exists()
+
+    # JSON mode
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "history", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["total"] == 0
+    assert data["executions"] == []
+    assert not db_file.exists()
+
+
+def test_history_command_invalid_limit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "history", str(tmp_path), "--limit", "0"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "History limit must be a positive integer" in captured.err
+
+
+def test_history_command_respects_limit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    for _ in range(3):
+        with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+            main()
+        capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "context-forge",
+            "history",
+            str(tmp_path),
+            "--limit",
+            "2",
+            "--format",
+            "json",
+        ],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["total"] == 2
+    assert len(data["executions"]) == 2
+
+
+def test_analyze_succeeds_even_when_history_recording_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]),
+        patch(
+            "context_forge.storage.repository.ProjectRepository.record_execution_start",
+            side_effect=sqlite3.DatabaseError("history write error"),
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert f"Analyzed: {tmp_path.resolve()}" in captured.out
+
+
+def test_analyze_failure_not_masked_when_history_recording_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]),
+        patch(
+            "context_forge.main.ProjectAnalyzer.analyze",
+            side_effect=RuntimeError("syntax error in AST"),
+        ),
+        patch(
+            "context_forge.storage.repository.ProjectRepository.record_execution_finish",
+            side_effect=sqlite3.DatabaseError("history finish write error"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Error: syntax error in AST\n" in captured.err
+
+
+def test_analyze_succeeds_even_when_database_setup_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]),
+        patch(
+            "context_forge.storage.repository.ProjectRepository.record_execution_start",
+            side_effect=PermissionError("database directory forbidden"),
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert f"Analyzed: {tmp_path.resolve()}" in captured.out
+
+
+def test_analyze_failure_preserved_when_database_setup_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]),
+        patch(
+            "context_forge.storage.repository.ProjectRepository.record_execution_start",
+            side_effect=PermissionError("database directory forbidden"),
+        ),
+        patch(
+            "context_forge.main.ProjectAnalyzer.analyze",
+            side_effect=RuntimeError("syntax error in AST"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Error: syntax error in AST\n" in captured.err
+
+
+def test_direct_run_analyze_call_defaults_and_explicit_command(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from context_forge.main import run_analyze
+
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    # Direct call with default command ("analyze")
+    run_analyze(tmp_path)
+    capsys.readouterr()
+
+    # Direct call with explicit command ("refresh")
+    run_analyze(tmp_path, command="refresh")
+    capsys.readouterr()
+
+    # Query history via CLI
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "history", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["total"] == 2
+    # Newest first
+    assert data["executions"][0]["command"] == "refresh"
+    assert data["executions"][1]["command"] == "analyze"
+
+
+def test_repeated_main_invocations_do_not_leak_command_identity(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "app.py").write_text("def hello(): return 1\n")
+
+    with patch.object(sys, "argv", ["context-forge", "refresh", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "history", str(tmp_path), "--format", "json"],
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["total"] == 2
+    assert data["executions"][0]["command"] == "analyze"
+    assert data["executions"][1]["command"] == "refresh"
+
+
 def test_run_status_does_not_analyze(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -997,7 +1360,7 @@ def test_refresh_command_reuses_analyze_handler(
     ):
         main()
 
-    run_analyze_mock.assert_called_once_with(tmp_path)
+    run_analyze_mock.assert_called_once_with(tmp_path, command="refresh")
 
 
 def test_memory_search_prints_ranked_results(

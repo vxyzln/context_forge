@@ -88,6 +88,7 @@ from context_forge.reporting import (
     StaleAnalysisError,
 )
 from context_forge.storage.cache import (
+    ExecutionRecord,
     RepositoryCacheMetadata,
     RepositoryIdentity,
 )
@@ -155,6 +156,7 @@ COMMAND_CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
             ("refresh", "Refresh repository analysis and cached intelligence"),
             ("status", "Show repository and analysis status"),
             ("cache", "Show repository cache state and freshness"),
+            ("history", "Show repository execution history and observability records"),
             ("preflight", "Inspect repository preflight readiness and configuration"),
         ],
     ),
@@ -364,6 +366,28 @@ def create_parser() -> argparse.ArgumentParser:
         help="Repository root directory to check cache freshness for (default: current directory)",
     )
     _add_output_format_argument(cache_parser)
+
+    history_parser = subparsers.add_parser(
+        "history",
+        aliases=["execution-history"],
+        formatter_class=NoTrailingPeriodHelpFormatter,
+        help="Show command execution history and observability records",
+        description="Show command execution history and observability records",
+    )
+    history_parser.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Repository root directory to inspect execution history for (default: current directory)",
+    )
+    history_parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_HISTORY_LIMIT,
+        help="Maximum number of execution history records to display (default: 10)",
+    )
+    _add_output_format_argument(history_parser)
 
     inspect_parser = subparsers.add_parser(
         "inspect",
@@ -1112,6 +1136,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "context",
         "status",
         "cache",
+        "history",
+        "execution-history",
         "inspect",
         "memory",
         "diagnostics",
@@ -1569,7 +1595,115 @@ def read_task(task: str | None) -> str:
     return normalized
 
 
-def run_analyze(path: Path, output_format: str = "text") -> None:
+DEFAULT_HISTORY_LIMIT: int = 10
+
+
+def print_history_summary(
+    records: list[ExecutionRecord],
+    root_path: Path,
+    output_format: str = "text",
+    limit: int = DEFAULT_HISTORY_LIMIT,
+) -> None:
+    if output_format == "json":
+        payload = {
+            "executions": [rec.to_dict() for rec in records],
+            "limit": limit,
+            "repository": str(root_path),
+            "total": len(records),
+        }
+        _emit_json(payload)
+        return
+
+    print(f"Repository: {root_path}")
+    if not records:
+        print("No execution history found.")
+        return
+
+    print(f"Executions ({len(records)}):")
+    for rec in records:
+        dur_str = (
+            f"{rec.duration_seconds:.3f}s"
+            if rec.duration_seconds is not None
+            else "n/a"
+        )
+        print(
+            f"  [{rec.started_at}] {rec.command} - {rec.outcome} ({dur_str}) id={rec.id}"
+        )
+        if rec.error_type or rec.error_message:
+            err_msg = (
+                f"{rec.error_type or 'Error'}: {rec.error_message}"
+                if rec.error_message
+                else rec.error_type
+            )
+            print(f"    Error: {err_msg}")
+
+
+def run_history(
+    path: Path,
+    output_format: str = "text",
+    limit: int = DEFAULT_HISTORY_LIMIT,
+) -> None:
+    if isinstance(limit, bool) or limit < 1:
+        raise ValueError("History limit must be a positive integer")
+
+    root_path = resolve_project_path(path)
+    database_path = project_database_path(root_path)
+
+    if not database_path.is_file():
+        records: list[ExecutionRecord] = []
+    else:
+        repository = ProjectRepository(Database(database_path))
+        records = repository.get_execution_history(
+            repository_path=root_path,
+            limit=limit,
+        )
+
+    print_history_summary(records, root_path, output_format, limit=limit)
+
+
+def _record_execution_start(
+    root_path: Path,
+    command: str,
+) -> tuple[ProjectRepository | None, str | None]:
+    try:
+        database_path = project_database_path(root_path)
+        repo = ProjectRepository(Database(database_path))
+        execution_id = repo.record_execution_start(
+            command=command,
+            repository_path=root_path,
+        )
+        return repo, execution_id
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def _record_execution_finish(
+    repo: ProjectRepository | None,
+    execution_id: str | None,
+    outcome: str,
+    duration_seconds: float | None = None,
+    error_type: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    if repo is None or execution_id is None:
+        return
+    try:
+        repo.record_execution_finish(
+            execution_id=execution_id,
+            outcome=outcome,
+            duration_seconds=duration_seconds,
+            error_type=error_type,
+            error_message=error_message,
+        )
+    except Exception:  # noqa: BLE001
+        return
+
+
+def run_analyze(
+    path: Path,
+    output_format: str = "text",
+    command: str = "analyze",
+) -> None:
     from context_forge.operational_logging import (
         log_analysis_completed,
         log_analysis_failed,
@@ -1580,20 +1714,47 @@ def run_analyze(path: Path, output_format: str = "text") -> None:
     started_at = time.monotonic()
     log_analysis_started(project_path=root_path)
 
+    history_repo, execution_id = _record_execution_start(root_path, command)
+
     try:
         project = analyze_project(root_path)
+        duration = time.monotonic() - started_at
         log_analysis_completed(
             project_path=root_path,
-            duration_seconds=time.monotonic() - started_at,
+            duration_seconds=duration,
             files_count=len(project.files),
             symbols_count=len(project.symbols),
         )
+        _record_execution_finish(
+            history_repo,
+            execution_id,
+            outcome="success",
+            duration_seconds=duration,
+        )
         print_analysis_summary(project, output_format)
+    except KeyboardInterrupt:
+        duration = time.monotonic() - started_at
+        _record_execution_finish(
+            history_repo,
+            execution_id,
+            outcome="interrupted",
+            duration_seconds=duration,
+        )
+        raise
     except Exception as exc:
+        duration = time.monotonic() - started_at
         log_analysis_failed(
             project_path=root_path,
-            duration_seconds=time.monotonic() - started_at,
+            duration_seconds=duration,
             error=exc,
+        )
+        _record_execution_finish(
+            history_repo,
+            execution_id,
+            outcome="failed",
+            duration_seconds=duration,
+            error_type=type(exc).__name__,
+            error_message=str(exc),
         )
         raise
 
@@ -3957,11 +4118,25 @@ def _dispatch_command(args: argparse.Namespace) -> None:
     )
 
     handlers = {
-        "analyze": lambda: run_analyze(args.path, args.format),
-        "refresh": lambda: (
-            run_analyze(args.path, args.format)
+        "analyze": lambda: (
+            run_analyze(args.path, args.format, command="analyze")
             if args.format == "json"
-            else run_analyze(args.path)
+            else run_analyze(args.path, command="analyze")
+        ),
+        "refresh": lambda: (
+            run_analyze(args.path, args.format, command="refresh")
+            if args.format == "json"
+            else run_analyze(args.path, command="refresh")
+        ),
+        "history": lambda: run_history(
+            args.path,
+            args.format,
+            args.limit,
+        ),
+        "execution-history": lambda: run_history(
+            args.path,
+            args.format,
+            args.limit,
         ),
         "status": lambda: run_status(args.path, args.format),
         "cache": lambda: run_cache(args.path, args.format),
