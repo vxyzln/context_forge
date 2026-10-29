@@ -8,6 +8,7 @@ from typing import Any
 from context_forge.config.audit import audit_configuration
 from context_forge.config.defaults import DEFAULTS
 from context_forge.config.global_config import global_config_path
+from context_forge.config.resolver import normalize_database_path
 from context_forge.parser.detector import LanguageDetector
 from context_forge.parser.language import Language
 from context_forge.parser.python import PythonParser
@@ -240,8 +241,15 @@ def build_preflight_report(
     )
     all_diagnostics.extend(config_audit.diagnostics)
 
+    db_rel = (
+        config_audit.resolved.database_path
+        if config_audit.resolved is not None
+        else DEFAULTS.database_path
+    )
+    db_file = normalize_database_path(db_rel, resolved_path)
+
     try:
-        scanner = RepositoryScanner(resolved_path)
+        scanner = RepositoryScanner(resolved_path, ignored_files={db_file})
         scanned_project = scanner.scan()
     except OSError as exc:
         msg = f"Failed to scan repository: {exc}"
@@ -356,12 +364,6 @@ def build_preflight_report(
         "Standard directories (.git, .venv, __pycache__, etc.) are excluded from inspection."
     )
 
-    db_rel = (
-        config_audit.resolved.database_path
-        if config_audit.resolved is not None
-        else DEFAULTS.database_path
-    )
-    db_file = resolved_path / db_rel
     has_persisted = db_file.is_file()
     if not has_persisted:
         limitations.append(

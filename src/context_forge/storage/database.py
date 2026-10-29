@@ -18,6 +18,7 @@ class Database:
         return connection
 
     def initialize(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.executescript(
                 """

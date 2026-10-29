@@ -98,7 +98,11 @@ ASSET_EXTENSIONS = {
 
 
 class RepositoryScanner:
-    def __init__(self, root_path: Path) -> None:
+    def __init__(
+        self,
+        root_path: Path,
+        ignored_files: set[Path] | None = None,
+    ) -> None:
         self.root_path = root_path.resolve()
 
         if not self.root_path.exists():
@@ -106,6 +110,15 @@ class RepositoryScanner:
 
         if not self.root_path.is_dir():
             raise ValueError("Repository path must be a directory")
+
+        self.ignored_files: set[Path] = set()
+        if ignored_files:
+            for f in ignored_files:
+                self.ignored_files.add(f)
+                try:
+                    self.ignored_files.add(f.resolve())
+                except OSError:
+                    pass
 
     def scan(self) -> Project:
         project = Project(
@@ -127,13 +140,26 @@ class RepositoryScanner:
             and not self._is_ignored_path(path)
         ]
 
+    def _is_ignored_file(self, path: Path) -> bool:
+        if path.name in IGNORED_FILES:
+            return True
+        if self.ignored_files:
+            if path in self.ignored_files:
+                return True
+            try:
+                if path.resolve() in self.ignored_files:
+                    return True
+            except OSError:
+                pass
+        return False
+
     def _iter_files(self) -> list[Path]:
         return [
             path
             for path in self.root_path.rglob("*")
             if path.is_file()
             and not path.is_symlink()
-            and path.name not in IGNORED_FILES
+            and not self._is_ignored_file(path)
             and not self._is_ignored_path(path)
         ]
 

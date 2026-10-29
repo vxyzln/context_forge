@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from context_forge.config.resolver import resolve_project_database_path
 from context_forge.models.project import Project
 from context_forge.pipeline.analyzer import ProjectAnalyzer
 from context_forge.reporting.contract import (
@@ -23,7 +24,7 @@ from context_forge.storage.cache import (
     detect_file_changes,
     fingerprint_file,
 )
-from context_forge.storage.database import Database, project_database_path
+from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
 
 
@@ -122,8 +123,12 @@ class WorkflowFreshness:
         }
 
 
-def _compute_current_fingerprints(root_path: Path) -> dict[Path, FileFingerprint]:
-    scanned_project = RepositoryScanner(root_path).scan()
+def _compute_current_fingerprints(
+    root_path: Path,
+    database_path: Path | None = None,
+) -> dict[Path, FileFingerprint]:
+    ignored = {database_path} if database_path is not None else None
+    scanned_project = RepositoryScanner(root_path, ignored_files=ignored).scan()
     fingerprints: dict[Path, FileFingerprint] = {}
     for file in scanned_project.files:
         abs_path = (root_path / file.path).resolve()
@@ -165,7 +170,7 @@ class WorkflowFreshnessGuard:
         current_fingerprints: dict[Path, FileFingerprint] | None = None,
     ) -> WorkflowFreshness:
         root = self.root_path
-        db_path = self.database_path or project_database_path(root)
+        db_path = resolve_project_database_path(root, self.database_path)
         identity = RepositoryIdentity(root)
 
         loaded_project: Project | None = project
@@ -404,7 +409,7 @@ class WorkflowFreshnessGuard:
         cur_fingerprints = current_fingerprints
         if cur_fingerprints is None:
             try:
-                cur_fingerprints = _compute_current_fingerprints(root)
+                cur_fingerprints = _compute_current_fingerprints(root, db_path)
             except (OSError, RuntimeError, ValueError) as exc:
                 diag = DiagnosticItem.blocker(
                     f"Failed to scan working tree files on disk: {exc}",
@@ -575,7 +580,7 @@ class WorkflowFreshnessGuard:
 
         self._refresh_attempted = True
         root = self.root_path
-        db_path = self.database_path or project_database_path(root)
+        db_path = resolve_project_database_path(root, self.database_path)
 
         try:
             analyzer = self.analyzer or ProjectAnalyzer(root, db_path)

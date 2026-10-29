@@ -220,7 +220,10 @@ class ProjectAnalyzer:
     def analyze(self) -> Project:
         self.database.initialize()
 
-        scanned_project = RepositoryScanner(self.root_path).scan()
+        scanned_project = RepositoryScanner(
+            self.root_path,
+            ignored_files={self.database.path},
+        ).scan()
 
         current_fingerprints = self._current_fingerprints(
             scanned_project,

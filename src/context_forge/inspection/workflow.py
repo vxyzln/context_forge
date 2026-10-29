@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from context_forge.config.resolver import resolve_project_database_path
 from context_forge.git.navigation import GitNavigationContext, map_changed_paths
 from context_forge.git.repository import GitRepository
 from context_forge.inspection.models import PreChangeInspectionResult
@@ -33,7 +34,7 @@ from context_forge.reporting.contract import (
     OperationOutcome,
 )
 from context_forge.storage.cache import RepositoryCacheMetadata, RepositoryIdentity
-from context_forge.storage.database import Database, project_database_path
+from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
 
 
@@ -139,7 +140,7 @@ def inspect_pre_change(
             diagnostics=_deduplicate_diagnostics(all_diagnostics),
         )
 
-    db_path = project_database_path(repo_path)
+    db_path = resolve_project_database_path(repo_path)
     has_db_file = db_path.exists()
     freshness_guard = guard or WorkflowFreshnessGuard(repo_path, database_path=db_path)
 

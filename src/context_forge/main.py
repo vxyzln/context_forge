@@ -14,6 +14,7 @@ from context_forge.config.project import (
     PackageBoundaryPolicy,
     StructuralRule,
 )
+from context_forge.config.resolver import resolve_project_database_path
 from context_forge.inspection import (
     format_pre_change_inspection_summary,
     inspect_pre_change,
@@ -93,7 +94,7 @@ from context_forge.storage.cache import (
     RepositoryCacheMetadata,
     RepositoryIdentity,
 )
-from context_forge.storage.database import Database, project_database_path
+from context_forge.storage.database import Database
 from context_forge.storage.repository import ProjectRepository
 
 
@@ -1176,24 +1177,24 @@ def resolve_project_path(path: Path) -> Path:
     return resolved
 
 
-def analyze_project(root_path: Path):
-    database_path = project_database_path(root_path)
+def analyze_project(root_path: Path, database_path: Path | None = None):
+    db_path = resolve_project_database_path(root_path, database_path)
 
     return ProjectAnalyzer(
         root_path=root_path,
-        database_path=database_path,
+        database_path=db_path,
     ).analyze()
 
 
-def load_project_analysis(root_path: Path):
-    database_path = project_database_path(root_path)
-    if not database_path.exists():
+def load_project_analysis(root_path: Path, database_path: Path | None = None):
+    db_path = resolve_project_database_path(root_path, database_path)
+    if not db_path.exists():
         raise MissingAnalysisError(
             "No persisted analysis found; run 'context-forge analyze' first",
-            path=str(database_path),
+            path=str(db_path),
         )
 
-    repository = ProjectRepository(Database(database_path))
+    repository = ProjectRepository(Database(db_path))
     repository_key = RepositoryIdentity(root_path).key
 
     try:
@@ -1204,13 +1205,13 @@ def load_project_analysis(root_path: Path):
 
         raise MissingAnalysisError(
             "No persisted analysis found; run 'context-forge analyze' first",
-            path=str(database_path),
+            path=str(db_path),
         ) from None
 
     if loaded is None:
         raise MissingAnalysisError(
             "No persisted analysis found; run 'context-forge analyze' first",
-            path=str(database_path),
+            path=str(db_path),
         )
 
     project, metadata = loaded
@@ -1223,27 +1224,22 @@ def load_guarded_project(
     allow_refresh: bool = False,
     database_path: Path | None = None,
 ) -> tuple[Project, RepositoryCacheMetadata, WorkflowFreshness]:
-    db_path = database_path or project_database_path(root_path)
+    db_path = resolve_project_database_path(root_path, database_path)
     repo = None
     proj = None
     meta = None
 
-    if database_path is None:
-        try:
-            loaded_repo, _, proj, meta = load_project_analysis(root_path)
-            repo = loaded_repo
-        except (MissingAnalysisError, sqlite3.OperationalError, sqlite3.DatabaseError):
-            pass
-    elif db_path.exists():
-        try:
-            repository = ProjectRepository(Database(db_path))
-            repository_key = RepositoryIdentity(root_path).key
-            loaded = repository.load_analysis(repository_key)
-            if loaded is not None:
-                repo = repository
-                proj, meta = loaded
-        except (sqlite3.OperationalError, sqlite3.DatabaseError):
-            pass
+    db_load_error: Exception | None = None
+    try:
+        loaded_repo, _, proj, meta = load_project_analysis(
+            root_path,
+            database_path=db_path,
+        )
+        repo = loaded_repo
+    except MissingAnalysisError:
+        pass
+    except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+        db_load_error = exc
 
     guard = WorkflowFreshnessGuard(
         root_path,
@@ -1312,6 +1308,11 @@ def load_guarded_project(
             "No persisted analysis found; run 'context-forge analyze' first",
             path=str(root_path),
         )
+    if db_load_error is not None:
+        raise IndeterminateFreshnessError(
+            f"Repository analysis freshness is indeterminate ({freshness.reason}); reanalysis is required",
+            path=str(root_path),
+        ) from db_load_error
     raise IndeterminateFreshnessError(
         f"Repository analysis freshness is indeterminate ({freshness.reason}); reanalysis is required",
         path=str(root_path),
@@ -1633,7 +1634,7 @@ def run_history(
         raise ValueError("History limit must be a positive integer")
 
     root_path = resolve_project_path(path)
-    database_path = project_database_path(root_path)
+    database_path = resolve_project_database_path(root_path)
 
     if not database_path.is_file():
         records: list[ExecutionRecord] = []
@@ -1652,7 +1653,7 @@ def _record_execution_start(
     command: str,
 ) -> tuple[ProjectRepository | None, str | None]:
     try:
-        database_path = project_database_path(root_path)
+        database_path = resolve_project_database_path(root_path)
         repo = ProjectRepository(Database(database_path))
         execution_id = repo.record_execution_start(
             command=command,
@@ -4154,14 +4155,28 @@ def run_path(
 
 def run_context(args: argparse.Namespace) -> None:
     from context_forge.application import build_context_service
+    from context_forge.config.audit import audit_configuration
+    from context_forge.config.validation import ConfigurationValidationError
     from context_forge.context.serialization import ContextPackageSerializer
 
     root_path = resolve_project_path(args.path)
+    audit_res = audit_configuration(root_path)
+    if not audit_res.is_valid:
+        blockers = [
+            d.message for d in audit_res.diagnostics if d.severity.name == "BLOCKER"
+        ]
+        msg = blockers[0] if blockers else "Invalid configuration"
+        raise ConfigurationValidationError(msg)
+
+    max_units = (
+        audit_res.resolved.max_context_units if audit_res.resolved is not None else 20
+    )
+
     allow_refresh = not getattr(args, "no_refresh", False)
     project, _ = load_fresh_project(root_path, allow_refresh=allow_refresh)
     task = read_task(args.task)
 
-    service = build_context_service()
+    service = build_context_service(max_context_units=max_units)
     package = service.retrieve_context(project, task)
     serialized = ContextPackageSerializer().serialize(package)
 

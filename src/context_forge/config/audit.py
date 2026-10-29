@@ -13,7 +13,10 @@ from context_forge.config.loader import (
     project_config_path,
 )
 from context_forge.config.project import ProjectConfiguration
-from context_forge.config.resolver import resolve_configuration
+from context_forge.config.resolver import (
+    normalize_database_path,
+    resolve_configuration,
+)
 from context_forge.config.validation import (
     ConfigurationValidationError,
     validate_project_config,
@@ -193,15 +196,35 @@ def audit_configuration(
                     )
                 )
 
+    if not has_blocker:
+        resolved = resolve_configuration(
+            global_config=g_config,
+            project_config=p_config,
+        )
+        candidate: Path | None = None
+        if project_root is not None:
+            candidate = normalize_database_path(resolved.database_path, project_root)
+        else:
+            raw_cand = Path(resolved.database_path)
+            if raw_cand.is_absolute():
+                candidate = normalize_database_path(raw_cand)
+
+        if candidate is not None and candidate.is_dir():
+            has_blocker = True
+            diagnostics.append(
+                DiagnosticItem.blocker(
+                    f"Resolved database path is an existing directory: {candidate.as_posix()}",
+                    code="DATABASE_PATH_IS_DIRECTORY",
+                    path=candidate.as_posix(),
+                    source="config",
+                )
+            )
+
     if has_blocker:
         status = "invalid"
         resolved = None
         precedence = {}
     else:
-        resolved = resolve_configuration(
-            global_config=g_config,
-            project_config=p_config,
-        )
         precedence = {
             "database_path": (
                 "project"
