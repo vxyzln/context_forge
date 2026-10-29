@@ -25,7 +25,11 @@ from context_forge.config.project import (
     ProjectConfiguration,
     ProjectStorageConfiguration,
 )
-from context_forge.config.resolver import resolve_configuration
+from context_forge.config.resolver import (
+    normalize_database_path,
+    resolve_configuration,
+    resolve_project_database_path,
+)
 from context_forge.config.validation import (
     ConfigurationValidationError,
     validate_project_config,
@@ -50,7 +54,9 @@ __all__ = [
     "load_global_configuration",
     "load_project_config",
     "load_project_configuration",
+    "normalize_database_path",
     "project_config_path",
     "resolve_configuration",
+    "resolve_project_database_path",
     "validate_project_config",
 ]

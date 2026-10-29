@@ -14,6 +14,34 @@ class ConfigurationValidationError(ValueError):
     pass
 
 
+def _resolve_alias(
+    item: dict[str, Any],
+    canonical: str,
+    aliases: tuple[str, ...],
+    context: str,
+) -> Any:
+    present: list[tuple[str, Any]] = []
+    for key in (canonical, *aliases):
+        if key in item:
+            present.append((key, item[key]))
+
+    if not present:
+        return None
+
+    def _norm(val: Any) -> Any:
+        return val.strip() if isinstance(val, str) else val
+
+    first_norm = _norm(present[0][1])
+    for key, val in present[1:]:
+        if _norm(val) != first_norm:
+            keys_str = ", ".join(f"'{k}'" for k, _ in present)
+            raise ConfigurationValidationError(
+                f"{context} has conflicting alias fields: {keys_str}"
+            )
+
+    return present[0][1]
+
+
 def validate_project_config(
     data: dict[str, Any],
 ) -> ProjectConfiguration:
@@ -21,12 +49,37 @@ def validate_project_config(
 
     storage_data = _section(data, "storage")
     analysis_data = _section(data, "analysis")
-    packages_data = _section(data, "packages") or _section(data, "package_policy")
+
+    has_packages = "packages" in data
+    has_package_policy = "package_policy" in data
+    if has_packages and has_package_policy:
+        packages_raw = data.get("packages")
+        package_policy_raw = data.get("package_policy")
+        if packages_raw != package_policy_raw:
+            raise ConfigurationValidationError(
+                "Conflicting configuration sections: cannot specify both 'packages' and 'package_policy'"
+            )
+        packages_data = _section(data, "packages")
+    elif has_packages:
+        packages_data = _section(data, "packages")
+    elif has_package_policy:
+        packages_data = _section(data, "package_policy")
+    else:
+        packages_data = {}
+
     rules_data = data.get("rules")
+
+    db_path = _optional_string(storage_data, "database_path")
+    if db_path is not None:
+        stripped = db_path.strip()
+        if stripped in {".", ".."} or stripped.endswith(("/", "\\")):
+            raise ConfigurationValidationError(
+                f"Configuration value 'database_path' cannot be a directory: {db_path!r}"
+            )
 
     return ProjectConfiguration(
         storage=ProjectStorageConfiguration(
-            database_path=_optional_string(storage_data, "database_path"),
+            database_path=db_path,
         ),
         analysis=ProjectAnalysisConfiguration(
             max_context_units=_optional_int(analysis_data, "max_context_units"),
@@ -170,8 +223,18 @@ def _validate_packages_policy(section: dict[str, Any]) -> PackageBoundaryPolicy:
             raise ConfigurationValidationError(
                 f"Package policy rule #{idx + 1} must be a table"
             )
-        src = rule.get("source") or rule.get("source_package")
-        tgt = rule.get("target") or rule.get("target_package")
+        src = _resolve_alias(
+            rule,
+            "source",
+            ("source_package",),
+            f"Package policy rule #{idx + 1}",
+        )
+        tgt = _resolve_alias(
+            rule,
+            "target",
+            ("target_package",),
+            f"Package policy rule #{idx + 1}",
+        )
         if not src or not isinstance(src, str) or not src.strip():
             raise ConfigurationValidationError(
                 f"Package policy rule #{idx + 1} missing or invalid 'source'"
@@ -190,7 +253,12 @@ def _validate_packages_policy(section: dict[str, Any]) -> PackageBoundaryPolicy:
             raise ConfigurationValidationError(
                 f"Package policy rule #{idx + 1} description must be a string"
             )
-        rule_id = rule.get("rule_id") or rule.get("id")
+        rule_id = _resolve_alias(
+            rule,
+            "rule_id",
+            ("id",),
+            f"Package policy rule #{idx + 1}",
+        )
         if rule_id is not None and not isinstance(rule_id, str):
             raise ConfigurationValidationError(
                 f"Package policy rule #{idx + 1} rule_id must be a string"
@@ -204,7 +272,20 @@ def _validate_packages_policy(section: dict[str, Any]) -> PackageBoundaryPolicy:
             r_id=rule_id.strip() if rule_id else None,
         )
 
-    raw_deny = section.get("deny") or section.get("prohibit")
+    has_deny = "deny" in section
+    has_prohibit = "prohibit" in section
+    raw_deny = None
+    if has_deny and has_prohibit:
+        if section["deny"] != section["prohibit"]:
+            raise ConfigurationValidationError(
+                "Package policy has conflicting alias fields: 'deny', 'prohibit'"
+            )
+        raw_deny = section["deny"]
+    elif has_deny:
+        raw_deny = section["deny"]
+    elif has_prohibit:
+        raw_deny = section["prohibit"]
+
     if raw_deny is not None:
         if not isinstance(raw_deny, list):
             raise ConfigurationValidationError("Package policy 'deny' must be a list")
@@ -225,8 +306,18 @@ def _validate_packages_policy(section: dict[str, Any]) -> PackageBoundaryPolicy:
                     pol="deny",
                 )
             elif isinstance(item, dict):
-                src = item.get("source") or item.get("source_package")
-                tgt = item.get("target") or item.get("target_package")
+                src = _resolve_alias(
+                    item,
+                    "source",
+                    ("source_package",),
+                    f"Package policy deny item #{idx + 1}",
+                )
+                tgt = _resolve_alias(
+                    item,
+                    "target",
+                    ("target_package",),
+                    f"Package policy deny item #{idx + 1}",
+                )
                 if not src or not isinstance(src, str) or not src.strip():
                     raise ConfigurationValidationError(
                         f"Package policy deny item #{idx + 1} missing or invalid 'source'"
@@ -235,12 +326,22 @@ def _validate_packages_policy(section: dict[str, Any]) -> PackageBoundaryPolicy:
                     raise ConfigurationValidationError(
                         f"Package policy deny item #{idx + 1} missing or invalid 'target'"
                     )
+                rule_id = _resolve_alias(
+                    item,
+                    "rule_id",
+                    ("id",),
+                    f"Package policy deny item #{idx + 1}",
+                )
+                if rule_id is not None and not isinstance(rule_id, str):
+                    raise ConfigurationValidationError(
+                        f"Package policy deny item #{idx + 1} rule_id must be a string"
+                    )
                 _add_rule(
                     src=src.strip(),
                     tgt=tgt.strip(),
                     pol="deny",
                     desc=item.get("description"),
-                    r_id=item.get("rule_id") or item.get("id"),
+                    r_id=rule_id.strip() if rule_id else None,
                 )
             else:
                 raise ConfigurationValidationError(
@@ -268,19 +369,36 @@ def _validate_structural_rules(raw_rules: Any) -> tuple[StructuralRule, ...]:
     for idx, item in enumerate(raw_rules):
         if not isinstance(item, dict):
             raise ConfigurationValidationError(f"Rule #{idx + 1} must be a table")
-        rule_id = item.get("rule_id") or item.get("id")
-        kind = item.get("kind") or item.get("type")
-        source = (
-            item.get("source")
-            or item.get("source_component")
-            or item.get("source_package")
+        rule_id = _resolve_alias(
+            item,
+            "rule_id",
+            ("id",),
+            f"Rule #{idx + 1}",
         )
-        target = (
-            item.get("target")
-            or item.get("target_component")
-            or item.get("target_package")
+        kind = _resolve_alias(
+            item,
+            "kind",
+            ("type",),
+            f"Rule #{idx + 1}",
         )
-        rel_type = item.get("relationship_type") or item.get("rel_type")
+        source = _resolve_alias(
+            item,
+            "source",
+            ("source_component", "source_package"),
+            f"Rule #{idx + 1}",
+        )
+        target = _resolve_alias(
+            item,
+            "target",
+            ("target_component", "target_package"),
+            f"Rule #{idx + 1}",
+        )
+        rel_type = _resolve_alias(
+            item,
+            "relationship_type",
+            ("rel_type",),
+            f"Rule #{idx + 1}",
+        )
         desc = item.get("description")
         severity = item.get("severity", "error")
 
