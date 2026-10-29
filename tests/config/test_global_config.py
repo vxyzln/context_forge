@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 from context_forge.config import (
     APPLICATION_NAME,
     GLOBAL_CONFIG_FILENAME,
@@ -19,37 +21,35 @@ def test_global_config_path_is_inside_application_directory() -> None:
     assert global_config_path().parent.name == APPLICATION_NAME
 
 
-def test_global_config_directory_uses_macos_application_support(
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+@pytest.mark.parametrize(
+    "xdg_val",
+    [
+        None,
+        "",
+        "   ",
+        "relative/path",
+        "/custom/absolute/path",
+    ],
+)
+def test_global_config_directory_macos_and_linux_always_use_dot_config(
     monkeypatch,
     tmp_path: Path,
+    platform: str,
+    xdg_val: str | None,
 ) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(sys, "platform", "darwin")
+    if xdg_val is None:
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    else:
+        monkeypatch.setenv("XDG_CONFIG_HOME", xdg_val)
 
-    assert global_config_directory() == (
-        tmp_path / "Library" / "Application Support" / APPLICATION_NAME
+    assert global_config_directory() == tmp_path / ".config" / APPLICATION_NAME
+    assert (
+        global_config_path()
+        == tmp_path / ".config" / APPLICATION_NAME / GLOBAL_CONFIG_FILENAME
     )
-
-
-def test_global_config_directory_uses_xdg_on_linux(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-
-    assert global_config_directory() == tmp_path / APPLICATION_NAME
-
-
-def test_global_config_directory_uses_default_linux_location(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-    assert global_config_directory() == (tmp_path / ".config" / APPLICATION_NAME)
 
 
 def test_global_config_directory_uses_appdata_on_windows(
@@ -104,3 +104,26 @@ temperature = 0.2
             "temperature": 0.2,
         },
     }
+
+
+def test_global_config_directory_windows_appdata_whitespace_falls_back(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", "   ")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    assert (
+        global_config_directory() == tmp_path / "AppData" / "Roaming" / APPLICATION_NAME
+    )
+
+
+def test_global_config_directory_windows_appdata_trimmed(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", f"  {tmp_path}  ")
+
+    assert global_config_directory() == tmp_path / APPLICATION_NAME

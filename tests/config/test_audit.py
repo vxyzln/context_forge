@@ -240,3 +240,96 @@ def test_audit_configuration_to_dict_serialization(tmp_path: Path) -> None:
     assert payload["precedence"]["database_path"] == "default"
     assert payload["precedence"]["max_context_units"] == "default"
     assert isinstance(payload["diagnostics"], list)
+
+
+def test_audit_configuration_rejects_database_path_that_is_directory(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "db_dir").mkdir()
+
+    (project_dir / ".contextforge.toml").write_text(
+        """
+[storage]
+database_path = "db_dir"
+""",
+        encoding="utf-8",
+    )
+
+    result = audit_configuration(project_dir)
+
+    assert result.is_valid is False
+    assert result.status == "invalid"
+    assert any(
+        d.code == "DATABASE_PATH_IS_DIRECTORY"
+        and "is an existing directory" in d.message
+        for d in result.diagnostics
+    )
+
+
+def test_audit_configuration_without_project_root_relative_path_no_false_positive(
+    tmp_path: Path,
+) -> None:
+    global_file = tmp_path / "global.toml"
+    global_file.write_text(
+        """
+[storage]
+database_path = "relative_db.db"
+""",
+        encoding="utf-8",
+    )
+
+    result = audit_configuration(
+        project_root=None,
+        global_config_path_override=global_file,
+    )
+
+    assert result.is_valid is True
+    assert not any(d.code == "DATABASE_PATH_IS_DIRECTORY" for d in result.diagnostics)
+
+
+def test_audit_configuration_without_project_root_rejects_absolute_directory(
+    tmp_path: Path,
+) -> None:
+    some_dir = tmp_path / "existing_dir"
+    some_dir.mkdir()
+
+    global_file = tmp_path / "global.toml"
+    global_file.write_text(
+        f"""
+[storage]
+database_path = "{some_dir.as_posix()}"
+""",
+        encoding="utf-8",
+    )
+
+    result = audit_configuration(
+        project_root=None,
+        global_config_path_override=global_file,
+    )
+
+    assert result.is_valid is False
+    assert result.status == "invalid"
+    assert any(d.code == "DATABASE_PATH_IS_DIRECTORY" for d in result.diagnostics)
+
+
+def test_audit_configuration_does_not_create_files_or_directories(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    (project_dir / ".contextforge.toml").write_text(
+        """
+[storage]
+database_path = "nested/dir/db.sqlite"
+""",
+        encoding="utf-8",
+    )
+
+    audit_configuration(project_dir)
+
+    # Auditing must NOT create nested/dir or db.sqlite
+    assert not (project_dir / "nested").exists()
+    assert not (project_dir / "nested" / "dir" / "db.sqlite").exists()

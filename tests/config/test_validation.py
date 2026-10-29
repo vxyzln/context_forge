@@ -289,3 +289,198 @@ def test_validate_project_config_rejects_non_list_rules() -> None:
         match="Configuration section 'rules' must be a list",
     ):
         validate_project_config({"rules": "invalid"})
+
+
+def test_validate_project_config_rejects_conflicting_package_sections() -> None:
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="Conflicting configuration sections: cannot specify both 'packages' and 'package_policy'",
+    ):
+        validate_project_config(
+            {
+                "packages": {"default_policy": "allow"},
+                "package_policy": {"default_policy": "deny"},
+            }
+        )
+
+
+def test_validate_project_config_accepts_identical_package_sections() -> None:
+    res = validate_project_config(
+        {
+            "packages": {"default_policy": "allow"},
+            "package_policy": {"default_policy": "allow"},
+        }
+    )
+    assert res.packages.default_policy == "allow"
+
+
+def test_validate_project_config_rejects_conflicting_rule_aliases() -> None:
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="has conflicting alias fields: 'source', 'source_package'",
+    ):
+        validate_project_config(
+            {
+                "packages": {
+                    "rules": [
+                        {
+                            "source": "pkg_a",
+                            "source_package": "pkg_b",
+                            "target": "pkg_c",
+                        }
+                    ]
+                }
+            }
+        )
+
+
+def test_validate_project_config_accepts_identical_rule_aliases() -> None:
+    res = validate_project_config(
+        {
+            "packages": {
+                "rules": [
+                    {
+                        "source": "pkg_a",
+                        "source_package": "pkg_a",
+                        "target": "pkg_c",
+                    }
+                ]
+            }
+        }
+    )
+    assert len(res.packages.rules) == 1
+    assert res.packages.rules[0].source_package == "pkg_a"
+
+
+def test_validate_project_config_accepts_whitespace_equivalent_aliases() -> None:
+    res = validate_project_config(
+        {
+            "packages": {
+                "rules": [
+                    {
+                        "source": "pkg_a",
+                        "source_package": "  pkg_a  ",
+                        "target": "pkg_c",
+                    }
+                ]
+            }
+        }
+    )
+    assert len(res.packages.rules) == 1
+    assert res.packages.rules[0].source_package == "pkg_a"
+
+
+def test_validate_project_config_rejects_conflicting_deny_prohibit_sections() -> None:
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="Package policy has conflicting alias fields: 'deny', 'prohibit'",
+    ):
+        validate_project_config(
+            {
+                "packages": {
+                    "deny": ["a -> b"],
+                    "prohibit": ["c -> d"],
+                }
+            }
+        )
+
+
+def test_validate_project_config_rejects_conflicting_structural_rule_aliases() -> None:
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="has conflicting alias fields: 'kind', 'type'",
+    ):
+        validate_project_config(
+            {
+                "rules": [
+                    {
+                        "kind": "prohibited_dependency",
+                        "type": "isolated_component",
+                        "source": "mod_a",
+                    }
+                ]
+            }
+        )
+
+
+@pytest.mark.parametrize("path_str", [".", "..", "foo/bar/", "foo/bar\\"])
+def test_validate_project_config_rejects_directory_indicators_in_database_path(
+    path_str: str,
+) -> None:
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="cannot be a directory",
+    ):
+        validate_project_config(
+            {
+                "storage": {
+                    "database_path": path_str,
+                }
+            }
+        )
+
+
+def test_validate_project_config_rejects_invalid_types_and_empty_strings_through_aliases() -> (
+    None
+):
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="missing or invalid 'source'",
+    ):
+        validate_project_config(
+            {
+                "packages": {
+                    "rules": [
+                        {
+                            "source": 123,
+                            "source_package": 123,
+                            "target": "pkg_b",
+                        }
+                    ]
+                }
+            }
+        )
+
+    with pytest.raises(
+        ConfigurationValidationError,
+        match="missing or invalid 'source'",
+    ):
+        validate_project_config(
+            {
+                "packages": {
+                    "rules": [
+                        {
+                            "source": "   ",
+                            "source_package": "",
+                            "target": "pkg_b",
+                        }
+                    ]
+                }
+            }
+        )
+
+
+def test_validate_project_config_accepts_whitespace_equivalent_structural_aliases() -> (
+    None
+):
+    res = validate_project_config(
+        {
+            "rules": [
+                {
+                    "kind": "prohibited_dependency",
+                    "type": " prohibited_dependency ",
+                    "source": "mod_a",
+                    "source_package": " mod_a ",
+                    "target": "mod_b",
+                    "target_component": " mod_b ",
+                    "relationship_type": "imports",
+                    "rel_type": " imports ",
+                }
+            ]
+        }
+    )
+    assert len(res.rules) == 1
+    assert res.rules[0].kind == "prohibited_dependency"
+    assert res.rules[0].source == "mod_a"
+    assert res.rules[0].target == "mod_b"
+    assert res.rules[0].relationship_type == "imports"

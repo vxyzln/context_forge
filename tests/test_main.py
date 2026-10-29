@@ -1175,6 +1175,274 @@ def test_context_command_interactive_input(
     assert parsed["task"] == "Fix scrolling"
 
 
+def test_context_command_applies_configured_max_context_units(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / ".contextforge.toml").write_text(
+        """
+[analysis]
+max_context_units = 7
+""",
+        encoding="utf-8",
+    )
+    package = ContextPackage(task="Task 1", units=())
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "context", str(tmp_path), "--task", "Task 1"],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
+        ),
+        patch("context_forge.application.build_context_service") as build_service,
+    ):
+        build_service.return_value.retrieve_context.return_value = package
+        main()
+
+    build_service.assert_called_once_with(max_context_units=7)
+
+
+def test_context_command_defaults_max_context_units_to_20(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    package = ContextPackage(task="Task 1", units=())
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "context", str(tmp_path), "--task", "Task 1"],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
+        ),
+        patch("context_forge.application.build_context_service") as build_service,
+    ):
+        build_service.return_value.retrieve_context.return_value = package
+        main()
+
+    build_service.assert_called_once_with(max_context_units=20)
+
+
+def test_context_command_rejects_invalid_configuration(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / ".contextforge.toml").write_text(
+        """
+[analysis]
+max_context_units = -1
+""",
+        encoding="utf-8",
+    )
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "context", str(tmp_path), "--task", "Task 1"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "must be positive" in captured.err
+
+
+def test_context_command_project_overrides_global_max_context_units(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home_dir)
+
+    global_cfg = home_dir / ".config" / "context-forge" / "config.toml"
+    global_cfg.parent.mkdir(parents=True, exist_ok=True)
+    global_cfg.write_text("[analysis]\nmax_context_units = 15\n", encoding="utf-8")
+
+    (project_dir / ".contextforge.toml").write_text(
+        "[analysis]\nmax_context_units = 5\n", encoding="utf-8"
+    )
+    package = ContextPackage(task="Task 1", units=())
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "context", str(project_dir), "--task", "Task 1"],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
+        ),
+        patch("context_forge.application.build_context_service") as build_service,
+    ):
+        build_service.return_value.retrieve_context.return_value = package
+        main()
+
+    build_service.assert_called_once_with(max_context_units=5)
+
+
+def test_context_command_global_max_context_units_when_project_omits(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home_dir)
+
+    global_cfg = home_dir / ".config" / "context-forge" / "config.toml"
+    global_cfg.parent.mkdir(parents=True, exist_ok=True)
+    global_cfg.write_text("[analysis]\nmax_context_units = 12\n", encoding="utf-8")
+
+    package = ContextPackage(task="Task 1", units=())
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "context", str(project_dir), "--task", "Task 1"],
+        ),
+        patch(
+            "context_forge.main.load_fresh_project", return_value=(object(), object())
+        ),
+        patch("context_forge.application.build_context_service") as build_service,
+    ):
+        build_service.return_value.retrieve_context.return_value = package
+        main()
+
+    build_service.assert_called_once_with(max_context_units=12)
+
+
+def test_context_service_enforces_max_context_units_limit() -> None:
+    from context_forge.application import build_context_service
+    from context_forge.models.enums import FileType
+    from context_forge.models.file import File
+
+    project = Project(name="demo", root_path=Path("/tmp/demo"))
+    for name in ["auth.py", "user.py", "token.py"]:
+        file = File(
+            project_id=project.id,
+            path=Path(name),
+            name=name,
+            extension=".py",
+            file_type=FileType.SOURCE,
+            size=128,
+        )
+        project.add_file(file)
+
+    service_1 = build_context_service(max_context_units=1)
+    package_1 = service_1.retrieve_context(project, "auth user token")
+    assert len(package_1.units) == 1
+
+    service_3 = build_context_service(max_context_units=3)
+    package_3 = service_3.retrieve_context(project, "auth user token")
+    assert len(package_3.units) > 1
+
+
+def test_cli_malformed_project_toml_fails_cleanly(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / ".contextforge.toml").write_text("INVALID TOML [[[", encoding="utf-8")
+    default_db = tmp_path / ".context_forge.db"
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Invalid project configuration" in captured.err
+    assert ".contextforge.toml" in captured.err
+    assert "Traceback" not in captured.err
+    assert not default_db.exists()
+
+
+def test_cli_malformed_global_toml_fails_cleanly(
+    monkeypatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home_dir)
+
+    global_cfg = home_dir / ".config" / "context-forge" / "config.toml"
+    global_cfg.parent.mkdir(parents=True, exist_ok=True)
+    global_cfg.write_text("MALFORMED [[[\n", encoding="utf-8")
+
+    default_db = project_dir / ".context_forge.db"
+
+    with (
+        patch.object(sys, "argv", ["context-forge", "analyze", str(project_dir)]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Invalid global configuration" in captured.err
+    assert "config.toml" in captured.err
+    assert "Traceback" not in captured.err
+    assert not default_db.exists()
+
+
+def test_cli_missing_configuration_falls_back_normally(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "hello.py").write_text("def hello(): pass\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home_dir)
+
+    default_db = project_dir / ".context_forge.db"
+
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(project_dir)]):
+        main()
+
+    assert default_db.is_file()
+
+
+def test_cli_malformed_project_toml_json_format_fails_cleanly(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / ".contextforge.toml").write_text("INVALID TOML [[[", encoding="utf-8")
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "analyze", str(tmp_path), "--format", "json"],
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    parsed = json.loads(captured.err)
+    assert parsed["status"] == "failed"
+    assert "Invalid project configuration" in parsed["message"]
+
+
 def test_context_command_rejects_empty_task(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -4677,10 +4945,33 @@ def test_corrupt_database_distinguished_from_absent_database(tmp_path: Path) -> 
     assert exc_info.value.code == "INDETERMINATE_FRESHNESS"
     assert "indeterminate" in str(exc_info.value)
     assert "missing" not in str(exc_info.value).lower()
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, sqlite3.DatabaseError)
 
     with pytest.raises(IndeterminateFreshnessError) as exc_info:
         load_fresh_project(tmp_path, allow_refresh=False)
     assert exc_info.value.code == "INDETERMINATE_FRESHNESS"
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, sqlite3.DatabaseError)
+
+    # Even with allow_refresh=True, an unreadable/corrupt database does NOT refresh or overwrite
+    with (
+        patch("context_forge.pipeline.freshness.ProjectAnalyzer") as mock_analyzer,
+        pytest.raises(IndeterminateFreshnessError) as exc_info,
+    ):
+        mock_analyzer.side_effect = AssertionError(
+            "ProjectAnalyzer should not be invoked for an unrecoverably corrupt database"
+        )
+        load_guarded_project(tmp_path, allow_refresh=True)
+
+    mock_analyzer.assert_not_called()
+    assert exc_info.value.code == "INDETERMINATE_FRESHNESS"
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, sqlite3.DatabaseError)
+    assert (
+        db_file.read_text(encoding="utf-8")
+        == "CORRUPTED_GARBAGE_NOT_A_SQLITE_DATABASE\n"
+    )
 
 
 @pytest.mark.parametrize(
