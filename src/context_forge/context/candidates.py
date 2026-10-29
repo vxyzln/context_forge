@@ -410,12 +410,15 @@ class CandidateGenerator:
         if not project.root_path.exists():
             return []
 
-        repository = GitRepository(project.root_path)
+        try:
+            repository = GitRepository(project.root_path)
 
-        if not repository.is_repository():
+            if not repository.is_repository():
+                return []
+
+            return repository.get_commits()
+        except FileNotFoundError:
             return []
-
-        return repository.get_commits()
 
     @staticmethod
     def _lexical_relevance(candidate: ContextCandidate) -> float:

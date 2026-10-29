@@ -872,3 +872,41 @@ def test_candidate_generator_deduplication_prefers_grounding_on_tie() -> None:
 
     assert len(result) == 1
     assert result[0].source == "task_grounding"
+
+
+def test_candidate_generator_handles_git_failure_gracefully(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = Project(
+        name="example",
+        root_path=tmp_path,
+    )
+
+    file = File(
+        project_id=project.id,
+        path=Path("src/auth.py"),
+        name="auth.py",
+        extension=".py",
+        file_type=FileType.SOURCE,
+    )
+    project.add_file(file)
+
+    from context_forge.git.repository import GitRepository
+
+    def missing_is_repository(self):
+        raise FileNotFoundError("git executable not found")
+
+    monkeypatch.setattr(GitRepository, "is_repository", missing_is_repository)
+
+    candidates, signals = CandidateGenerator().generate(project, "auth")
+    assert len(candidates) >= 1
+    assert file.id in signals
+
+    def permission_error_is_repository(self):
+        raise PermissionError("Permission denied: 'git'")
+
+    monkeypatch.setattr(GitRepository, "is_repository", permission_error_is_repository)
+
+    with pytest.raises(PermissionError):
+        CandidateGenerator().generate(project, "auth")

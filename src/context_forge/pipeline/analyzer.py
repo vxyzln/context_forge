@@ -1,3 +1,4 @@
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 
@@ -28,10 +29,13 @@ def current_fingerprints(
         )
         if not absolute_path.exists():
             continue
-        fingerprints[file.path] = fingerprint_file(
-            project.root_path,
-            file.path,
-        )
+        try:
+            fingerprints[file.path] = fingerprint_file(
+                project.root_path,
+                file.path,
+            )
+        except FileNotFoundError:
+            continue
     return fingerprints
 
 
@@ -286,9 +290,14 @@ class ProjectAnalyzer:
 
             git_repository = GitRepository(self.root_path)
 
-            if git_repository.is_repository():
-                commits = git_repository.get_commits()
-                project.git_activity = summarize_commits(commits)
+            try:
+                if git_repository.is_repository():
+                    commits = git_repository.get_commits()
+                    project.git_activity = summarize_commits(commits)
+            except FileNotFoundError:
+                pass
+            except (subprocess.SubprocessError, OSError) as error:
+                project.errors.append(f"Git activity extraction failed: {error}")
 
             project.analysis_status = "analyzed"
 

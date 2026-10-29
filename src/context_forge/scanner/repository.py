@@ -188,7 +188,12 @@ class RepositoryScanner:
         ):
             relative_path = directory_path.relative_to(self.root_path)
             parent_path = directory_path.parent
-            parent = directory_map[parent_path]
+            parent = directory_map.get(parent_path)
+            if parent is None:
+                project.errors.append(
+                    f"Inconsistent directory structure: parent directory '{parent_path}' not found for '{relative_path}'"
+                )
+                continue
 
             directory = Directory(
                 project_id=project.id,
@@ -216,7 +221,18 @@ class RepositoryScanner:
                 Path(".") if relative_path.parent == Path(".") else relative_path.parent
             )
 
-            directory = directory_lookup[directory_path]
+            directory = directory_lookup.get(directory_path)
+            if directory is None:
+                project.errors.append(
+                    f"Inconsistent directory structure: directory '{directory_path}' not found for file '{relative_path}'"
+                )
+                continue
+
+            try:
+                file_size = file_path.stat().st_size
+            except FileNotFoundError:
+                continue
+
             is_generated = self._is_generated(relative_path)
             is_ignored = file_path.name in IGNORED_FILES
 
@@ -227,7 +243,7 @@ class RepositoryScanner:
                 name=file_path.name,
                 extension=file_path.suffix.lower(),
                 file_type=self._classify_file(relative_path, is_generated),
-                size=file_path.stat().st_size,
+                size=file_size,
                 is_generated=is_generated,
                 is_ignored=is_ignored,
             )

@@ -197,3 +197,51 @@ def test_scanner_is_deterministic_in_structure(tmp_path: Path) -> None:
     ]
 
     assert first_structure == second_structure
+
+
+def test_scanner_handles_disappearing_file_gracefully(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    app_file = src / "app.py"
+    app_file.write_text("print('app')")
+    transient_file = src / "transient.py"
+    transient_file.write_text("print('transient')")
+
+    scanner = RepositoryScanner(tmp_path)
+    original_iter_files = scanner._iter_files
+
+    def iter_files_and_delete() -> list[Path]:
+        files = original_iter_files()
+        # Delete transient file between file discovery and file scanning
+        if transient_file.exists():
+            transient_file.unlink()
+        return files
+
+    scanner._iter_files = iter_files_and_delete
+    project = scanner.scan()
+
+    file_paths = {f.path for f in project.files}
+    assert Path("src/app.py") in file_paths
+    assert Path("src/transient.py") not in file_paths
+
+
+def test_scanner_reports_inconsistent_directory_structure(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    child = src / "child"
+    child.mkdir()
+    f = child / "mod.py"
+    f.write_text("x = 1")
+
+    scanner = RepositoryScanner(tmp_path)
+    # Simulate an inconsistent scan where parent directory 'src' is missing from directory discovery
+    scanner._iter_directories = lambda: [child]
+    project = scanner.scan()
+
+    assert any(
+        "Inconsistent directory structure: parent directory" in err
+        for err in project.errors
+    )
+    assert any(
+        "Inconsistent directory structure: directory" in err for err in project.errors
+    )

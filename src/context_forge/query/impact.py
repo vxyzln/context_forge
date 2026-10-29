@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from context_forge.comparison.models import is_terminal_complete_status
 from context_forge.models.file import File
 from context_forge.models.project import Project
 from context_forge.models.relationship import Relationship, RelationshipType
@@ -259,6 +260,7 @@ class ImpactResult:
     candidates: tuple[TargetCandidate, ...] = ()
     limitations: tuple[str, ...] = ()
     message: str = ""
+    depth_limited: bool = False
 
     @property
     def outcome(self) -> OperationOutcome:
@@ -283,18 +285,72 @@ class ImpactResult:
                     details={"candidate_count": len(self.candidates)},
                 )
             )
-        elif self.truncated:
-            status = OperationStatus.PARTIAL
+        elif self.status == "invalid":
+            status = OperationStatus.BLOCKED
             diagnostics.append(
-                DiagnosticItem.warning(
-                    f"Impact results truncated to limit {self.limit}",
-                    code="RESULTS_TRUNCATED",
+                DiagnosticItem.blocker(
+                    self.message or "Invalid target query",
+                    code="TARGET_INVALID",
                     source="impact",
-                    details={"limit": self.limit, "total": self.total},
                 )
             )
         else:
-            status = OperationStatus.SUCCESS
+            is_incomplete = self.status == "incomplete" or any(
+                lim.startswith("Repository analysis status is")
+                or "contains errors" in lim
+                or "Zero impact detected, but repository analysis is incomplete" in lim
+                for lim in self.limitations
+            )
+            is_depth_limited = self.depth_limited or any(
+                "Traversal depth was limited" in lim for lim in self.limitations
+            )
+            is_truncated = self.truncated
+
+            if is_incomplete:
+                for lim in self.limitations:
+                    if (
+                        lim.startswith("Repository analysis status is")
+                        or "contains errors" in lim
+                        or "Zero impact detected, but repository analysis is incomplete"
+                        in lim
+                    ):
+                        diagnostics.append(
+                            DiagnosticItem.warning(
+                                lim,
+                                code="INCOMPLETE_ANALYSIS",
+                                source="impact",
+                            )
+                        )
+
+            if is_truncated:
+                diagnostics.append(
+                    DiagnosticItem.warning(
+                        f"Impact results truncated to limit {self.limit}",
+                        code="RESULTS_TRUNCATED",
+                        source="impact",
+                        details={"limit": self.limit, "total": self.total},
+                    )
+                )
+
+            if is_depth_limited:
+                diagnostics.append(
+                    DiagnosticItem.warning(
+                        f"Impact results depth-limited to {self.max_depth} hop(s)",
+                        code="DEPTH_LIMIT_REACHED",
+                        source="impact",
+                        details={
+                            "max_depth": self.max_depth,
+                            "depth_reached": self.depth_reached,
+                        },
+                    )
+                )
+
+            if is_incomplete:
+                status = OperationStatus.INCOMPLETE
+            elif is_truncated or is_depth_limited:
+                status = OperationStatus.PARTIAL
+            else:
+                status = OperationStatus.SUCCESS
 
         return OperationOutcome(
             status=status,
@@ -316,6 +372,7 @@ class ImpactResult:
             "limit": self.limit,
             "max_depth": self.max_depth,
             "depth_reached": self.depth_reached,
+            "depth_limited": self.depth_limited,
             "truncated": self.truncated,
             "items": [item.to_dict() for item in self.items],
             "limitations": list(self.limitations),
@@ -574,7 +631,10 @@ def _build_limitations(
             "runtime reflection, and unresolved imports are not represented as impact edges."
         ),
     ]
-    if project.analysis_status != "analyzed":
+    is_complete_project = (
+        is_terminal_complete_status(project.analysis_status) and not project.errors
+    )
+    if not is_complete_project:
         limits.append(
             f"Repository analysis status is {project.analysis_status!r}; impact data "
             "may be incomplete."
@@ -582,6 +642,10 @@ def _build_limitations(
     if project.errors:
         limits.append(
             "The persisted analysis contains errors; some relationships may be missing."
+        )
+    if total == 0 and not is_complete_project:
+        limits.append(
+            "Zero impact detected, but repository analysis is incomplete; unindexed dependents may exist."
         )
     if depth_limited and max_depth is not None:
         limits.append(
@@ -1112,6 +1176,7 @@ def find_impact(
         candidates=(),
         limitations=limitations,
         message="",
+        depth_limited=depth_limited,
     )
 
 

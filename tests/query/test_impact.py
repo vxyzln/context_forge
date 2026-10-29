@@ -1142,3 +1142,86 @@ def test_impact_result_outcome_contract(tmp_path: Path) -> None:
     assert trunc_res.outcome.status == "partial"
     assert trunc_res.outcome.has_warnings
     assert trunc_res.outcome.warnings[0].code == "RESULTS_TRUNCATED"
+
+
+def test_impact_outcome_incomplete_analysis_and_zero_impact(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+    project.analysis_status = "failed"
+    project.errors = ["SyntaxError in service.py"]
+
+    res = find_impact(project, "User", direction="incoming")
+    assert res.outcome.is_incomplete
+    assert res.outcome.status == "incomplete"
+    assert any(w.code == "INCOMPLETE_ANALYSIS" for w in res.outcome.warnings)
+    assert "outcome" in res.to_dict()
+    assert res.to_dict()["outcome"]["status"] == "incomplete"
+
+    # For an isolated entity with 0 impact edges on an incomplete project
+    from context_forge.models.symbol import Symbol
+
+    isolated_sym = Symbol(
+        file_id=project.files[0].id,
+        name="IsolatedHelper",
+        kind="function",
+        start_line=50,
+        end_line=60,
+    )
+    project.add_symbol(isolated_sym)
+    zero_res = find_impact(project, "IsolatedHelper", direction="both")
+    assert zero_res.total == 0
+    assert zero_res.outcome.is_incomplete
+    assert any(
+        "Zero impact detected, but repository analysis is incomplete" in lim
+        for lim in zero_res.limitations
+    )
+
+
+def test_impact_outcome_depth_limited(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+    # models.py has incoming import from service.py, which has incoming import from client.py
+    res = find_impact(project, "src/pkg/models.py", direction="incoming", max_depth=1)
+    assert res.depth_limited is True
+    assert res.outcome.is_partial
+    assert res.outcome.status == "partial"
+    assert any(w.code == "DEPTH_LIMIT_REACHED" for w in res.outcome.warnings)
+
+
+def test_impact_outcome_combined_limitations(tmp_path: Path) -> None:
+    project = create_impact_test_project(tmp_path)
+    project.analysis_status = "failed"
+    project.errors = ["SyntaxError in service.py"]
+
+    # Add a second incoming import to models.py so total direct hits > 1
+    extra_file = File(
+        project_id=project.id,
+        path=Path("src/pkg/extra.py"),
+        name="extra.py",
+        extension=".py",
+    )
+    project.add_file(extra_file)
+    project.add_relationship(
+        Relationship(
+            source_id=extra_file.id,
+            target_id=project.files[1].id,  # models_file
+            relationship_type=RelationshipType.IMPORTS,
+        )
+    )
+
+    # models.py has 2 direct incoming edges and 1 indirect incoming edge (client.py via service.py)
+    # With max_depth=1 and limit=1 on an incomplete project:
+    res = find_impact(
+        project,
+        "src/pkg/models.py",
+        direction="incoming",
+        max_depth=1,
+        limit=1,
+    )
+    assert res.outcome.is_incomplete
+    assert res.outcome.status == "incomplete"
+    assert res.truncated is True
+    assert res.depth_limited is True
+
+    warning_codes = {w.code for w in res.outcome.warnings}
+    assert "INCOMPLETE_ANALYSIS" in warning_codes
+    assert "RESULTS_TRUNCATED" in warning_codes
+    assert "DEPTH_LIMIT_REACHED" in warning_codes

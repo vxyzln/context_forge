@@ -3270,7 +3270,10 @@ def run_impact(
 
     print("Direct impact:")
     if not direct_items:
-        print("  None detected.")
+        if result.outcome.is_incomplete:
+            print("  None detected (analysis incomplete; dependents may exist).")
+        else:
+            print("  None detected.")
     else:
         for item in direct_items:
             loc = f" ({item.related_path})" if item.related_path else ""
@@ -3283,7 +3286,10 @@ def run_impact(
         print()
         print("Indirect impact:")
         if not indirect_items:
-            print("  None detected.")
+            if result.outcome.is_incomplete:
+                print("  None detected (analysis incomplete; dependents may exist).")
+            else:
+                print("  None detected.")
         else:
             for item in indirect_items:
                 loc = f" ({item.related_path})" if item.related_path else ""

@@ -35,6 +35,42 @@ def test_repository_returns_none_for_non_git_directory(
     assert repository.get_info() is None
 
 
+def test_repository_handles_missing_git_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = GitRepository(tmp_path)
+
+    def mock_run_git_missing(*args, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory: 'git'")
+
+    monkeypatch.setattr(repository, "_run_git", mock_run_git_missing)
+    with pytest.raises(FileNotFoundError):
+        repository.is_repository()
+    with pytest.raises(FileNotFoundError):
+        repository.get_root()
+
+    status_missing = repository.get_status()
+    assert status_missing.is_repository is False
+    assert status_missing.outcome.status == "failed"
+    assert any(
+        d.code == "GIT_INVOCATION_FAILED" for d in status_missing.outcome.diagnostics
+    )
+
+    def mock_run_git_permission(*args, **kwargs):
+        raise PermissionError(13, "Permission denied: 'git'")
+
+    monkeypatch.setattr(repository, "_run_git", mock_run_git_permission)
+    with pytest.raises(PermissionError):
+        repository.is_repository()
+    with pytest.raises(PermissionError):
+        repository.get_root()
+
+    status = repository.get_status()
+    assert status.outcome.status == "failed"
+    assert any(d.code == "GIT_INVOCATION_FAILED" for d in status.outcome.diagnostics)
+
+
 def test_repository_gets_root(tmp_path: Path) -> None:
     run_git(tmp_path, "init")
 

@@ -25,7 +25,6 @@ class GitRepository:
             "--is-inside-work-tree",
             check=False,
         )
-
         return result.returncode == 0 and result.stdout.strip() == "true"
 
     def get_root(self) -> Path | None:
@@ -267,8 +266,31 @@ class GitRepository:
         untracked_mode: str = "all",
         timeout_seconds: float = 15.0,
     ) -> GitStatusResult:
-        root = self.get_root()
-        if root is None or not self.is_repository():
+        try:
+            root = self.get_root()
+            is_repo = self.is_repository() if root is not None else False
+        except (FileNotFoundError, PermissionError) as exc:
+            diag = DiagnosticItem.error(
+                f"Failed to invoke Git executable: {exc}",
+                code="GIT_INVOCATION_FAILED",
+                source="git",
+                path=str(self.root_path),
+            )
+            return GitStatusResult(
+                is_repository=False,
+                root_path=None,
+                branch=None,
+                head_hash=None,
+                entries=(),
+                limitations=(f"Git executable cannot be invoked: {exc}",),
+                outcome=OperationOutcome.failed(
+                    f"Failed to invoke Git executable: {exc}",
+                    diagnostics=(diag,),
+                    limitations=(f"Git executable cannot be invoked: {exc}",),
+                ),
+            )
+
+        if root is None or not is_repo:
             diag = DiagnosticItem.blocker(
                 f"Directory is not a Git repository: {self.root_path}",
                 code="NOT_A_GIT_REPOSITORY",

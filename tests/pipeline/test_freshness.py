@@ -363,6 +363,24 @@ def test_assess_indeterminate_filesystem_error(tmp_path: Path):
     assert any(d.code == "INDETERMINATE_FRESHNESS" for d in freshness.diagnostics)
 
 
+def test_compute_current_fingerprints_distinguishes_permission_error_from_deletion(
+    tmp_path: Path,
+):
+    from context_forge.pipeline.freshness import _compute_current_fingerprints
+
+    app_file = tmp_path / "app.py"
+    app_file.write_text("print('hello')")
+
+    with (
+        patch(
+            "context_forge.pipeline.freshness.fingerprint_file",
+            side_effect=PermissionError("Permission denied"),
+        ),
+        pytest.raises(PermissionError),
+    ):
+        _compute_current_fingerprints(tmp_path)
+
+
 def test_precedence_stale_takes_precedence_over_incomplete(tmp_path: Path):
     _setup_analyzed_repo(
         tmp_path,

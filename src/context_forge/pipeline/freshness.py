@@ -133,7 +133,10 @@ def _compute_current_fingerprints(
     for file in scanned_project.files:
         abs_path = (root_path / file.path).resolve()
         if abs_path.is_file():
-            fingerprints[file.path] = fingerprint_file(root_path, file.path)
+            try:
+                fingerprints[file.path] = fingerprint_file(root_path, file.path)
+            except FileNotFoundError:
+                continue
     return fingerprints
 
 

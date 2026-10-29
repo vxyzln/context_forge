@@ -335,6 +335,69 @@ def hello():
     assert project.git_activity is None
 
 
+def test_analyzer_handles_missing_git_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    def mock_run_git_missing(*args, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory: 'git'")
+
+    from context_forge.git.repository import GitRepository
+
+    monkeypatch.setattr(GitRepository, "_run_git", mock_run_git_missing)
+
+    database_path = tmp_path / ".context_forge.db"
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert project.analysis_status == "analyzed"
+    assert project.git_activity is None
+    assert not project.errors
+
+
+def test_analyzer_surfaces_git_permission_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_file = tmp_path / "main.py"
+    source_file.write_text(
+        """
+def hello():
+    return "hello"
+"""
+    )
+
+    def mock_run_git_permission(*args, **kwargs):
+        raise PermissionError(13, "Permission denied: 'git'")
+
+    from context_forge.git.repository import GitRepository
+
+    monkeypatch.setattr(GitRepository, "_run_git", mock_run_git_permission)
+
+    database_path = tmp_path / ".context_forge.db"
+
+    project = ProjectAnalyzer(
+        root_path=tmp_path,
+        database_path=database_path,
+    ).analyze()
+
+    assert project.analysis_status == "analyzed"
+    assert project.git_activity is None
+    assert len(project.errors) == 1
+    assert "Git activity extraction failed" in project.errors[0]
+
+
 def test_analyzer_repeated_analysis_is_deterministic(
     tmp_path: Path,
 ) -> None:
@@ -1773,6 +1836,26 @@ def test_analyzer_graph_relationships_consistent_with_cached_imports(
     ]
     assert len(cached_import_rels) == 1
     assert len(second_project.imports) == 1
+
+
+def test_current_fingerprints_handles_disappearing_file(tmp_path: Path) -> None:
+    from context_forge.pipeline.analyzer import current_fingerprints
+    from context_forge.scanner.repository import RepositoryScanner
+
+    a = tmp_path / "a.py"
+    a.write_text("def a(): pass\n", encoding="utf-8")
+    b = tmp_path / "b.py"
+    b.write_text("def b(): pass\n", encoding="utf-8")
+
+    project = RepositoryScanner(tmp_path).scan()
+    assert len(project.files) == 2
+
+    # b.py disappears right after scan
+    b.unlink()
+
+    fps = current_fingerprints(project)
+    assert Path("a.py") in fps
+    assert Path("b.py") not in fps
 
 
 # TODO: add benchmark coverage for large project analysis runs
