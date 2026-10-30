@@ -1,6 +1,6 @@
 [project]
 name = "context-forge-local"
-version = "1.0.1"
+version = "1.0.2"
 description = "Deterministic, local-first repository intelligence and memory vault for Python projects."
 readme = "README.md"
 requires-python = ">=3.13"
