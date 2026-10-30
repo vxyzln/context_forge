@@ -245,3 +245,101 @@ def test_scanner_reports_inconsistent_directory_structure(tmp_path: Path) -> Non
     assert any(
         "Inconsistent directory structure: directory" in err for err in project.errors
     )
+
+
+def test_scanner_traversal_and_globally_sorted_contracts(
+    tmp_path: Path,
+) -> None:
+    # Nested fixture designed to distinguish depth-first traversal from globally sorted output.
+    # root_z.py and root_a.py are at depth 0.
+    # In depth-first traversal (_iter_files), root files are discovered before descending into subdirectories.
+    # In globally sorted output (project.files), files are sorted by normalized relative POSIX path.
+    (tmp_path / "beta" / "sub").mkdir(parents=True)
+    (tmp_path / "alpha").mkdir(parents=True)
+
+    (tmp_path / "root_z.py").write_text("z = 1")
+    (tmp_path / "root_a.py").write_text("a = 1")
+    (tmp_path / "alpha" / "a.py").write_text("a = 1")
+    (tmp_path / "beta" / "b.py").write_text("b = 1")
+    (tmp_path / "beta" / "sub" / "s.py").write_text("s = 1")
+
+    scanner = RepositoryScanner(tmp_path)
+
+    # 1. Assert exact expected depth-first traversal order
+    iter_files = [
+        p.relative_to(scanner.root_path).as_posix() for p in scanner._iter_files()
+    ]
+    expected_iter_files = [
+        "root_a.py",
+        "root_z.py",
+        "alpha/a.py",
+        "beta/b.py",
+        "beta/sub/s.py",
+    ]
+    assert iter_files == expected_iter_files
+
+    iter_dirs = [
+        p.relative_to(scanner.root_path).as_posix() for p in scanner._iter_directories()
+    ]
+    expected_iter_dirs = [
+        "alpha",
+        "beta",
+        "beta/sub",
+    ]
+    assert iter_dirs == expected_iter_dirs
+
+    # 2. Assert exact expected globally sorted output in project.files and project.directories
+    project = scanner.scan()
+    project_files = [f.path.as_posix() for f in project.files]
+    expected_project_files = [
+        "alpha/a.py",
+        "beta/b.py",
+        "beta/sub/s.py",
+        "root_a.py",
+        "root_z.py",
+    ]
+    assert project_files == expected_project_files
+
+    project_dirs = [d.path.as_posix() for d in project.directories]
+    expected_project_dirs = [
+        ".",
+        "alpha",
+        "beta",
+        "beta/sub",
+    ]
+    assert project_dirs == expected_project_dirs
+
+    # 3. Assert repeated scan equality
+    second_scanner = RepositoryScanner(tmp_path)
+    second_project = second_scanner.scan()
+    assert [f.path.as_posix() for f in second_project.files] == expected_project_files
+    assert [
+        d.path.as_posix() for d in second_project.directories
+    ] == expected_project_dirs
+
+
+def test_scanner_respects_is_ignored_path_override_and_nested_ignores(
+    tmp_path: Path,
+) -> None:
+    class CustomScanner(RepositoryScanner):
+        def _is_ignored_path(self, path: Path) -> bool:
+            return super()._is_ignored_path(path) or any(
+                p.startswith("custom_") for p in path.relative_to(self.root_path).parts
+            )
+
+    (tmp_path / "custom_dir" / "nested").mkdir(parents=True)
+    (tmp_path / "custom_dir" / "nested" / "file.py").write_text("c = 1")
+    (tmp_path / "normal_dir").mkdir()
+    (tmp_path / "normal_dir" / "file.py").write_text("n = 1")
+
+    scanner = CustomScanner(tmp_path)
+    dirs = [
+        p.relative_to(scanner.root_path).as_posix() for p in scanner._iter_directories()
+    ]
+    files = [p.relative_to(scanner.root_path).as_posix() for p in scanner._iter_files()]
+
+    assert "custom_dir" not in dirs
+    assert "custom_dir/nested" not in dirs
+    assert "custom_dir/nested/file.py" not in files
+    assert dirs == ["normal_dir"]
+    assert files == ["normal_dir/file.py"]

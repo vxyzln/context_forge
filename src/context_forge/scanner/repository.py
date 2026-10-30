@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from context_forge.models.directory import Directory
@@ -132,13 +133,18 @@ class RepositoryScanner:
         return project
 
     def _iter_directories(self) -> list[Path]:
-        return [
-            path
-            for path in self.root_path.rglob("*")
-            if path.is_dir()
-            and not path.is_symlink()
-            and not self._is_ignored_path(path)
-        ]
+        directories = []
+        for root, dirnames, _ in os.walk(self.root_path):
+            dirnames[:] = [
+                d
+                for d in dirnames
+                if not self._is_ignored_path(Path(root) / d)
+                and not (Path(root) / d).is_symlink()
+            ]
+            dirnames.sort()
+            for d in dirnames:
+                directories.append(Path(root) / d)
+        return directories
 
     def _is_ignored_file(self, path: Path) -> bool:
         if path.name in IGNORED_FILES:
@@ -154,14 +160,26 @@ class RepositoryScanner:
         return False
 
     def _iter_files(self) -> list[Path]:
-        return [
-            path
-            for path in self.root_path.rglob("*")
-            if path.is_file()
-            and not path.is_symlink()
-            and not self._is_ignored_file(path)
-            and not self._is_ignored_path(path)
-        ]
+        files = []
+        for root, dirnames, filenames in os.walk(self.root_path):
+            dirnames[:] = [
+                d
+                for d in dirnames
+                if not self._is_ignored_path(Path(root) / d)
+                and not (Path(root) / d).is_symlink()
+            ]
+            dirnames.sort()
+            filenames.sort()
+            for f in filenames:
+                p = Path(root) / f
+                if (
+                    p.is_file()
+                    and not p.is_symlink()
+                    and not self._is_ignored_file(p)
+                    and not self._is_ignored_path(p)
+                ):
+                    files.append(p)
+        return files
 
     def _is_ignored_path(self, path: Path) -> bool:
         return any(

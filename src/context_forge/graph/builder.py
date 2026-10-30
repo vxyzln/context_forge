@@ -449,6 +449,9 @@ class RelationshipBuilder:
         self,
         symbols: list[Symbol],
     ) -> list[Symbol]:
+        if len(symbols) <= 1:
+            return list(symbols)
+
         unique: dict[UUID, Symbol] = {symbol.id: symbol for symbol in symbols}
 
         return sorted(
