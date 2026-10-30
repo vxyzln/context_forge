@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -1387,18 +1389,50 @@ def print_status_summary(
     print(f"Cache status: {'fresh' if freshness.is_fresh else 'stale'}")
 
 
+def _format_cache_paths(paths: Any, root_path: Path | None = None) -> list[str]:
+    if not paths:
+        return []
+    formatted: list[str] = []
+    resolved_root = root_path.resolve() if root_path is not None else None
+    for p in paths:
+        path_obj = Path(p) if not isinstance(p, Path) else p
+        if path_obj.is_absolute() and root_path is not None:
+            try:
+                rel = path_obj.relative_to(root_path)
+                formatted.append(rel.as_posix())
+                continue
+            except ValueError:
+                pass
+            if resolved_root is not None:
+                try:
+                    rel = path_obj.resolve().relative_to(resolved_root)
+                    formatted.append(rel.as_posix())
+                    continue
+                except ValueError:
+                    pass
+            formatted.append(path_obj.as_posix())
+        else:
+            formatted.append(path_obj.as_posix())
+    return sorted(formatted)
+
+
 def print_cache_summary(
-    repository_key,
+    repository_key: str,
     metadata,
     fingerprints,
     freshness,
     output_format: str = "text",
+    root_path: Path | None = None,
 ) -> None:
     changes = freshness.changes
 
-    added = sorted(changes.added) if changes is not None else []
-    modified = sorted(changes.modified) if changes is not None else []
-    deleted = sorted(changes.deleted) if changes is not None else []
+    added = _format_cache_paths(changes.added, root_path) if changes is not None else []
+    modified = (
+        _format_cache_paths(changes.modified, root_path) if changes is not None else []
+    )
+    deleted = (
+        _format_cache_paths(changes.deleted, root_path) if changes is not None else []
+    )
 
     payload = {
         "added_paths": added,
@@ -1513,12 +1547,106 @@ def print_inspection_summary(
         print(f"  {item.relationship_type.value}: {item.source_id} -> {item.target_id}")
 
 
+@dataclass(frozen=True)
+class _DiagnosticSummaryRecord:
+    severity: str
+    message: str
+    path: str | None = None
+    line: int | None = None
+
+
+_LOCATION_ERROR_RE = re.compile(
+    r"^(?P<path>(?:[a-zA-Z]:[\\/])?[^:\r\n]+):(?P<line>\d+):(?P<col>\d+):\s*(?P<msg>.*)$"
+)
+_NO_PARSER_ERROR_RE = re.compile(
+    r"^(?P<path>(?:[a-zA-Z]:[\\/])?[^:\r\n]+):\s*(?P<msg>no parser available.*)$"
+)
+
+
+def _normalize_diagnostic_error(item: Any) -> _DiagnosticSummaryRecord:
+    if hasattr(item, "severity") and hasattr(item, "message"):
+        path_val = getattr(item, "path", None)
+        path_str = str(path_val) if path_val is not None else None
+        line_val = getattr(item, "line", None)
+        try:
+            line_int = int(line_val) if line_val is not None else None
+        except (ValueError, TypeError):
+            line_int = None
+        severity_val = str(getattr(item, "severity", "error"))
+        message_val = str(getattr(item, "message", ""))
+        return _DiagnosticSummaryRecord(
+            severity=severity_val,
+            message=message_val,
+            path=path_str,
+            line=line_int,
+        )
+
+    if isinstance(item, dict):
+        path_val = item.get("path")
+        path_str = str(path_val) if path_val is not None else None
+        line_val = item.get("line")
+        try:
+            line_int = int(line_val) if line_val is not None else None
+        except (ValueError, TypeError):
+            line_int = None
+        severity_val = str(item.get("severity", "error"))
+        message_val = str(item.get("message", ""))
+        return _DiagnosticSummaryRecord(
+            severity=severity_val,
+            message=message_val,
+            path=path_str,
+            line=line_int,
+        )
+
+    raw = str(item).strip()
+    location_match = _LOCATION_ERROR_RE.match(raw)
+    if location_match:
+        candidate_path = location_match.group("path").strip()
+        # Ensure candidate_path is plausibly a file path (has slashes, backslashes, or a file extension)
+        # to avoid misinterpreting messages like 'Request failed:12:4: timeout'
+        if (
+            "/" in candidate_path
+            or "\\" in candidate_path
+            or (Path(candidate_path).suffix and not candidate_path.endswith("."))
+        ):
+            line_num = int(location_match.group("line"))
+            line_val = line_num if line_num > 0 else None
+            msg = location_match.group("msg").strip()
+            return _DiagnosticSummaryRecord(
+                severity="error",
+                message=msg,
+                path=candidate_path or None,
+                line=line_val,
+            )
+
+    no_parser_match = _NO_PARSER_ERROR_RE.match(raw)
+    if no_parser_match:
+        path_str = no_parser_match.group("path").strip() or None
+        msg = no_parser_match.group("msg").strip()
+        return _DiagnosticSummaryRecord(
+            severity="error",
+            message=msg,
+            path=path_str,
+            line=None,
+        )
+
+    return _DiagnosticSummaryRecord(
+        severity="error",
+        message=raw,
+        path=None,
+        line=None,
+    )
+
+
 def print_diagnostics_summary(
     project,
     output_format: str = "text",
 ) -> None:
+    raw_errors = project.errors if project.errors else []
+    normalized_errors = [_normalize_diagnostic_error(err) for err in raw_errors]
+
     errors = sorted(
-        project.errors,
+        normalized_errors,
         key=lambda item: (
             str(item.path or ""),
             item.line if item.line is not None else -1,
@@ -1545,15 +1673,15 @@ def print_diagnostics_summary(
         return
 
     print(f"Repository: {project.root_path}")
-    print(f"Analysis errors: {len(project.errors)}")
+    print(f"Analysis errors: {len(raw_errors)}")
 
-    if not project.errors:
+    if not raw_errors:
         print("No analysis errors.")
         return
 
     print()
 
-    for error in project.errors:
+    for error in errors:
         print(f"[{error.severity}] {error.message}")
         if error.path is not None:
             print(f"  Path: {error.path}")
@@ -1772,7 +1900,12 @@ def run_cache(path: Path, output_format: str = "text") -> None:
     )
 
     print_cache_summary(
-        repository_key, metadata, fingerprints, freshness, output_format
+        repository_key,
+        metadata,
+        fingerprints,
+        freshness,
+        output_format,
+        root_path=root_path,
     )
 
 

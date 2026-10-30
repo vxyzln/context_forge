@@ -6791,3 +6791,377 @@ def test_comparison_files_by_path_handles_empty_and_normal_states() -> None:
     assert diff.is_complete
     assert len(diff.added_files) == 0
     assert len(diff.removed_files) == 0
+
+
+def test_diagnostics_command_with_raw_string_errors(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": tmp_path.resolve(),
+            "errors": [
+                "broken.py:12:4: invalid syntax (broken.py, line 12)",
+                "mod.py: no parser available for language 'unknown'",
+                "Inconsistent directory structure: parent missing",
+            ],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "diagnostics", str(tmp_path)],
+        ),
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(None, "key", project, None),
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "[error] invalid syntax (broken.py, line 12)" in captured.out
+    assert "  Path: broken.py" in captured.out
+    assert "  Line: 12" in captured.out
+    assert "[error] no parser available for language 'unknown'" in captured.out
+    assert "  Path: mod.py" in captured.out
+    assert "[error] Inconsistent directory structure: parent missing" in captured.out
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "diagnostics", str(tmp_path), "--format", "json"],
+        ),
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(None, "key", project, None),
+        ),
+    ):
+        main()
+
+    captured_json = capsys.readouterr()
+    assert captured_json.err == ""
+    data = json.loads(captured_json.out)
+    assert len(data["errors"]) == 3
+    broken_entry = next(e for e in data["errors"] if e["path"] == "broken.py")
+    assert broken_entry["line"] == 12
+    assert broken_entry["severity"] == "error"
+
+
+def test_diagnostics_real_syntax_error_handling(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "broken.py").write_text("def broken(\n")
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(sys, "argv", ["context-forge", "diagnostics", str(tmp_path)]):
+        main()
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Analysis errors: 1" in captured.out
+    assert "Path: broken.py" in captured.out
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "diagnostics", str(tmp_path), "--format", "json"],
+    ):
+        main()
+    captured_json = capsys.readouterr()
+    assert captured_json.err == ""
+    data = json.loads(captured_json.out)
+    assert len(data["errors"]) == 1
+    assert data["errors"][0]["path"] == "broken.py"
+    assert data["errors"][0]["line"] == 1
+
+
+def test_cache_command_outputs_json_with_path_objects_in_changes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Changes:
+        added = (Path("z.py"), Path("a.py"))
+        modified = (Path("d.py"), Path("b.py"))
+        deleted = (Path("y.py"), Path("c.py"))
+
+    class Freshness:
+        is_fresh = False
+        reason = "Files were modified"
+        changes = Changes()
+
+    class Repository:
+        def check_cache_freshness(self, repository_key, fingerprints):
+            return Freshness()
+
+    project = type(
+        "Project",
+        (),
+        {"root_path": tmp_path.resolve()},
+    )()
+
+    metadata = type(
+        "Metadata",
+        (),
+        {"cache_schema_version": 1, "analyzer_version": "0.1.0"},
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "cache", str(tmp_path), "--format", "json"],
+        ),
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(Repository(), "sample-key", project, metadata),
+        ),
+        patch(
+            "context_forge.main.current_fingerprints",
+            return_value={"tracked.py": "hash"},
+        ),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+    assert json.loads(captured.out) == {
+        "added_paths": ["a.py", "z.py"],
+        "cache_status": "stale",
+        "deleted_paths": ["c.py", "y.py"],
+        "freshness_reason": "Files were modified",
+        "modified_paths": ["b.py", "d.py"],
+        "repository": "sample-key",
+        "tracked_files": 1,
+    }
+
+
+def test_cache_real_lifecycle_modified_added_deleted_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    f1 = tmp_path / "file1.py"
+    f1.write_text("x = 1\n")
+    with patch.object(sys, "argv", ["context-forge", "analyze", str(tmp_path)]):
+        main()
+    capsys.readouterr()
+
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "cache", str(tmp_path), "--format", "json"],
+    ):
+        main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["cache_status"] == "fresh"
+    assert out["modified_paths"] == []
+    assert out["added_paths"] == []
+    assert out["deleted_paths"] == []
+
+    f1.write_text("x = 2\n")
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "cache", str(tmp_path), "--format", "json"],
+    ):
+        main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["cache_status"] == "stale"
+    assert out["modified_paths"] == ["file1.py"]
+    assert out["added_paths"] == []
+    assert out["deleted_paths"] == []
+
+    f1.unlink()
+    with patch.object(
+        sys,
+        "argv",
+        ["context-forge", "cache", str(tmp_path), "--format", "json"],
+    ):
+        main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["cache_status"] == "stale"
+    assert "file1.py" in out["deleted_paths"]
+
+
+def test_emit_json_strictly_raises_on_unsupported_objects() -> None:
+    from context_forge.main import _emit_json
+
+    # Sets must not be silently converted to strings
+    with pytest.raises(TypeError):
+        _emit_json({"unsupported_set": {1, 2, 3}})
+
+    # Arbitrary objects must not be silently converted to strings
+    class Unserializable:
+        pass
+
+    with pytest.raises(TypeError):
+        _emit_json({"obj": Unserializable()})
+
+
+def test_format_cache_paths_comprehensive_cases(tmp_path: Path) -> None:
+    from context_forge.main import _format_cache_paths
+
+    repo_root = tmp_path / "my_project"
+    repo_root.mkdir()
+
+    # 1. Relative paths
+    rel_paths = [Path("z.py"), Path("sub/b.py"), Path("a.py")]
+    assert _format_cache_paths(rel_paths, repo_root) == ["a.py", "sub/b.py", "z.py"]
+
+    # 2. Absolute paths inside repository
+    abs_inside = [repo_root / "src/b.py", repo_root / "a.py"]
+    assert _format_cache_paths(abs_inside, repo_root) == ["a.py", "src/b.py"]
+
+    # 3. Absolute paths outside repository must not be silently relativized
+    abs_outside = [Path("/outside/shared/lib.py")]
+    assert _format_cache_paths(abs_outside, repo_root) == ["/outside/shared/lib.py"]
+
+    # 4. Non-path repository key (root_path is None or non-path identifier)
+    assert _format_cache_paths(
+        [Path("file1.py"), Path("file2.py")], root_path=None
+    ) == [
+        "file1.py",
+        "file2.py",
+    ]
+
+    # 5. Empty collections
+    assert _format_cache_paths([], repo_root) == []
+    assert _format_cache_paths(None, repo_root) == []
+
+
+def test_diagnostic_error_normalization_cross_platform_and_edge_cases() -> None:
+    from context_forge.main import _normalize_diagnostic_error
+
+    # Unix absolute path
+    res = _normalize_diagnostic_error("/repo/broken.py:12:4: invalid syntax")
+    assert res.path == "/repo/broken.py"
+    assert res.line == 12
+    assert res.message == "invalid syntax"
+
+    # Windows drive-letter path with backslashes
+    res = _normalize_diagnostic_error("C:\\repo\\broken.py:12:4: invalid syntax")
+    assert res.path == "C:\\repo\\broken.py"
+    assert res.line == 12
+    assert res.message == "invalid syntax"
+
+    # Windows drive-letter path with forward slashes
+    res = _normalize_diagnostic_error("C:/repo/broken.py:12:4: invalid syntax")
+    assert res.path == "C:/repo/broken.py"
+    assert res.line == 12
+    assert res.message == "invalid syntax"
+
+    # Path containing spaces
+    res = _normalize_diagnostic_error("src/my module.py:12:4: invalid syntax")
+    assert res.path == "src/my module.py"
+    assert res.line == 12
+    assert res.message == "invalid syntax"
+
+    # Message containing additional colons
+    res = _normalize_diagnostic_error('broken.py:10:2: SyntaxError: expected ":"')
+    assert res.path == "broken.py"
+    assert res.line == 10
+    assert res.message == 'SyntaxError: expected ":"'
+
+    # General message with period/dot must remain unlocated
+    res = _normalize_diagnostic_error("Failed reading config.json: cannot decode")
+    assert res.path is None
+    assert res.line is None
+    assert res.message == "Failed reading config.json: cannot decode"
+
+    # General message with module dot syntax must remain unlocated
+    res = _normalize_diagnostic_error("module.submodule: execution timed out")
+    assert res.path is None
+    assert res.line is None
+    assert res.message == "module.submodule: execution timed out"
+
+    # Normal unlocated scanner error
+    res = _normalize_diagnostic_error(
+        "Inconsistent directory structure: parent directory 'foo' not found"
+    )
+    assert res.path is None
+    assert res.line is None
+    assert (
+        res.message
+        == "Inconsistent directory structure: parent directory 'foo' not found"
+    )
+
+    # Parser-unavailable error with file path
+    res = _normalize_diagnostic_error(
+        "mod.py: no parser available for language 'unknown'"
+    )
+    assert res.path == "mod.py"
+    assert res.line is None
+    assert res.message == "no parser available for language 'unknown'"
+
+    # Windows parser-unavailable error
+    res = _normalize_diagnostic_error(
+        "C:\\repo\\mod.py: no parser available for language 'unknown'"
+    )
+    assert res.path == "C:\\repo\\mod.py"
+    assert res.line is None
+    assert res.message == "no parser available for language 'unknown'"
+
+    # Ambiguous colon-separated unlocated message must remain unlocated
+    res = _normalize_diagnostic_error("Request failed:12:4: timeout")
+    assert res.path is None
+    assert res.line is None
+    assert res.message == "Request failed:12:4: timeout"
+
+
+def test_diagnostics_cli_with_cross_platform_and_unlocated_errors(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = type(
+        "Project",
+        (),
+        {
+            "root_path": tmp_path.resolve(),
+            "errors": [
+                "C:\\repo\\broken.py:12:4: invalid syntax",
+                "/unix/broken.py:5:1: unexpected token",
+                "Failed reading config.json: cannot decode",
+                "mod.py: no parser available for language 'unknown'",
+            ],
+        },
+    )()
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["context-forge", "diagnostics", str(tmp_path), "--format", "json"],
+        ),
+        patch(
+            "context_forge.main.load_project_analysis",
+            return_value=(None, "key", project, None),
+        ),
+    ):
+        main()
+
+    data = json.loads(capsys.readouterr().out)
+    assert len(data["errors"]) == 4
+
+    # Verify unlocated error stays unlocated
+    unlocated = next(
+        e for e in data["errors"] if "Failed reading config.json" in e["message"]
+    )
+    assert unlocated["path"] is None
+    assert unlocated["line"] is None
+
+    # Verify Windows path correctly captured
+    win_entry = next(e for e in data["errors"] if e["path"] == "C:\\repo\\broken.py")
+    assert win_entry["line"] == 12
+
+    # Verify Unix path correctly captured
+    unix_entry = next(e for e in data["errors"] if e["path"] == "/unix/broken.py")
+    assert unix_entry["line"] == 5
+
+    # Verify parser-unavailable correctly captured
+    no_parser = next(e for e in data["errors"] if e["path"] == "mod.py")
+    assert no_parser["line"] is None
+    assert "no parser available" in no_parser["message"]

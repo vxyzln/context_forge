@@ -1,6 +1,8 @@
 from pathlib import Path
 from uuid import UUID
 
+import pytest
+
 from context_forge.storage.cache import (
     ANALYZER_VERSION,
     CACHE_SCHEMA_VERSION,
@@ -610,3 +612,74 @@ def test_determine_cache_invalidation_for_missing_current_fingerprints() -> None
         paths=frozenset(),
         reason="missing_current_fingerprints",
     )
+
+
+def test_fingerprint_file_relative_path_inside_root(tmp_path: Path) -> None:
+    source = tmp_path / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("code", encoding="utf-8")
+
+    fp = fingerprint_file(tmp_path, Path("src/app.py"))
+    assert fp.path == Path("src/app.py")
+    assert fp.size == 4
+
+
+def test_fingerprint_file_absolute_path_inside_root(tmp_path: Path) -> None:
+    source = tmp_path / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("code", encoding="utf-8")
+
+    fp = fingerprint_file(tmp_path, source.resolve())
+    assert fp.path == Path("src/app.py")
+
+
+def test_fingerprint_file_relative_path_traversal_outside_root(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "secret.py"
+    outside.write_text("secret", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        fingerprint_file(repo, Path("../secret.py"))
+
+
+def test_fingerprint_file_absolute_path_outside_root(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("outside", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        fingerprint_file(repo, outside.resolve())
+
+
+def test_fingerprint_file_symlink_pointing_outside_root(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("secret", encoding="utf-8")
+
+    symlink_file = repo / "sym_outside.py"
+    try:
+        symlink_file.symlink_to(outside)
+    except OSError as err:
+        pytest.skip(f"Symlinks not supported in test environment: {err}")
+
+    with pytest.raises(ValueError):
+        fingerprint_file(repo, Path("sym_outside.py"))
+
+
+def test_fingerprint_file_relative_root_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    inside = repo / "mod.py"
+    inside.write_text("data", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    fp = fingerprint_file(Path("repo"), Path("mod.py"))
+    assert fp.path == Path("mod.py")
