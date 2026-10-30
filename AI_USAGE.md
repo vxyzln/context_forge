@@ -39,8 +39,9 @@ I used AI to remove code that was no longer needed. Around 8,000 lines of code w
 ### 4. Testing, Packaging, and Final Cleanup
 
 When it was time to test and package the project, I used AI to help with Python packaging because I had not built a package before.
+I used AI to remove the dead code which would be left and also i used to make minor perfomance improvements and also fix 2-3 errors foe windows file's path which would pevous give error. it helped me remove some dead code and debug and find 3-4 more issues which were fixed.
 
-I also used AI to review the repository for redundant logic and unwanted comments or docstrings. Moreover,i used Ai and AI helped me create the example projects under test_projects, which reviewers and other users can use to explore how Context Forge works.
+Moreover,i used Ai and AI helped me create the example projects under test_projects, which reviewers and other users can use to explore how Context Forge works.
 
 Tests can be seen under the test-project folder.
 

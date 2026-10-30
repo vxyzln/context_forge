@@ -102,6 +102,7 @@ My commit message followed a pretty conventional style
 - **test** : when added test for a feature or i improved or changes the existing tests
 - **chore** : maintanance which doesnt change the main code in its working like git ignore or housekeeping etc. or removing unwanted file which were accidentally committted
 - **docs** : when updating documents or guidlines or usage instructions
+- **perf** : when changes were made for the perfomance improvements of the tool
 
 this was the commit style i followed through out my project. i saw it in one of the theo3.gg 's video and liked it as it provided enough to understand what this commit is about and also i saw this style in the StarDance's guide for committing changes as an option and gave it a try in this project.
 

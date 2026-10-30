@@ -22,6 +22,7 @@ cf --help
    - [`cf refresh`](#cf-refresh)
    - [`cf status`](#cf-status)
    - [`cf cache`](#cf-cache)
+   - [`cf history` (aliases: `execution-history`)](#cf-history-aliases-execution-history)
    - [`cf preflight`](#cf-preflight)
 5. [Context Retrieval & Memory Commands](#context-retrieval--memory-commands)
    - [`cf context`](#cf-context)
@@ -325,6 +326,71 @@ cf cache /path/to/project --format json
 
 **When to use it**  
 Use `cf cache` to determine if project source files have drifted from the indexed database without modifying any database records.
+
+---
+
+### `cf history` (aliases: `execution-history`)
+
+**What it does**
+Displays command execution history and observability records persisted in the repository database (`.context_forge.db`). Shows timestamp, command executed, outcome (`success` or `failed`), execution duration, execution record ID, and error details for failed commands.
+
+**Syntax**
+```bash
+cf history [<path>] [--limit <limit>] [--format {text,json}]
+```
+
+**Aliases**
+- `cf execution-history`
+
+**Arguments**
+- `<path>` *(optional, positional)*: Repository root directory to inspect execution history for. Defaults to current directory (`.`).
+
+**Options and flags**
+- `--limit <limit>`: Maximum number of execution history records to display. Default: `10`.
+- `--format {text,json}`: Output format (`text` or `json`). Default: `text`.
+
+**Examples**
+```bash
+# View recent execution records for the current repository
+cf history
+
+# View recent executions with a custom limit
+cf history --limit 5
+
+# Use the execution-history alias with JSON output
+cf execution-history /path/to/project --format json
+```
+
+**Output**
+- **Text output**:
+  ```text
+  Repository: /path/to/project
+  Executions (2):
+    [2026-10-29T13:13:30.680809+00:00] analyze - success (0.002s) id=aa70e79f-13b0-4877-8548-6b720ac21d75
+    [2026-10-29T13:13:29.819228+00:00] analyze - failed (0.002s) id=c6ac22a3-2c07-45ef-a21b-1b26f1977e3a
+      Error: RuntimeError: AST parse error
+  ```
+  If no execution records exist:
+  ```text
+  Repository: /path/to/project
+  No execution history found.
+  ```
+- **JSON output**:
+  ```json
+  {"executions":[{"command":"analyze","duration_seconds":0.002050958006293513,"error_message":null,"error_type":null,"finished_at":"2026-10-29T13:13:30.681778+00:00","id":"aa70e79f-13b0-4877-8548-6b720ac21d75","outcome":"success","repository_path":"/path/to/project","started_at":"2026-10-29T13:13:30.680809+00:00"},{"command":"analyze","duration_seconds":0.002401499994448386,"error_message":"AST parse error","error_type":"RuntimeError","finished_at":"2026-10-29T13:13:29.821185+00:00","id":"c6ac22a3-2c07-45ef-a21b-1b26f1977e3a","outcome":"failed","repository_path":"/path/to/project","started_at":"2026-10-29T13:13:29.819228+00:00"}],"limit":2,"repository":"/path/to/project","total":2}
+  ```
+
+**When to use it**
+Use `cf history` to audit previous tool runs, inspect execution durations, verify pipeline automation, and troubleshoot recent analysis failures.
+
+**Behavior and limitations**
+- **Read-only**: Reads from the `execution_history` table in `.context_forge.db` without modifying database state.
+- **Missing database**: If the database file does not exist, reports empty execution history rather than raising an error.
+- **Chronological ordering**: Returns records ordered with the most recent execution first.
+
+**Errors and exit behavior**
+- Exits with code 1 if `<path>` does not exist or is not a directory.
+- Exits with code 1 if `--limit` is less than 1 (`Error: History limit must be a positive integer`).
 
 ---
 
@@ -714,7 +780,7 @@ cf path <start> <end> [--path <project_path>] [--direction {both,incoming,outgoi
 - `--path, -p <project_path>`: Repository root directory. Default: `.`.
 - `--direction {both,incoming,outgoing}`: Direction of relationship traversal. Default: `both`.
 - `--type {imports,references,inherits,calls,depends_on}`: Filter traversed relationships by type. Default: `None` (all).
-- `--depth, --max-depth <max_depth>`: Maximum graph traversal depth. Default: `5`.
+- `--depth, --max-depth <max_depth>`: Maximum graph traversal depth for shortest path search. Default: `10`.
 - `--max-expansions <max_expansions>`: Maximum graph nodes expanded before terminating search. Default: `1000`.
 - `--format {text,json}`: Output format (`text` or `json`). Default: `text`.
 - `--no-refresh`: Disable automatic background refresh when stale.
@@ -777,7 +843,7 @@ cf health [<path>] [--limit <limit>] [--format {text,json}]
 - `<path>` *(optional, positional)*: Repository root directory. Defaults to `.`.
 
 **Options and flags**
-- `--limit <limit>`: Maximum structural findings displayed per category. Default: `10`.
+- `--limit <limit>`: Maximum structural health findings displayed per category. Default: `50`.
 - `--format {text,json}`: Output format (`text` or `json`). Default: `text`.
 
 **Examples**
@@ -1099,6 +1165,7 @@ cf --logo
 | [`cf refresh`](#cf-refresh) | — | Refresh repository analysis and cached intelligence. |
 | [`cf status`](#cf-status) | — | Show repository file, symbol, relationship counts, and cache freshness. |
 | [`cf cache`](#cf-cache) | — | Show repository cache state, tracked file count, and file modification details. |
+| [`cf history`](#cf-history-aliases-execution-history) | `execution-history` | Show command execution history and observability records. |
 | [`cf preflight`](#cf-preflight) | — | Perform a read-only environment, Git, and configuration readiness audit. |
 | [`cf context`](#cf-context) | — | Retrieve deterministic, budgeted context package JSON for a task. |
 | [`cf inspect`](#cf-inspect) | — | Inspect complete persisted repository intelligence inventory. |
