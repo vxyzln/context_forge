@@ -11,6 +11,7 @@ from context_forge.parser.python import PythonParser
 from context_forge.parser.result import ParseResult
 from context_forge.scanner.repository import RepositoryScanner
 from context_forge.storage.cache import (
+    CacheFreshness,
     RepositoryCacheMetadata,
     RepositoryIdentity,
     fingerprint_file,
@@ -146,48 +147,34 @@ class ProjectAnalyzer:
         current_paths = {file.path for file in files}
         changed_or_added = changed_paths & current_paths
 
+        preserved_file_ids = {
+            file.id
+            for file in cached_project.files
+            if file.path not in changed_or_added and file.path in current_paths
+        }
+
         cached_symbols = [
             symbol
             for symbol in cached_project.symbols
-            if symbol.file_id
-            in {
-                file.id
-                for file in cached_project.files
-                if file.path not in changed_or_added and file.path in current_paths
-            }
+            if symbol.file_id in preserved_file_ids
         ]
 
         cached_imports = [
             reference
             for reference in cached_project.imports
-            if reference.file_id
-            in {
-                file.id
-                for file in cached_project.files
-                if file.path not in changed_or_added and file.path in current_paths
-            }
+            if reference.file_id in preserved_file_ids
         ]
 
         cached_references = [
             reference
             for reference in cached_project.references
-            if reference.file_id
-            in {
-                file.id
-                for file in cached_project.files
-                if file.path not in changed_or_added and file.path in current_paths
-            }
+            if reference.file_id in preserved_file_ids
         ]
 
         cached_inheritance_references = [
             reference
             for reference in cached_project.inheritance_references
-            if reference.file_id
-            in {
-                file.id
-                for file in cached_project.files
-                if file.path not in changed_or_added and file.path in current_paths
-            }
+            if reference.file_id in preserved_file_ids
         ]
 
         cached_project.directories = directories
@@ -212,6 +199,7 @@ class ProjectAnalyzer:
         cached_project.frameworks = scanned_project.frameworks
         cached_project.package_manager = scanned_project.package_manager
         cached_project.analysis_status = scanned_project.analysis_status
+        cached_project.clear_membership_caches()
 
         return cached_project
 
@@ -238,22 +226,49 @@ class ProjectAnalyzer:
             current_fingerprints,
         )
 
-        cached_analysis = self.repository.load_analysis(
-            self.identity.key,
-        )
+        cached_analysis = None
+        if freshness.is_fresh:
+            cached_analysis = self.repository.load_analysis(
+                self.identity.key,
+            )
+            if (
+                cached_analysis is not None
+                and cached_analysis[0].analysis_status == "analyzed"
+            ):
+                project, _ = cached_analysis
+                return project
 
         if (
-            freshness.is_fresh
-            and cached_analysis is not None
-            and cached_analysis[0].analysis_status == "analyzed"
+            cached_analysis is not None
+            and cached_analysis[0].analysis_status != "analyzed"
         ):
-            project, _ = cached_analysis
-            return project
+            invalidation = self.repository.refresh_cache_state(
+                self.identity.key,
+                current_fingerprints,
+                freshness=CacheFreshness(
+                    is_fresh=False,
+                    reason=f"incomplete_cache_{cached_analysis[0].analysis_status}",
+                ),
+            )
+            cached_analysis = None
+        else:
+            invalidation = self.repository.refresh_cache_state(
+                self.identity.key,
+                current_fingerprints,
+                freshness=freshness,
+            )
 
-        invalidation = self.repository.refresh_cache_state(
-            self.identity.key,
-            current_fingerprints,
-        )
+        if invalidation.full:
+            cached_analysis = None
+        elif cached_analysis is None:
+            cached_analysis = self.repository.load_analysis(
+                self.identity.key,
+            )
+            if (
+                cached_analysis is not None
+                and cached_analysis[0].analysis_status != "analyzed"
+            ):
+                cached_analysis = None
 
         if cached_analysis is None or invalidation.full:
             project = scanned_project

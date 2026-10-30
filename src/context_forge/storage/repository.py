@@ -121,8 +121,8 @@ class ProjectRepository:
             (repository_key,),
         )
 
-        for fingerprint in fingerprints:
-            connection.execute(
+        if fingerprints:
+            connection.executemany(
                 """
                 INSERT INTO repository_file_fingerprints (
                     repository_key,
@@ -133,13 +133,16 @@ class ProjectRepository:
                 )
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (
-                    repository_key,
-                    fingerprint.path.as_posix(),
-                    fingerprint.size,
-                    fingerprint.modified_at_ns,
-                    fingerprint.content_hash,
-                ),
+                [
+                    (
+                        repository_key,
+                        fingerprint.path.as_posix(),
+                        fingerprint.size,
+                        fingerprint.modified_at_ns,
+                        fingerprint.content_hash,
+                    )
+                    for fingerprint in fingerprints
+                ],
             )
 
     def load_file_fingerprints(
@@ -216,11 +219,13 @@ class ProjectRepository:
         self,
         repository_key: str,
         current_fingerprints: dict[Path, FileFingerprint],
+        freshness: CacheFreshness | None = None,
     ) -> CacheInvalidation:
-        freshness = self.check_cache_freshness(
-            repository_key,
-            current_fingerprints,
-        )
+        if freshness is None:
+            freshness = self.check_cache_freshness(
+                repository_key,
+                current_fingerprints,
+            )
         invalidation = determine_cache_invalidation(
             freshness,
         )
@@ -615,8 +620,8 @@ class ProjectRepository:
             ),
         )
 
-        for directory in project.directories:
-            connection.execute(
+        if project.directories:
+            connection.executemany(
                 """
                 INSERT OR REPLACE INTO directories (
                     id,
@@ -629,19 +634,22 @@ class ProjectRepository:
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    str(directory.id),
-                    str(directory.project_id),
-                    str(directory.path),
-                    directory.name,
-                    str(directory.parent_id) if directory.parent_id else None,
-                    directory.depth,
-                    directory.directory_type.value,
-                ),
+                [
+                    (
+                        str(directory.id),
+                        str(directory.project_id),
+                        str(directory.path),
+                        directory.name,
+                        str(directory.parent_id) if directory.parent_id else None,
+                        directory.depth,
+                        directory.directory_type.value,
+                    )
+                    for directory in project.directories
+                ],
             )
 
-        for file in project.files:
-            connection.execute(
+        if project.files:
+            connection.executemany(
                 """
                 INSERT OR REPLACE INTO files (
                     id,
@@ -657,22 +665,25 @@ class ProjectRepository:
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    str(file.id),
-                    str(file.project_id),
-                    str(file.directory_id) if file.directory_id else None,
-                    str(file.path),
-                    file.name,
-                    file.extension,
-                    file.file_type.value,
-                    file.size,
-                    int(file.is_generated),
-                    int(file.is_ignored),
-                ),
+                [
+                    (
+                        str(file.id),
+                        str(file.project_id),
+                        str(file.directory_id) if file.directory_id else None,
+                        str(file.path),
+                        file.name,
+                        file.extension,
+                        file.file_type.value,
+                        file.size,
+                        int(file.is_generated),
+                        int(file.is_ignored),
+                    )
+                    for file in project.files
+                ],
             )
 
-        for symbol in project.symbols:
-            connection.execute(
+        if project.symbols:
+            connection.executemany(
                 """
                 INSERT OR REPLACE INTO symbols (
                     id,
@@ -687,21 +698,26 @@ class ProjectRepository:
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    str(symbol.id),
-                    str(symbol.file_id),
-                    symbol.name,
-                    symbol.kind,
-                    symbol.qualified_name,
-                    symbol.start_line,
-                    symbol.end_line,
-                    str(symbol.parent_symbol_id) if symbol.parent_symbol_id else None,
-                    symbol.signature,
-                ),
+                [
+                    (
+                        str(symbol.id),
+                        str(symbol.file_id),
+                        symbol.name,
+                        symbol.kind,
+                        symbol.qualified_name,
+                        symbol.start_line,
+                        symbol.end_line,
+                        str(symbol.parent_symbol_id)
+                        if symbol.parent_symbol_id
+                        else None,
+                        symbol.signature,
+                    )
+                    for symbol in project.symbols
+                ],
             )
 
-        for relationship in project.relationships:
-            connection.execute(
+        if project.relationships:
+            connection.executemany(
                 """
                 INSERT OR REPLACE INTO relationships (
                     id,
@@ -713,18 +729,21 @@ class ProjectRepository:
                 )
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    str(relationship.id),
-                    str(relationship.source_id),
-                    str(relationship.target_id),
-                    relationship.relationship_type,
-                    relationship.confidence,
-                    json.dumps(relationship.metadata),
-                ),
+                [
+                    (
+                        str(relationship.id),
+                        str(relationship.source_id),
+                        str(relationship.target_id),
+                        relationship.relationship_type,
+                        relationship.confidence,
+                        json.dumps(relationship.metadata),
+                    )
+                    for relationship in project.relationships
+                ],
             )
 
-        for reference in project.imports:
-            connection.execute(
+        if project.imports:
+            connection.executemany(
                 """
                 INSERT INTO imports (
                     project_id,
@@ -736,18 +755,21 @@ class ProjectRepository:
                 )
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    str(project.id),
-                    str(reference.file_id),
-                    reference.module_name,
-                    reference.imported_name,
-                    reference.alias,
-                    reference.level,
-                ),
+                [
+                    (
+                        str(project.id),
+                        str(reference.file_id),
+                        reference.module_name,
+                        reference.imported_name,
+                        reference.alias,
+                        reference.level,
+                    )
+                    for reference in project.imports
+                ],
             )
 
-        for error in project.errors:
-            connection.execute(
+        if project.errors:
+            connection.executemany(
                 """
                 INSERT INTO analysis_errors (
                     project_id,
@@ -755,10 +777,13 @@ class ProjectRepository:
                 )
                 VALUES (?, ?)
                 """,
-                (
-                    str(project.id),
-                    error,
-                ),
+                [
+                    (
+                        str(project.id),
+                        error,
+                    )
+                    for error in project.errors
+                ],
             )
 
     def save_analysis(

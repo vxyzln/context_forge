@@ -1858,4 +1858,151 @@ def test_current_fingerprints_handles_disappearing_file(tmp_path: Path) -> None:
     assert Path("b.py") not in fps
 
 
-# TODO: add benchmark coverage for large project analysis runs
+def test_large_project_analysis_incremental_and_warm_correctness(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "src"
+    for pkg_idx in range(3):
+        pkg_dir = src / f"pkg_{pkg_idx}"
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "__init__.py").write_text("", encoding="utf-8")
+        for mod_idx in range(5):
+            mod_file = pkg_dir / f"mod_{mod_idx}.py"
+            mod_file.write_text(
+                f"class Service_{pkg_idx}_{mod_idx}:\n"
+                f"    def compute(self, x: int) -> int:\n"
+                f"        return x + 1\n",
+                encoding="utf-8",
+            )
+
+    db_path = tmp_path / ".context_forge.db"
+    analyzer = ProjectAnalyzer(tmp_path, database_path=db_path)
+
+    # 1. Cold analysis
+    project_cold = analyzer.analyze()
+    assert project_cold.analysis_status == "analyzed"
+    assert len(project_cold.files) == 18
+    assert len(project_cold.symbols) >= 30
+
+    # 2. Warm analysis produces identical structure
+    analyzer_warm = ProjectAnalyzer(tmp_path, database_path=db_path)
+    project_warm = analyzer_warm.analyze()
+    assert len(project_warm.files) == len(project_cold.files)
+    assert len(project_warm.symbols) == len(project_cold.symbols)
+
+    # 3. Modify single file
+    target_file = src / "pkg_0" / "mod_0.py"
+    target_file.write_text(
+        "class Service_0_0:\n"
+        "    def compute(self, x: int) -> int:\n"
+        "        return x + 999\n"
+        "    def extra(self) -> str:\n"
+        "        return 'new'\n",
+        encoding="utf-8",
+    )
+
+    analyzer_inc = ProjectAnalyzer(tmp_path, database_path=db_path)
+    project_inc = analyzer_inc.analyze()
+    assert project_inc.analysis_status == "analyzed"
+    names = {s.name for s in project_inc.symbols}
+    assert "extra" in names
+
+
+def test_incremental_analysis_same_length_entity_replacement_preserves_membership_and_relationships(
+    tmp_path: Path,
+) -> None:
+    from context_forge.models.symbol import Symbol
+
+    src = tmp_path / "src"
+    src.mkdir(parents=True, exist_ok=True)
+
+    file_a = src / "alpha.py"
+    file_a.write_text(
+        "class AlphaService:\n    def run(self) -> str:\n        return 'alpha'\n",
+        encoding="utf-8",
+    )
+
+    file_b = src / "beta.py"
+    file_b.write_text(
+        "class BetaService:\n    def execute(self) -> int:\n        return 42\n",
+        encoding="utf-8",
+    )
+
+    db_path = tmp_path / ".context_forge.db"
+    analyzer = ProjectAnalyzer(tmp_path, database_path=db_path)
+
+    project_1 = analyzer.analyze()
+    assert project_1.analysis_status == "analyzed"
+    names_1 = {s.name for s in project_1.symbols}
+    assert "AlphaService" in names_1
+    assert "BetaService" in names_1
+
+    # Modify alpha.py by replacing AlphaService with GammaService (same number of classes and methods)
+    file_a.write_text(
+        "class GammaService:\n"
+        "    def execute_gamma(self) -> str:\n"
+        "        return 'gamma'\n",
+        encoding="utf-8",
+    )
+
+    analyzer_inc = ProjectAnalyzer(tmp_path, database_path=db_path)
+    project_2 = analyzer_inc.analyze()
+    assert project_2.analysis_status == "analyzed"
+
+    # New entity recognized
+    names_2 = {s.name for s in project_2.symbols}
+    assert "GammaService" in names_2
+    assert "execute_gamma" in names_2
+
+    # Removed entity not treated as current
+    assert "AlphaService" not in names_2
+    assert "run" not in names_2
+
+    # Unchanged entities retained
+    assert "BetaService" in names_2
+    assert "execute" in names_2
+
+    # Membership validation on merged project: can add valid new symbol for alpha.py
+    file_a_entity = next(f for f in project_2.files if f.path == Path("src/alpha.py"))
+    new_symbol = Symbol(
+        file_id=file_a_entity.id,
+        name="additional_func",
+        kind="function",
+        start_line=10,
+        end_line=12,
+    )
+    project_2.add_symbol(new_symbol)
+    assert new_symbol in project_2.symbols
+
+
+def test_analyzer_fresh_cache_with_incomplete_or_failed_status_triggers_full_reanalysis(
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+
+    src = tmp_path / "src"
+    src.mkdir(parents=True, exist_ok=True)
+    app = src / "app.py"
+    app.write_text("class Original:\n    pass\n", encoding="utf-8")
+
+    db_path = tmp_path / ".context_forge.db"
+    analyzer = ProjectAnalyzer(tmp_path, database_path=db_path)
+
+    # 1. Initial complete analysis
+    first_project = analyzer.analyze()
+    assert first_project.analysis_status == "analyzed"
+
+    # 2. Corrupt/mark status as 'failed' in SQLite projects table while fingerprints remain fresh
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE projects SET analysis_status = 'failed'")
+    conn.commit()
+    conn.close()
+
+    # 3. Analyze again with unchanged files
+    second_analyzer = ProjectAnalyzer(tmp_path, database_path=db_path)
+    second_project = second_analyzer.analyze()
+
+    # Must not return the failed project; must reanalyze fully to 'analyzed'
+    assert second_project.analysis_status == "analyzed"
+    names = {s.name for s in second_project.symbols}
+    assert "Original" in names

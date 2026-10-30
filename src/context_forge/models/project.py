@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from context_forge.git.models import GitActivitySummary
@@ -17,6 +18,25 @@ from context_forge.parser.result import (
 
 @dataclass
 class Project:
+    """Project entity model representing an analyzed codebase.
+
+    Mutation Contract:
+        Entities must be added via `add_file()`, `add_symbol()`, `add_reference()`,
+        `add_inheritance_reference()`, `add_import()`, and `add_relationship()` to
+        enforce relational integrity (such as project_id containment and valid symbol
+        ownership) and maintain internal membership caches.
+
+        Whole-collection reassignment (e.g., `project.files = new_files` or
+        `project.symbols = new_symbols`, as used during incremental project merges)
+        is supported and automatically invalidates internal membership caches.
+
+        Direct in-place indexed or slice mutation (such as `project.files[i] = ...` or
+        `project.files[:] = ...`) is outside the supported contract because it bypasses
+        project-id and file-id integrity validation. If callers perform manual in-place
+        modifications, `clear_membership_caches()` must be explicitly called to reset
+        internal membership caches.
+    """
+
     name: str
     root_path: Path
     id: UUID = field(default_factory=uuid4)
@@ -46,6 +66,52 @@ class Project:
         if not self.root_path.is_absolute():
             raise ValueError("Project root path must be absolute")
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "files":
+            object.__setattr__(self, "_cached_file_ids", None)
+            object.__setattr__(self, "_cached_files_ref", None)
+        elif name == "symbols":
+            object.__setattr__(self, "_cached_symbol_ids", None)
+            object.__setattr__(self, "_cached_symbols_ref", None)
+        super().__setattr__(name, value)
+
+    def clear_membership_caches(self) -> None:
+        """Reset internal file and symbol membership caches.
+
+        Invoked automatically upon collection reassignment and incremental merge,
+        and available if entity collections are modified outside supported `add_*` methods.
+        """
+        object.__setattr__(self, "_cached_file_ids", None)
+        object.__setattr__(self, "_cached_files_ref", None)
+        object.__setattr__(self, "_cached_symbol_ids", None)
+        object.__setattr__(self, "_cached_symbols_ref", None)
+
+    def _file_ids(self) -> set[UUID]:
+        cached = getattr(self, "_cached_file_ids", None)
+        cached_ref = getattr(self, "_cached_files_ref", None)
+        if (
+            cached is None
+            or cached_ref is not self.files
+            or len(cached) != len(self.files)
+        ):
+            cached = {file.id for file in self.files}
+            object.__setattr__(self, "_cached_file_ids", cached)
+            object.__setattr__(self, "_cached_files_ref", self.files)
+        return cached
+
+    def _symbol_ids(self) -> set[UUID]:
+        cached = getattr(self, "_cached_symbol_ids", None)
+        cached_ref = getattr(self, "_cached_symbols_ref", None)
+        if (
+            cached is None
+            or cached_ref is not self.symbols
+            or len(cached) != len(self.symbols)
+        ):
+            cached = {symbol.id for symbol in self.symbols}
+            object.__setattr__(self, "_cached_symbol_ids", cached)
+            object.__setattr__(self, "_cached_symbols_ref", self.symbols)
+        return cached
+
     def add_directory(self, directory: Directory) -> None:
         if directory.project_id != self.id:
             raise ValueError("Directory belongs to a different project")
@@ -57,15 +123,23 @@ class Project:
             raise ValueError("File belongs to a different project")
 
         self.files.append(file)
+        cached = getattr(self, "_cached_file_ids", None)
+        cached_ref = getattr(self, "_cached_files_ref", None)
+        if cached is not None and cached_ref is self.files:
+            cached.add(file.id)
 
     def add_symbol(self, symbol: Symbol) -> None:
-        if symbol.file_id not in {file.id for file in self.files}:
+        if symbol.file_id not in self._file_ids():
             raise ValueError("Symbol file does not belong to project")
 
         self.symbols.append(symbol)
+        cached = getattr(self, "_cached_symbol_ids", None)
+        cached_ref = getattr(self, "_cached_symbols_ref", None)
+        if cached is not None and cached_ref is self.symbols:
+            cached.add(symbol.id)
 
     def add_reference(self, reference: SymbolReference) -> None:
-        if reference.file_id not in {file.id for file in self.files}:
+        if reference.file_id not in self._file_ids():
             raise ValueError("Reference file does not belong to project")
 
         self.references.append(reference)
@@ -74,16 +148,16 @@ class Project:
         self,
         reference: InheritanceReference,
     ) -> None:
-        if reference.file_id not in {file.id for file in self.files}:
+        if reference.file_id not in self._file_ids():
             raise ValueError("Inheritance reference file does not belong to project")
 
-        if reference.class_symbol_id not in {symbol.id for symbol in self.symbols}:
+        if reference.class_symbol_id not in self._symbol_ids():
             raise ValueError("Inheritance reference class does not belong to project")
 
         self.inheritance_references.append(reference)
 
     def add_import(self, reference: ImportReference) -> None:
-        if reference.file_id not in {file.id for file in self.files}:
+        if reference.file_id not in self._file_ids():
             raise ValueError("Import reference file does not belong to project")
 
         self.imports.append(reference)
