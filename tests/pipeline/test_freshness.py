@@ -172,7 +172,6 @@ def test_assess_stale_when_file_modified(tmp_path: Path):
     _setup_analyzed_repo(tmp_path, files=["app.py"])
     target_file = tmp_path / "app.py"
 
-    # Ensure content changes alone trigger staleness.
     target_file.write_text("# modified content\nprint('new')\n", encoding="utf-8")
 
     guard = WorkflowFreshnessGuard(tmp_path)
@@ -594,13 +593,11 @@ def test_guard_refreshes_recoverable_indeterminate_states_when_authorized(
 
     guard = WorkflowFreshnessGuard(tmp_path, analyzer=mock_analyzer)
 
-    # With allow_refresh=False, it does not refresh
     unrefreshed = guard.guard(allow_refresh=False)
     assert unrefreshed.is_indeterminate is True
     assert unrefreshed.refreshed is False
     mock_analyzer.analyze.assert_not_called()
 
-    # With allow_refresh=True, it attempts recovery
     freshness = guard.guard(allow_refresh=True)
     assert mock_analyzer.analyze.call_count == 1
     assert freshness.refreshed is True
@@ -777,11 +774,9 @@ def test_load_fresh_project_with_allow_refresh_success(tmp_path: Path):
 
     (tmp_path / "x.py").write_text("x = 2\n", encoding="utf-8")
 
-    # With allow_refresh=False, it should raise StaleAnalysisError
     with pytest.raises(StaleAnalysisError):
         load_fresh_project(tmp_path, allow_refresh=False)
 
-    # With allow_refresh=True, it should refresh and return project
     proj, meta = load_fresh_project(tmp_path, allow_refresh=True)
     assert proj is not None
     assert meta is not None
@@ -848,11 +843,9 @@ def test_guard_refresh_producing_incomplete_analysis_not_presented_as_current(
     assert "Refresh completed but analysis remains" in freshness.refresh_error
     assert freshness.outcome.status == OperationStatus.FAILED
 
-    # Without refresh allowed, load_guarded_project raises IncompleteAnalysisError
     with pytest.raises(IncompleteAnalysisError):
         load_guarded_project(tmp_path, allow_refresh=False)
 
-    # With refresh allowed, when refresh leaves it incomplete, it raises RefreshFailedError
     with patch(
         "context_forge.pipeline.freshness.ProjectAnalyzer", return_value=mock_analyzer
     ):
@@ -870,7 +863,6 @@ def test_guard_refresh_producing_stale_analysis_raises_refresh_failed(
     _setup_analyzed_repo(tmp_path, files=["app.py"])
     (tmp_path / "app.py").write_text("# disk change\n", encoding="utf-8")
 
-    # Analyzer analyze() completes but does not update cached fingerprints on disk
     mock_analyzer = MagicMock()
     mock_analyzer.analyze.return_value = _create_sample_project(
         tmp_path, files=["app.py"]
@@ -924,7 +916,6 @@ def test_guard_refresh_success_restores_current(tmp_path: Path):
     _setup_analyzed_repo(tmp_path, files=["app.py"])
     (tmp_path / "app.py").write_text("x = 42\n", encoding="utf-8")
 
-    # Real analyzer refresh
     guard = WorkflowFreshnessGuard(tmp_path)
     freshness = guard.guard(allow_refresh=True)
 
@@ -948,7 +939,6 @@ def test_refresh_failure_real_db_persistence_consistency(tmp_path: Path):
     )
     (tmp_path / "helper.py").write_text("val = 10\n", encoding="utf-8")
 
-    # Initial analysis
     ProjectAnalyzer(tmp_path, db_path).analyze()
 
     db = Database(db_path)
@@ -967,12 +957,10 @@ def test_refresh_failure_real_db_persistence_consistency(tmp_path: Path):
     assert len(orig_files) == 2
     assert len(orig_symbols) >= 1
 
-    # Now modify app.py on disk
     (tmp_path / "app.py").write_text(
         "import helper\ndef run(): return helper.val * 2\n", encoding="utf-8"
     )
 
-    # Invalidate & inject failure during RelationshipBuilder.build during refresh
     with patch(
         "context_forge.graph.builder.RelationshipBuilder.build",
         side_effect=RuntimeError("injected relationship builder crash"),
@@ -985,8 +973,6 @@ def test_refresh_failure_real_db_persistence_consistency(tmp_path: Path):
         assert freshness.refresh_error == "injected relationship builder crash"
         assert freshness.outcome.status == OperationStatus.FAILED
 
-    # Verify database consistency after failure:
-    # 1. DB connection remains completely readable
     with db.connect() as conn:
         post_projects = conn.execute("SELECT * FROM projects").fetchall()
         post_cache = conn.execute("SELECT * FROM repository_cache").fetchall()
@@ -998,24 +984,18 @@ def test_refresh_failure_real_db_persistence_consistency(tmp_path: Path):
     assert len(post_projects) == 1
     assert len(post_cache) == 1
     assert len(post_files) >= 1
-    # 2. In accordance with incremental invalidation: app.py was invalidated at the
-    # start of refresh, so only helper.py remains in repository_file_fingerprints.
-    # Because save_analysis failed, new fingerprints were not committed.
     assert len(post_fingerprints) == 1
     assert post_fingerprints[0]["path"] == "helper.py"
 
-    # 3. Subsequent assessment detects app.py has no cache fingerprint vs disk -> STALE, NEVER CURRENT!
     post_guard = WorkflowFreshnessGuard(tmp_path)
     post_assessment = post_guard.assess_freshness()
     assert post_assessment.is_current is False
     assert post_assessment.state == FreshnessState.STALE
     assert "app.py" in str(post_assessment.changes)
 
-    # 4. Without refresh, substantive loading is blocked with StaleAnalysisError
     with pytest.raises(StaleAnalysisError):
         load_guarded_project(tmp_path, allow_refresh=False)
 
-    # 5. Subsequent refresh attempt without the injected error recovers cleanly
     recovered = post_guard.guard(allow_refresh=True)
     assert recovered.is_current is True
     assert recovered.refreshed is True
@@ -1029,19 +1009,15 @@ def test_refresh_failure_real_db_persistence_consistency(tmp_path: Path):
 
 
 def test_refresh_failure_during_persistence_consistency(tmp_path: Path):
-    """Failure during save_analysis leaves database in a consistent stale state that recovers cleanly."""
     db_path = tmp_path / ".context_forge.db"
     (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
     (tmp_path / "lib.py").write_text("y = 2\n", encoding="utf-8")
 
-    # Initial analysis
     ProjectAnalyzer(tmp_path, db_path).analyze()
     db = Database(db_path)
 
-    # Modify app.py
     (tmp_path / "app.py").write_text("x = 99\n", encoding="utf-8")
 
-    # Inject failure during _save_file_fingerprints in save_analysis
     with patch(
         "context_forge.storage.repository.ProjectRepository._save_file_fingerprints",
         side_effect=sqlite3.OperationalError(
@@ -1055,7 +1031,6 @@ def test_refresh_failure_during_persistence_consistency(tmp_path: Path):
         assert freshness.is_current is False
         assert "disk I/O error" in str(freshness.refresh_error)
 
-    # 1. Fresh database connection verifies tables are readable and intact
     with db.connect() as conn:
         post_projects = conn.execute("SELECT * FROM projects").fetchall()
         post_cache = conn.execute("SELECT * FROM repository_cache").fetchall()
@@ -1065,17 +1040,14 @@ def test_refresh_failure_during_persistence_consistency(tmp_path: Path):
 
     assert len(post_projects) == 1
     assert len(post_cache) == 1
-    # app.py fingerprint was invalidated; save_analysis transaction rolled back
     assert len(post_fingerprints) == 1
     assert post_fingerprints[0]["path"] == "lib.py"
 
-    # 2. Fresh guard assessment detects repository is STALE, NEVER CURRENT
     fresh_guard = WorkflowFreshnessGuard(tmp_path)
     fresh_assessment = fresh_guard.assess_freshness()
     assert fresh_assessment.is_current is False
     assert fresh_assessment.is_stale is True
 
-    # 3. Subsequent refresh without the error succeeds and achieves CURRENT status
     recovered = fresh_guard.guard(allow_refresh=True)
     assert recovered.is_current is True
     assert recovered.refreshed is True
@@ -1157,13 +1129,7 @@ def _set_db_field(root: Path, table: str, field: str, value: Any) -> None:
         conn.execute(f"UPDATE {table} SET {field} = ?", (value,))
 
 
-# ==============================================================================
-# 11. Section 3 Detailed Timing, Change Detection & Automatic Refresh Tests
-# ==============================================================================
-
-
 def test_current_project_does_not_reanalyze_unnecessarily(tmp_path: Path):
-    """Running query against current project reuses analysis without calling analyzer."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
@@ -1183,14 +1149,12 @@ def test_current_project_does_not_reanalyze_unnecessarily(tmp_path: Path):
 def test_timing_unchanged_project_after_30_and_60_seconds_does_not_reanalyze(
     tmp_path: Path,
 ):
-    """Elapsed time alone (30s, 60s) must not trigger re-analysis when files are unchanged."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
     db_path = tmp_path / ".context_forge.db"
     ProjectAnalyzer(tmp_path, db_path).analyze()
 
-    # Simulate 30s elapsed by shifting timestamps
     stat = (tmp_path / "mod.py").stat()
     past_mtime = stat.st_mtime - 35
     import os
@@ -1206,7 +1170,6 @@ def test_timing_unchanged_project_after_30_and_60_seconds_does_not_reanalyze(
     assert proj is not None
     assert mock_analyzer.analyze.call_count == 0
 
-    # Simulate 60s elapsed
     past_mtime_60 = stat.st_mtime - 70
     os.utime(tmp_path / "mod.py", (past_mtime_60, past_mtime_60))
     with patch(
@@ -1221,23 +1184,19 @@ def test_timing_unchanged_project_after_30_and_60_seconds_does_not_reanalyze(
 def test_timing_changed_file_within_30_and_60_seconds_triggers_auto_refresh(
     tmp_path: Path,
 ):
-    """Source file changed within 30s or 60s triggers automatic refresh."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
     db_path = tmp_path / ".context_forge.db"
     ProjectAnalyzer(tmp_path, db_path).analyze()
 
-    # 1. Modify file within 30s
     (tmp_path / "mod.py").write_text("x = 2\n", encoding="utf-8")
     proj, _ = load_fresh_project(tmp_path, allow_refresh=True)
     assert any(s.name == "x" for s in proj.symbols)
 
-    # Verify updated in DB
     guard = WorkflowFreshnessGuard(tmp_path, database_path=db_path)
     assert guard.assess_freshness().is_current is True
 
-    # 2. Modify file within 60s
     (tmp_path / "mod.py").write_text("y = 99\n", encoding="utf-8")
     proj2, _ = load_fresh_project(tmp_path, allow_refresh=True)
     assert any(s.name == "y" for s in proj2.symbols)
@@ -1245,21 +1204,17 @@ def test_timing_changed_file_within_30_and_60_seconds_triggers_auto_refresh(
 
 
 def test_repeated_commands_after_refresh_reuse_updated_analysis(tmp_path: Path):
-    """Repeated commands after a successful refresh reuse the updated analysis."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "mod.py").write_text("x = 10\n", encoding="utf-8")
     db_path = tmp_path / ".context_forge.db"
     ProjectAnalyzer(tmp_path, db_path).analyze()
 
-    # Modify
     (tmp_path / "mod.py").write_text("x = 20\n", encoding="utf-8")
 
-    # Command 1: refreshes
     proj1, _ = load_fresh_project(tmp_path, allow_refresh=True)
     assert proj1 is not None
 
-    # Command 2: reuses without re-analysis
     mock_analyzer = MagicMock()
     with patch(
         "context_forge.pipeline.freshness.ProjectAnalyzer", return_value=mock_analyzer
@@ -1271,19 +1226,16 @@ def test_repeated_commands_after_refresh_reuse_updated_analysis(tmp_path: Path):
 
 
 def test_added_and_deleted_files_handled_by_automatic_refresh(tmp_path: Path):
-    """Added and deleted files are detected and refreshed automatically."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "a.py").write_text("def fn_a(): pass\n", encoding="utf-8")
     db_path = tmp_path / ".context_forge.db"
     ProjectAnalyzer(tmp_path, db_path).analyze()
 
-    # 1. Add file
     (tmp_path / "b.py").write_text("def fn_b(): pass\n", encoding="utf-8")
     proj_add, _ = load_fresh_project(tmp_path, allow_refresh=True)
     assert any(s.name == "fn_b" for s in proj_add.symbols)
 
-    # 2. Delete file
     (tmp_path / "a.py").unlink()
     proj_del, _ = load_fresh_project(tmp_path, allow_refresh=True)
     assert not any(s.name == "fn_a" for s in proj_del.symbols)
@@ -1291,7 +1243,6 @@ def test_added_and_deleted_files_handled_by_automatic_refresh(tmp_path: Path):
 
 
 def test_changed_dependencies_updated_by_automatic_refresh(tmp_path: Path):
-    """Changed dependencies update relationship graph on automatic refresh."""
     from context_forge.main import load_fresh_project
     from context_forge.query.project import ProjectQuery
 
@@ -1300,30 +1251,25 @@ def test_changed_dependencies_updated_by_automatic_refresh(tmp_path: Path):
     db_path = tmp_path / ".context_forge.db"
     ProjectAnalyzer(tmp_path, db_path).analyze()
 
-    # Change import in app.py
     (tmp_path / "app.py").write_text("import sys\n", encoding="utf-8")
     proj, _ = load_fresh_project(tmp_path, allow_refresh=True)
 
     app_file = next(f for f in proj.files if f.path == Path("app.py"))
     direct_deps = ProjectQuery(proj).get_direct_dependencies(app_file.id)
-    # lib should no longer be a direct dependency
     assert not any(d.path == Path("lib.py") for d in direct_deps)
 
 
 def test_load_fresh_project_initial_analysis_on_new_repo(tmp_path: Path):
-    """Substantive queries auto-initialize analysis on an unanalyzed repo."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "hello.py").write_text("MSG = 'hello'\n", encoding="utf-8")
     db_path = tmp_path / ".context_forge.db"
     assert not db_path.exists()
 
-    # 1. allow_refresh=False refuses to initialize
     with pytest.raises(MissingAnalysisError):
         load_fresh_project(tmp_path, allow_refresh=False)
     assert not db_path.exists()
 
-    # 2. allow_refresh=True performs initial analysis
     proj, meta = load_fresh_project(tmp_path, allow_refresh=True)
     assert db_path.exists()
     assert proj is not None
@@ -1332,7 +1278,6 @@ def test_load_fresh_project_initial_analysis_on_new_repo(tmp_path: Path):
 
 
 def test_load_fresh_project_recovers_schema_version_mismatch(tmp_path: Path):
-    """Schema mismatch is safely recovered via full reanalysis when allow_refresh=True."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "hello.py").write_text("MSG = 'hello'\n", encoding="utf-8")
@@ -1344,18 +1289,15 @@ def test_load_fresh_project_recovers_schema_version_mismatch(tmp_path: Path):
     conn.commit()
     conn.close()
 
-    # Without refresh: raises IndeterminateFreshnessError
     with pytest.raises(IndeterminateFreshnessError):
         load_fresh_project(tmp_path, allow_refresh=False)
 
-    # With refresh: recovers
     proj, meta = load_fresh_project(tmp_path, allow_refresh=True)
     assert proj is not None
     assert meta.cache_schema_version == CACHE_SCHEMA_VERSION
 
 
 def test_load_fresh_project_recovers_analyzer_version_mismatch(tmp_path: Path):
-    """Analyzer version mismatch is safely recovered when allow_refresh=True."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "hello.py").write_text("MSG = 'hello'\n", encoding="utf-8")
@@ -1367,18 +1309,15 @@ def test_load_fresh_project_recovers_analyzer_version_mismatch(tmp_path: Path):
     conn.commit()
     conn.close()
 
-    # Without refresh: raises IndeterminateFreshnessError
     with pytest.raises(IndeterminateFreshnessError):
         load_fresh_project(tmp_path, allow_refresh=False)
 
-    # With refresh: recovers
     proj, meta = load_fresh_project(tmp_path, allow_refresh=True)
     assert proj is not None
     assert meta.analyzer_version == ANALYZER_VERSION
 
 
 def test_load_fresh_project_recovers_incomplete_analysis(tmp_path: Path):
-    """Incomplete analysis is recovered when repo code is valid."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "hello.py").write_text("MSG = 'hello'\n", encoding="utf-8")
@@ -1390,24 +1329,20 @@ def test_load_fresh_project_recovers_incomplete_analysis(tmp_path: Path):
     conn.commit()
     conn.close()
 
-    # Without refresh: raises IncompleteAnalysisError
     with pytest.raises(IncompleteAnalysisError):
         load_fresh_project(tmp_path, allow_refresh=False)
 
-    # With refresh: recovers
     proj, _ = load_fresh_project(tmp_path, allow_refresh=True)
     assert proj.analysis_status == "analyzed"
 
 
 def test_load_fresh_project_recovery_fails_honestly_when_code_broken(tmp_path: Path):
-    """Recovery analysis fails with RefreshFailedError if repo has syntax errors."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "hello.py").write_text("MSG = 'hello'\n", encoding="utf-8")
     db_path = tmp_path / ".context_forge.db"
     ProjectAnalyzer(tmp_path, db_path).analyze()
 
-    # Introduce broken code and set failed status
     (tmp_path / "hello.py").write_text("def broken(:\n", encoding="utf-8")
     conn = sqlite3.connect(db_path)
     conn.execute("UPDATE projects SET analysis_status = 'failed'")
@@ -1422,7 +1357,6 @@ def test_load_fresh_project_recovery_fails_honestly_when_code_broken(tmp_path: P
 
 
 def test_load_fresh_project_corrupt_database_fails_safely(tmp_path: Path):
-    """Corrupt SQLite database fails safely with IndeterminateFreshnessError and never recovers."""
     from context_forge.main import load_fresh_project
 
     (tmp_path / "hello.py").write_text("MSG = 'hello'\n", encoding="utf-8")

@@ -12,7 +12,7 @@ def test_configuration_defaults_use_canonical_values() -> None:
 
 def test_configuration_defaults_are_immutable() -> None:
     with pytest.raises(FrozenInstanceError):
-        DEFAULTS.database_path = "other.db"  # type: ignore[misc]
+        DEFAULTS.database_path = "other.db"
 
 
 def test_configuration_defaults_can_be_constructed_independently() -> None:

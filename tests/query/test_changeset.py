@@ -78,17 +78,12 @@ def create_changeset_project(tmp_path: Path) -> Project:
     project.add_file(f_d)
     project.add_file(f_test)
 
-    # Physical files on disk
     (root / "src" / "a.py").write_text("def a(): pass\n", encoding="utf-8")
     (root / "src" / "b.py").write_text("import src.a\n", encoding="utf-8")
     (root / "src" / "c.py").write_text("import src.b\n", encoding="utf-8")
     (root / "src" / "d.py").write_text("def d(): pass\n", encoding="utf-8")
     (root / "tests" / "test_a.py").write_text("import src.a\n", encoding="utf-8")
 
-    # Relationships:
-    # b -> imports -> a (so changing a affects b; b is downstream of a in both/incoming)
-    # c -> imports -> b (so changing b affects c; c is downstream of b)
-    # test_a -> imports -> a
     project.add_relationship(
         Relationship(
             source_id=f_b.id,
@@ -123,7 +118,6 @@ def test_01_single_valid_changed_file(tmp_path: Path) -> None:
     assert len(res.supplied_paths) == 1
     assert len(res.resolved_inputs) == 1
     assert res.resolved_inputs[0].is_resolved is True
-    # b.py is directly impacted, c.py is downstream
     affected_paths = [it.path for it in res.items]
     assert "src/b.py" in affected_paths
     assert "src/c.py" in affected_paths
@@ -132,7 +126,6 @@ def test_01_single_valid_changed_file(tmp_path: Path) -> None:
 
 def test_02_multiple_valid_changed_files(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
-    # Both a.py and d.py changed
     res = analyze_changeset(proj, ["src/a.py", "src/d.py"])
 
     assert res.status == "success"
@@ -142,7 +135,6 @@ def test_02_multiple_valid_changed_files(tmp_path: Path) -> None:
 
 def test_03_multiple_changed_files_affecting_same_downstream(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
-    # Add an edge so d.py also affects c.py
     f_c = next(f for f in proj.files if f.path == Path("src/c.py"))
     f_d = next(f for f in proj.files if f.path == Path("src/d.py"))
     proj.add_relationship(
@@ -154,7 +146,6 @@ def test_03_multiple_changed_files_affecting_same_downstream(tmp_path: Path) -> 
     )
 
     res = analyze_changeset(proj, ["src/a.py", "src/d.py"])
-    # c.py is reached from BOTH src/a.py and src/d.py
     c_item = next(it for it in res.items if it.path == "src/c.py")
     assert "src/a.py" in c_item.roots
     assert "src/d.py" in c_item.roots
@@ -165,14 +156,12 @@ def test_04_deduplication_by_stable_identity(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
     res = analyze_changeset(proj, ["src/a.py", "src/b.py"])
 
-    # Every item must have unique entity_id
     entity_ids = [it.entity_id for it in res.items]
     assert len(entity_ids) == len(set(entity_ids))
 
 
 def test_05_distinct_entities_with_identical_names(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
-    # Add two symbols with identical name 'helper' in different files
     f_a = next(f for f in proj.files if f.path == Path("src/a.py"))
     f_b = next(f for f in proj.files if f.path == Path("src/b.py"))
     s1 = Symbol(
@@ -184,7 +173,6 @@ def test_05_distinct_entities_with_identical_names(tmp_path: Path) -> None:
     proj.add_symbol(s1)
     proj.add_symbol(s2)
 
-    # Edge from a.py to s1, and edge from b.py to s2
     proj.add_relationship(
         Relationship(
             source_id=f_a.id,
@@ -202,7 +190,6 @@ def test_05_distinct_entities_with_identical_names(tmp_path: Path) -> None:
 
     res = analyze_changeset(proj, ["src/a.py", "src/b.py"])
     helpers = [it for it in res.items if it.name == "helper"]
-    # They should both be in items, with different entity_ids
     assert len(helpers) == 2
     assert helpers[0].entity_id != helpers[1].entity_id
 
@@ -222,19 +209,15 @@ def test_06_correct_direct_and_downstream_classification(tmp_path: Path) -> None
 
 def test_07_overlapping_roots(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
-    # Both a.py and b.py are roots. b.py is also impacted by a.py!
     res = analyze_changeset(proj, ["src/a.py", "src/b.py"])
 
-    # Consistent set-level classification: b.py is a root
     b_item = next(it for it in res.items if it.path == "src/b.py")
     assert b_item.classification == "root"
-    # But b_item provenance records reachability from a.py
     assert any(p.root_path == "src/a.py" for p in b_item.provenance)
 
 
 def test_08_multiple_paths_to_same_affected_entity(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
-    # Add direct edge from a.py to c.py as well as transitive path through b.py
     f_a = next(f for f in proj.files if f.path == Path("src/a.py"))
     f_c = next(f for f in proj.files if f.path == Path("src/c.py"))
     proj.add_relationship(
@@ -247,7 +230,6 @@ def test_08_multiple_paths_to_same_affected_entity(tmp_path: Path) -> None:
 
     res = analyze_changeset(proj, ["src/a.py"])
     c_item = next(it for it in res.items if it.path == "src/c.py")
-    # Shortest path is 1 hop (CALLS)
     assert c_item.min_depth == 1
     assert c_item.classification == "direct"
 
@@ -256,7 +238,6 @@ def test_09_cycles_and_self_loops(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
     f_a = next(f for f in proj.files if f.path == Path("src/a.py"))
     f_b = next(f for f in proj.files if f.path == Path("src/b.py"))
-    # Add cycle a -> b -> a
     proj.add_relationship(
         Relationship(
             source_id=f_a.id,
@@ -264,7 +245,6 @@ def test_09_cycles_and_self_loops(tmp_path: Path) -> None:
             relationship_type=RelationshipType.REFERENCES,
         )
     )
-    # Self-loop on a
     proj.add_relationship(
         Relationship(
             source_id=f_a.id,
@@ -273,7 +253,6 @@ def test_09_cycles_and_self_loops(tmp_path: Path) -> None:
         )
     )
 
-    # Must terminate without infinite loop
     res = analyze_changeset(proj, ["src/a.py"], max_depth=5)
     assert res.status == "success"
 
@@ -284,7 +263,6 @@ def test_10_duplicate_input_paths(tmp_path: Path) -> None:
 
     assert len(res.supplied_paths) == 2
     assert len(res.resolved_inputs) == 2
-    # Affected items deduplicated
     entity_ids = [it.entity_id for it in res.items]
     assert len(entity_ids) == len(set(entity_ids))
 
@@ -318,7 +296,6 @@ def test_13_path_outside_permitted_root(tmp_path: Path) -> None:
 
 def test_14_ambiguous_path_mapping(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
-    # Add duplicate file path in project inventory
     proj.add_file(
         File(
             project_id=proj.id,
@@ -353,12 +330,10 @@ def test_17_mixed_valid_and_invalid_paths(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
     res = analyze_changeset(proj, ["src/a.py", "src/missing.py"])
 
-    # Partial success: a.py was analyzed, missing.py was reported
     assert res.status == "partial"
     assert res.outcome.status == OperationStatus.PARTIAL
     assert any(r.status == "resolved" for r in res.resolved_inputs)
     assert any(r.status == "not_found" for r in res.resolved_inputs)
-    # Items from a.py are still found!
     assert len(res.items) > 0
 
 
@@ -373,7 +348,6 @@ def test_18_empty_change_set(tmp_path: Path) -> None:
 
 def test_19_traversal_depth_limit(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
-    # Depth 1 from a.py reaches b.py, but not c.py (which is depth 2)
     res = analyze_changeset(proj, ["src/a.py"], max_depth=1)
 
     affected_paths = [it.path for it in res.items]
@@ -424,7 +398,6 @@ def test_22_provenance_retained_for_multiple_roots(tmp_path: Path) -> None:
 
 def test_23_evidence_based_relevant_tests(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
-    # tests/test_a.py imports src/a.py in graph
     res = analyze_changeset(proj, ["src/a.py"])
 
     assert len(res.relevant_tests) >= 1
@@ -434,7 +407,6 @@ def test_23_evidence_based_relevant_tests(tmp_path: Path) -> None:
 
 def test_24_no_unsupported_test_association_without_evidence(tmp_path: Path) -> None:
     proj = create_changeset_project(tmp_path)
-    # src/d.py has no test relationships in graph
     res = analyze_changeset(proj, ["src/d.py"])
 
     assert len(res.relevant_tests) == 0
@@ -452,7 +424,6 @@ def test_25_partial_status_reporting(tmp_path: Path) -> None:
 
 def test_26_cli_text_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     proj = create_changeset_project(tmp_path)
-    # Use ProjectQuery or mock load_fresh_project
     stdout = io.StringIO()
     with (
         patch("context_forge.main.load_fresh_project", return_value=(proj, None)),
@@ -519,15 +490,12 @@ def test_29_project_query_method_and_regression_coverage(tmp_path: Path) -> None
     proj = create_changeset_project(tmp_path)
     pq = ProjectQuery(proj)
 
-    # analyze_changeset on ProjectQuery
     res = pq.analyze_changeset(["src/a.py"])
     assert res.status == "success"
 
-    # Regression: find_impact on ProjectQuery still works
     imp = pq.find_impact("src/a.py")
     assert imp.status == "resolved"
     assert imp.total > 0
 
-    # Regression: direct find_impact function
     imp2 = find_impact(proj, "src/a.py")
     assert imp2.status == "resolved"

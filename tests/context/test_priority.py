@@ -38,4 +38,4 @@ def test_context_priority_is_immutable() -> None:
     priority = ContextPriority(score=0.8)
 
     with pytest.raises(AttributeError):
-        priority.score = 0.9  # type: ignore[misc]
+        priority.score = 0.9

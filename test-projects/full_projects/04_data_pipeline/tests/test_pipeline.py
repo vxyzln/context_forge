@@ -21,7 +21,6 @@ class TestDataPipeline(unittest.TestCase):
         self.assertEqual(report["categories_count"], 3)
         self.assertEqual(report["grand_total_amount"], 517.40)
 
-        # Check books breakdown
         breakdown = {c["category"]: c for c in report["category_breakdown"]}
         self.assertIn("books", breakdown)
         self.assertEqual(breakdown["books"]["count"], 2)

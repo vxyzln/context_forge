@@ -1,5 +1,3 @@
-"""Validation package."""
-
 from pipeline.validation.schema import (
     PipelineValidationError,
     parse_numeric,

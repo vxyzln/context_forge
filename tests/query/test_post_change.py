@@ -80,9 +80,6 @@ def post_change_project(tmp_path: Path) -> Project:
     proj.add_symbol(s_srv)
     proj.add_symbol(s_test)
 
-    # Relationships:
-    # app -> service (calls)
-    # test -> app (references)
     proj.add_relationship(
         Relationship(
             source_id=s_app.id,
@@ -102,7 +99,6 @@ def post_change_project(tmp_path: Path) -> Project:
 
 
 def test_post_change_verification_basic_success(post_change_project: Project) -> None:
-    # Provide a changed file: src/app.py
     report = run_post_change_verification(
         post_change_project,
         paths=["src/app.py"],
@@ -115,13 +111,11 @@ def test_post_change_verification_basic_success(post_change_project: Project) ->
     assert report.comparison_status == "not_performed"
     assert any("Before-state was not provided" in lim for lim in report.limitations)
 
-    # Check suggested checks
     assert len(report.suggested_checks) > 0
     for chk in report.suggested_checks:
         assert chk.executed is False
         assert chk.status == CheckExecutionStatus.SUGGESTED.value
 
-    # Summary
     assert report.summary is not None
     assert report.summary.changed_files_count == 1
     assert report.summary.suggested_checks_count == len(report.suggested_checks)
@@ -130,7 +124,6 @@ def test_post_change_verification_basic_success(post_change_project: Project) ->
 def test_missing_before_state_is_never_fabricated(
     post_change_project: Project,
 ) -> None:
-    # Running without before_state must report comparison as not_performed and honest limitation
     report = run_post_change_verification(
         post_change_project,
         paths=["src/app.py"],
@@ -150,7 +143,6 @@ def test_missing_before_state_is_never_fabricated(
 
 
 def test_with_valid_before_state(post_change_project: Project) -> None:
-    # Create a before-project representing earlier state
     before_proj = Project(
         name="post_change_proj",
         root_path=post_change_project.root_path,
@@ -186,7 +178,6 @@ def test_with_valid_before_state(post_change_project: Project) -> None:
 
 
 def test_stale_repository_refresh_truthful(post_change_project: Project) -> None:
-    # When allow_refresh is False, stale status must remain visible and refreshed must be False
     stale_freshness = WorkflowFreshness(
         state=FreshnessState.STALE,
         reason="modified files",
@@ -205,7 +196,6 @@ def test_stale_repository_refresh_truthful(post_change_project: Project) -> None
     )
     assert any(d.code == "STALE_REPOSITORY" for d in report_no_refresh.diagnostics)
 
-    # When refresh actually occurred via guard, refreshed is True and refreshed project is used
     refreshed_proj = Project(
         name="post_change_proj",
         root_path=post_change_project.root_path,
@@ -280,7 +270,6 @@ def test_suggested_checks_remain_strictly_unexecuted(
 def test_comparison_failure_propagates_to_overall_status(
     post_change_project: Project,
 ) -> None:
-    # A different repo path triggers repository identity mismatch blocker in comparison
     other_proj = Project(
         name="other_repo",
         root_path=Path("/tmp/different_repo"),
@@ -341,7 +330,6 @@ def test_comparison_failure_cannot_be_overridden_by_clean_rules(
 def test_package_boundary_and_rules_integration(
     post_change_project: Project,
 ) -> None:
-    # Configure a package policy that prohibits app -> service
     policy = PackageBoundaryPolicy(
         rules=(
             PackageDependencyRule(
@@ -352,7 +340,6 @@ def test_package_boundary_and_rules_integration(
         )
     )
 
-    # Configure a regression rule that prohibits App -> Service calls
     rule = StructuralRule(
         rule_id="no-app-calls-service",
         kind=RuleKind.PROHIBITED_DEPENDENCY.value,
@@ -377,7 +364,6 @@ def test_package_boundary_and_rules_integration(
 
 
 def test_partial_failure_isolation(post_change_project: Project) -> None:
-    # Even if an invalid rule is provided, the rest of the verification completes
     invalid_rule = StructuralRule(
         rule_id="bad-rule",
         kind="unsupported_kind",
@@ -394,7 +380,6 @@ def test_partial_failure_isolation(post_change_project: Project) -> None:
     assert report.regression_rules is not None
     assert report.regression_rules.unevaluable_count == 1
     assert report.summary.rule_unevaluable_count == 1
-    # Changeset and risk still completed
     assert report.changeset_impact is not None
     assert report.change_risk is not None
 
@@ -402,7 +387,6 @@ def test_partial_failure_isolation(post_change_project: Project) -> None:
 def test_missing_persisted_analysis_blocks_workflow(
     post_change_project: Project,
 ) -> None:
-    # When no DB exists and no freshness passed, MISSING_ANALYSIS blocker blocks workflow
     report = run_post_change_verification(
         post_change_project,
         paths=["src/app.py"],

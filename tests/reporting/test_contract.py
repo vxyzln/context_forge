@@ -108,7 +108,7 @@ def test_diagnostic_item_validation() -> None:
     with pytest.raises(ValueError, match="Diagnostic message cannot be empty"):
         DiagnosticItem(severity=DiagnosticSeverity.INFO, message="   ")
 
-    item = DiagnosticItem(severity="warning", message="Something odd")  # type: ignore[arg-type]
+    item = DiagnosticItem(severity="warning", message="Something odd")
     assert item.severity == DiagnosticSeverity.WARNING
 
 

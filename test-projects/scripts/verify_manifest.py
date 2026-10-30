@@ -1,9 +1,3 @@
-"""Standard-library manifest verification script for Context Forge test projects.
-
-Executes Context Forge commands on a project fixture and asserts the actual JSON
-output matches expected results declared in `expected/manifest.json`.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -53,7 +47,6 @@ def verify_manifest(
 
     print(f"=== Verifying [{project_id}] at {target_path} ===")
 
-    # 1. Run analyze
     analyze_cmd = cli_prefix + ["analyze", str(target_path)]
     if verbose:
         print(f"Running: {' '.join(analyze_cmd)}")
@@ -62,7 +55,6 @@ def verify_manifest(
         print(f"FAIL: analyze command exited with {code}\n{stderr}", file=sys.stderr)
         return False
 
-    # 2. Run status JSON
     status_cmd = cli_prefix + ["status", str(target_path), "--format", "json"]
     if verbose:
         print(f"Running: {' '.join(status_cmd)}")
@@ -83,7 +75,6 @@ def verify_manifest(
     expected = manifest.get("expected", {})
     failures: list[str] = []
 
-    # File count
     if "file_count" in expected:
         actual_files = status_data.get("files", 0)
         if actual_files != expected["file_count"]:
@@ -91,7 +82,6 @@ def verify_manifest(
                 f"files count mismatch: expected {expected['file_count']}, got {actual_files}"
             )
 
-    # Symbol count
     if "symbol_count" in expected:
         actual_symbols = status_data.get("symbols", 0)
         if actual_symbols != expected["symbol_count"]:
@@ -99,7 +89,6 @@ def verify_manifest(
                 f"symbols count mismatch: expected {expected['symbol_count']}, got {actual_symbols}"
             )
 
-    # Relationship count
     if "relationship_count" in expected:
         actual_rels = status_data.get("relationships", 0)
         if actual_rels != expected["relationship_count"]:
@@ -107,7 +96,6 @@ def verify_manifest(
                 f"relationships count mismatch: expected {expected['relationship_count']}, got {actual_rels}"
             )
 
-    # Analysis errors
     if "analysis_errors" in expected:
         actual_errors = status_data.get("analysis_errors", 0)
         if actual_errors != expected["analysis_errors"]:
@@ -115,7 +103,6 @@ def verify_manifest(
                 f"analysis_errors mismatch: expected {expected['analysis_errors']}, got {actual_errors}"
             )
 
-    # 3. Run inspect JSON
     inspect_cmd = cli_prefix + ["inspect", str(target_path), "--format", "json"]
     if verbose:
         print(f"Running: {' '.join(inspect_cmd)}")
@@ -130,13 +117,11 @@ def verify_manifest(
                 (s["name"], s.get("kind")) for s in inspect_data.get("symbols", [])
             }
 
-            # Verify expected source files
             for expected_file in expected.get("source_files", []):
                 norm_file = expected_file.replace("\\", "/")
                 if norm_file not in discovered_files:
                     failures.append(f"missing expected source file: {norm_file}")
 
-            # Verify expected symbols
             for sym in expected.get("symbols", []):
                 sym_tuple = (sym["name"], sym.get("kind"))
                 if sym_tuple not in discovered_symbols:
@@ -148,7 +133,6 @@ def verify_manifest(
     else:
         failures.append(f"inspect command exited with {code}: {stderr}")
 
-    # 4. Command-specific extra assertions
     extra_commands = manifest.get("extra_checks", [])
     for extra in extra_commands:
         extra_args = extra.get("command", [])

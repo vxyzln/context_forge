@@ -246,7 +246,6 @@ def test_get_logger_handles_destination_change_without_leaking_or_duplicating(
     assert file2.exists()
     assert "second_destination_message" in file2.read_text(encoding="utf-8")
 
-    # Verify that file1 did not receive the second message
     file1_content = file1.read_text(encoding="utf-8")
     assert "second_destination_message" not in file1_content
 
@@ -300,7 +299,6 @@ def test_get_logger_preserves_unrelated_handlers(
 
         get_logger()
 
-        # Operational handler added without removing the stream or custom handlers
         assert stream_handler in logger.handlers
         assert other_rotating in logger.handlers
         assert any(
@@ -330,10 +328,8 @@ def test_get_logger_preserves_unrelated_rotating_handler_with_same_filename(
         ):
             cf_logger = get_logger()
 
-            # The unrelated handler targeting another path with same filename must remain attached
             assert unrelated_handler in cf_logger.handlers
 
-            # The unrelated handler must remain usable
             cf_logger.info("message_for_all_handlers")
             unrelated_handler.flush()
 
@@ -385,7 +381,6 @@ def test_log_rotation_and_backup_count(
     ):
         logger = get_logger()
 
-        # Write messages with UTF-8 characters exceeding test_max_bytes each time
         for i in range(6):
             logger.info("entry_%d_%s", i, "UnicodeData-ümlaut-🚀-" + "A" * 60)
 
@@ -403,7 +398,6 @@ def test_log_rotation_and_backup_count(
         assert backup2.exists()
         assert not backup3.exists()
 
-        # Verify UTF-8 readability across active and rotated files
         assert "UnicodeData-ümlaut-🚀" in active_log.read_text(encoding="utf-8")
         assert "UnicodeData-ümlaut-🚀" in backup1.read_text(encoding="utf-8")
         assert "UnicodeData-ümlaut-🚀" in backup2.read_text(encoding="utf-8")
@@ -449,11 +443,9 @@ def test_logging_tolerates_handler_construction_failure(
             side_effect=PermissionError("cannot open log file"),
         ),
     ):
-        # Directly verify that handler construction raises PermissionError
         with pytest.raises(PermissionError, match="cannot open log file"):
             get_logger()
 
-        # Verify that each logging event catches the error and remains non-fatal
         log_analysis_started(project_path=Path("/tmp/project"))
         log_analysis_completed(
             project_path=Path("/tmp/project"),
@@ -483,13 +475,11 @@ def test_record_write_failure_behavior(
         assert len(rotating_handlers) == 1
         handler = rotating_handlers[0]
 
-        # Simulate a write error directly on the open stream
         with patch.object(
             handler.stream,
             "write",
             side_effect=OSError(28, "No space left on device"),
         ):
-            # Logging functions must remain non-fatal even on record write failure
             log_analysis_started(project_path=Path("/tmp/project"))
             log_analysis_completed(
                 project_path=Path("/tmp/project"),
@@ -504,11 +494,10 @@ def test_record_write_failure_behavior(
             )
 
         captured = capsys.readouterr()
-        # Standard Python logging framework emits diagnostic traceback to stderr via handleError
         assert "No space left on device" in captured.err
         assert "Logging error" in captured.err
 
 
 def test_logging_does_not_mask_programming_errors() -> None:
     with pytest.raises(TypeError):
-        _log_event("not_an_int_level", "msg")  # type: ignore[arg-type]
+        _log_event("not_an_int_level", "msg")

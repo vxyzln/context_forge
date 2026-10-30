@@ -20,7 +20,6 @@ def sample_project(tmp_path: Path) -> Project:
     root = tmp_path.resolve()
     proj = Project(name="test_proj", root_path=root, analysis_status="completed")
 
-    # Files
     f_ui = File(
         project_id=proj.id,
         path=Path("src/ui/view.py"),
@@ -43,7 +42,6 @@ def sample_project(tmp_path: Path) -> Project:
     proj.add_file(f_service)
     proj.add_file(f_db)
 
-    # Symbols
     s_view = Symbol(
         file_id=f_ui.id,
         name="View",
@@ -72,7 +70,6 @@ def sample_project(tmp_path: Path) -> Project:
     proj.add_symbol(s_core)
     proj.add_symbol(s_db)
 
-    # Relationships: View -> CoreService (calls), CoreService -> Database (imports)
     proj.add_relationship(
         Relationship(
             source_id=s_view.id,
@@ -92,7 +89,6 @@ def sample_project(tmp_path: Path) -> Project:
 
 
 def test_rule_no_violation_detected(sample_project: Project) -> None:
-    # Rule: ui cannot depend directly on storage
     rule = StructuralRule(
         rule_id="no-ui-to-db",
         kind=RuleKind.PROHIBITED_DEPENDENCY.value,
@@ -112,7 +108,6 @@ def test_rule_no_violation_detected(sample_project: Project) -> None:
 
 
 def test_rule_violation_detected_with_traceability(sample_project: Project) -> None:
-    # Rule: service must not depend on storage
     rule = StructuralRule(
         rule_id="no-service-to-storage",
         kind=RuleKind.PROHIBITED_DEPENDENCY.value,
@@ -142,7 +137,6 @@ def test_rule_violation_detected_with_traceability(sample_project: Project) -> N
 
 
 def test_rule_invalid_syntax_unevaluable(sample_project: Project) -> None:
-    # Rule with unsupported kind
     rule = StructuralRule(
         rule_id="invalid-rule",
         kind="unsupported_kind",
@@ -159,7 +153,6 @@ def test_rule_invalid_syntax_unevaluable(sample_project: Project) -> None:
 
 
 def test_rule_unknown_referenced_entity_unevaluable(sample_project: Project) -> None:
-    # Source refers to a specific entity that does not exist in the project
     rule = StructuralRule(
         rule_id="unknown-entity-rule",
         kind=RuleKind.PROHIBITED_DEPENDENCY.value,
@@ -175,7 +168,6 @@ def test_rule_unknown_referenced_entity_unevaluable(sample_project: Project) -> 
 
 
 def test_rule_ambiguous_referenced_entity_unevaluable(sample_project: Project) -> None:
-    # Add two symbols with identical unqualified name in different files
     f_other = File(
         project_id=sample_project.id,
         path=Path("src/other.py"),
@@ -196,7 +188,7 @@ def test_rule_ambiguous_referenced_entity_unevaluable(sample_project: Project) -
     rule = StructuralRule(
         rule_id="ambiguous-rule",
         kind=RuleKind.PROHIBITED_DEPENDENCY.value,
-        source="View",  # Ambiguous between ui.view.View and other.View
+        source="View",
         target="src/storage/*",
     )
     report = evaluate_structural_rules(sample_project, [rule])
@@ -210,7 +202,6 @@ def test_rule_ambiguous_referenced_entity_unevaluable(sample_project: Project) -
 def test_rule_incomplete_analysis_reported_as_unevaluable(
     sample_project: Project,
 ) -> None:
-    # If project analysis is incomplete, clean pass cannot be claimed
     sample_project.analysis_status = "incomplete"
     sample_project.errors.append("Syntax error in src/parser/extra.py")
 
@@ -231,7 +222,6 @@ def test_rule_incomplete_analysis_reported_as_unevaluable(
 
 
 def test_rule_prohibited_relationship_type(sample_project: Project) -> None:
-    # View calls CoreService. Prohibiting 'inherits' should pass, but prohibiting 'calls' should violate
     inherits_rule = StructuralRule(
         rule_id="no-view-inherits-core",
         kind=RuleKind.PROHIBITED_RELATIONSHIP.value,
@@ -257,7 +247,6 @@ def test_rule_prohibited_relationship_type(sample_project: Project) -> None:
 
 
 def test_rule_isolated_component(sample_project: Project) -> None:
-    # Database is not isolated (it has incoming import from CoreService)
     rule = StructuralRule(
         rule_id="isolate-db",
         kind=RuleKind.ISOLATED_COMPONENT.value,
@@ -273,7 +262,6 @@ def test_rule_isolated_component(sample_project: Project) -> None:
 
 
 def test_unmatched_wildcard_source_unevaluable(sample_project: Project) -> None:
-    # A wildcard source pattern that matches no entities or packages must be unevaluable, not clean pass
     rule = StructuralRule(
         rule_id="unmatched-wildcard-src",
         kind=RuleKind.PROHIBITED_DEPENDENCY.value,
@@ -292,7 +280,6 @@ def test_unmatched_wildcard_source_unevaluable(sample_project: Project) -> None:
 
 
 def test_unmatched_wildcard_target_unevaluable(sample_project: Project) -> None:
-    # A wildcard target pattern that matches no entities or packages must be unevaluable
     rule = StructuralRule(
         rule_id="unmatched-wildcard-tgt",
         kind=RuleKind.PROHIBITED_DEPENDENCY.value,

@@ -169,11 +169,9 @@ def test_project_same_length_file_replacement_invalidates_membership_cache() -> 
         start_line=1,
         end_line=2,
     )
-    # 2. Trigger construction of cached file-ID set
     project.add_symbol(symbol_a)
     assert symbol_a.file_id in project._file_ids()
 
-    # 3. Replace file collection with different file B while keeping collection length unchanged
     file_b = File(
         project_id=project.id,
         path=Path("b.py"),
@@ -182,7 +180,6 @@ def test_project_same_length_file_replacement_invalidates_membership_cache() -> 
     )
     project.files = [file_b]
 
-    # 4. Add valid symbol associated with file B
     symbol_b = Symbol(
         file_id=file_b.id,
         name="func_b",
@@ -190,11 +187,9 @@ def test_project_same_length_file_replacement_invalidates_membership_cache() -> 
         start_line=1,
         end_line=2,
     )
-    # 5. Confirm that the operation succeeds
     project.add_symbol(symbol_b)
     assert symbol_b in project.symbols
 
-    # 6. Confirm that a symbol referencing removed file A is rejected
     symbol_a_extra = Symbol(
         file_id=file_a.id,
         name="func_a_extra",
@@ -238,11 +233,9 @@ def test_project_same_length_symbol_replacement_invalidates_membership_cache() -
         name="Base",
         line=2,
     )
-    # 2. Trigger construction of cached symbol-ID set
     project.add_inheritance_reference(ref_a)
     assert class_a.id in project._symbol_ids()
 
-    # 3. Replace symbol collection with different symbol while preserving collection length
     class_b = Symbol(
         file_id=file.id,
         name="ClassB",
@@ -252,7 +245,6 @@ def test_project_same_length_symbol_replacement_invalidates_membership_cache() -
     )
     project.symbols = [class_b]
 
-    # 4. Confirm that an inheritance reference to the new valid class symbol is accepted
     ref_b = InheritanceReference(
         file_id=file.id,
         class_symbol_id=class_b.id,
@@ -262,7 +254,6 @@ def test_project_same_length_symbol_replacement_invalidates_membership_cache() -
     project.add_inheritance_reference(ref_b)
     assert ref_b in project.inheritance_references
 
-    # 5. Confirm that a reference to the removed class symbol is rejected
     ref_a_rejected = InheritanceReference(
         file_id=file.id,
         class_symbol_id=class_a.id,

@@ -69,7 +69,6 @@ class CandidateGenerator:
         interpretation=None,
         grounding: RepositoryGrounding | None = None,
     ) -> list[ContextCandidate]:
-        # Prioritize exact search matches before expanding references.
         results = ProjectQuery(project).search(task)
 
         candidates = [ContextCandidate.from_search_result(result) for result in results]

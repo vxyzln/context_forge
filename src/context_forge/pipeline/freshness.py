@@ -571,7 +571,6 @@ class WorkflowFreshnessGuard:
         if not allow_refresh:
             return assessment
 
-        # Keep unrecoverable indeterminate states from triggering automatic refresh.
         if (
             assessment.is_indeterminate
             and assessment.reason not in RECOVERABLE_INDETERMINATE_REASONS

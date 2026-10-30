@@ -619,13 +619,7 @@ def test_32_no_silent_fallback_to_current_cache() -> None:
     assert res.before_state_id is None
 
 
-# ==============================================================================
-# Symmetrical Qualification Regression Tests 1 to 7
-# ==============================================================================
-
-
 def test_regression_01_incomplete_before_state_with_file_additions() -> None:
-    # 1. Incomplete before-state with apparent file additions
     p1 = make_project(analysis_status="failed")
     add_file(p1, "src/a.py")
 
@@ -644,7 +638,6 @@ def test_regression_01_incomplete_before_state_with_file_additions() -> None:
 
 
 def test_regression_02_incomplete_before_state_with_symbol_additions() -> None:
-    # 2. Incomplete before-state with apparent symbol additions
     p1 = make_project(analysis_status="not_analyzed")
     f1 = add_file(p1, "src/a.py")
     add_symbol(p1, f1.id, "existing")
@@ -665,7 +658,6 @@ def test_regression_02_incomplete_before_state_with_symbol_additions() -> None:
 
 
 def test_regression_03_incomplete_before_state_with_relationship_additions() -> None:
-    # 3. Incomplete before-state with apparent relationship additions
     p1 = make_project(errors=["analyzer timeout on module b"])
     add_file(p1, "src/a.py")
     add_file(p1, "src/b.py")
@@ -691,7 +683,6 @@ def test_regression_03_incomplete_before_state_with_relationship_additions() -> 
 
 
 def test_regression_04_incomplete_after_state_with_file_removals() -> None:
-    # 4. Incomplete after-state with apparent file removals
     p1 = make_project(analysis_status="analyzed")
     add_file(p1, "src/a.py")
     add_file(p1, "src/b.py")
@@ -710,7 +701,6 @@ def test_regression_04_incomplete_after_state_with_file_removals() -> None:
 
 
 def test_regression_05_incomplete_after_state_with_symbol_removals() -> None:
-    # 5. Incomplete after-state with apparent symbol removals
     p1 = make_project(analysis_status="analyzed")
     f1 = add_file(p1, "src/a.py")
     add_symbol(p1, f1.id, "stay")
@@ -731,7 +721,6 @@ def test_regression_05_incomplete_after_state_with_symbol_removals() -> None:
 
 
 def test_regression_06_incomplete_after_state_with_relationship_removals() -> None:
-    # 6. Incomplete after-state with apparent relationship removals
     p1 = make_project(analysis_status="analyzed")
     f1 = add_file(p1, "src/a.py")
     f2 = add_file(p1, "src/b.py")
@@ -757,7 +746,6 @@ def test_regression_06_incomplete_after_state_with_relationship_removals() -> No
 
 
 def test_regression_07_fully_complete_pair_reports_unqualified_differences() -> None:
-    # 7. A fully complete pair that still reports ordinary additions and removals as before
     p1 = make_project(analysis_status="analyzed")
     f1 = add_file(p1, "src/stay.py")
     f_rem = add_file(p1, "src/removed.py")
@@ -788,7 +776,6 @@ def test_regression_07_fully_complete_pair_reports_unqualified_differences() -> 
     assert res.is_complete is True
     assert res.outcome.is_success is True
 
-    # Files
     assert len(res.added_files) == 1
     assert res.added_files[0].path == "src/added.py"
     assert "qualification" not in res.added_files[0].details
@@ -796,7 +783,6 @@ def test_regression_07_fully_complete_pair_reports_unqualified_differences() -> 
     assert res.removed_files[0].path == "src/removed.py"
     assert "qualification" not in res.removed_files[0].details
 
-    # Symbols
     assert len(res.added_symbols) == 1
     assert res.added_symbols[0].name == "sym_add"
     assert "qualification" not in res.added_symbols[0].details
@@ -804,7 +790,6 @@ def test_regression_07_fully_complete_pair_reports_unqualified_differences() -> 
     assert res.removed_symbols[0].name == "sym_remove"
     assert "qualification" not in res.removed_symbols[0].details
 
-    # Relationships
     assert len(res.added_relationships) == 1
     assert "qualification" not in res.added_relationships[0].details
     assert len(res.removed_relationships) == 1
@@ -812,7 +797,6 @@ def test_regression_07_fully_complete_pair_reports_unqualified_differences() -> 
 
 
 def test_symmetrical_modifications_qualification_under_incomplete_state() -> None:
-    # Relationship modification when after state is incomplete
     p1 = make_project(analysis_status="analyzed")
     f1 = add_file(p1, "src/a.py")
     f2 = add_file(p1, "src/b.py")
@@ -846,13 +830,7 @@ def test_symmetrical_modifications_qualification_under_incomplete_state() -> Non
     )
 
 
-# ==============================================================================
-# Collision Detection Tests
-# ==============================================================================
-
-
 def test_symbol_collision_detection_and_ambiguity() -> None:
-    # Two symbols in the same file with identical kind and qualified_name
     p1 = make_project()
     f1 = add_file(p1, "src/a.py")
     add_symbol(p1, f1.id, "overloaded", start_line=10, end_line=15)
@@ -863,7 +841,6 @@ def test_symbol_collision_detection_and_ambiguity() -> None:
     add_symbol(p2, f2.id, "overloaded", start_line=10, end_line=15)
 
     res = compare_states(p1, p2)
-    # Must report collision diagnostic and ambiguity
     assert any(d.code == "SYMBOL_COLLISION" for d in res.diagnostics)
     assert any("Symbol key collision detected" in lim for lim in res.limitations)
     assert any(
@@ -873,7 +850,6 @@ def test_symbol_collision_detection_and_ambiguity() -> None:
 
 
 def test_relationship_collision_detection_and_ambiguity() -> None:
-    # Two relationships with identical source, target, and relationship_type
     p1 = make_project()
     f1 = add_file(p1, "src/a.py")
     f2 = add_file(p1, "src/b.py")

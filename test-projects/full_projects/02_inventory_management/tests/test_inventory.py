@@ -33,7 +33,6 @@ class TestInventoryManagement(unittest.TestCase):
             self.app.service.withdraw_stock("SKU_WIDGET", 100)
 
     def test_reorder_reporting(self) -> None:
-        # Stock levels: WIDGET has 40 (target 60), BOLT has 30 (target 200)
         summary = self.app.reporter.generate_stock_summary()
         self.assertEqual(summary["total_skus"], 2)
         self.assertEqual(summary["reorder_needed_count"], 2)

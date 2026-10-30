@@ -1,5 +1,3 @@
-"""Domain models package."""
-
 from inventory.domain.enums import MovementType, StockStatus
 from inventory.domain.movement import StockMovement
 from inventory.domain.product import Product

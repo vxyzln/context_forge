@@ -466,7 +466,6 @@ def test_analyze_records_execution_in_history(
 
     capsys.readouterr()
 
-    # Query history via CLI
     with patch.object(
         sys,
         "argv",
@@ -610,10 +609,8 @@ def test_history_command_empty_when_no_db(
     captured = capsys.readouterr()
     assert f"Repository: {tmp_path.resolve()}" in captured.out
     assert "No execution history found." in captured.out
-    # Must not create database file
     assert not db_file.exists()
 
-    # JSON mode
     with patch.object(
         sys,
         "argv",
@@ -768,15 +765,12 @@ def test_direct_run_analyze_call_defaults_and_explicit_command(
 
     (tmp_path / "app.py").write_text("def hello(): return 1\n")
 
-    # Direct call with default command ("analyze")
     run_analyze(tmp_path)
     capsys.readouterr()
 
-    # Direct call with explicit command ("refresh")
     run_analyze(tmp_path, command="refresh")
     capsys.readouterr()
 
-    # Query history via CLI
     with patch.object(
         sys,
         "argv",
@@ -787,7 +781,6 @@ def test_direct_run_analyze_call_defaults_and_explicit_command(
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert data["total"] == 2
-    # Newest first
     assert data["executions"][0]["command"] == "refresh"
     assert data["executions"][1]["command"] == "analyze"
 
@@ -3992,10 +3985,8 @@ def test_architecture_command_auto_refreshes_on_stale_repository(
         main()
     capsys.readouterr()
 
-    # Modify file to make cache stale
     source.write_text("x = 2\n", encoding="utf-8")
 
-    # Running architecture without --no-refresh automatically refreshes and succeeds
     with patch.object(
         sys,
         "argv",
@@ -4069,7 +4060,6 @@ def test_architecture_command_handles_schema_v1_database_without_crashing(
         in arch_captured.err
     )
 
-    # Without --no-refresh, architecture auto-recovers and succeeds
     with patch.object(sys, "argv", ["context-forge", "architecture", str(tmp_path)]):
         main()
     final_captured = capsys.readouterr()
@@ -4415,7 +4405,6 @@ def test_impact_command_auto_refreshes_on_stale_repository(
 
     target_file.write_text("x = 2\n", encoding="utf-8")
 
-    # Automatically refreshes and succeeds
     with patch.object(
         sys,
         "argv",
@@ -4897,29 +4886,24 @@ def test_unanalyzed_directory_missing_db_avoids_database_connection(
 
 
 def test_unanalyzed_directory_real_path_read_only_invariance(tmp_path: Path) -> None:
-    """Verifies with zero mocks that read-only project loading on an unanalyzed directory
-    never creates a database file or directory on disk."""
     sample_file = tmp_path / "mod.py"
     sample_file.write_text("x = 1\n", encoding="utf-8")
 
     initial_listing = set(tmp_path.rglob("*"))
     assert (tmp_path / ".context_forge.db") not in initial_listing
 
-    # 1. Test load_guarded_project without mocks
     with pytest.raises(MissingAnalysisError) as exc_info:
         load_guarded_project(tmp_path)
     assert exc_info.value.code == "MISSING_ANALYSIS"
     assert set(tmp_path.rglob("*")) == initial_listing
     assert not (tmp_path / ".context_forge.db").exists()
 
-    # 2. Test load_fresh_project without mocks
     with pytest.raises(MissingAnalysisError) as exc_info:
         load_fresh_project(tmp_path, allow_refresh=False)
     assert exc_info.value.code == "MISSING_ANALYSIS"
     assert set(tmp_path.rglob("*")) == initial_listing
     assert not (tmp_path / ".context_forge.db").exists()
 
-    # 3. Test explicit custom database_path that does not exist
     custom_db = tmp_path / "custom" / "my.db"
     with pytest.raises(MissingAnalysisError) as exc_info:
         load_guarded_project(tmp_path, database_path=custom_db)
@@ -4934,8 +4918,6 @@ def test_unanalyzed_directory_real_path_read_only_invariance(tmp_path: Path) -> 
 
 
 def test_corrupt_database_distinguished_from_absent_database(tmp_path: Path) -> None:
-    """Verifies that an existing but corrupt SQLite database is classified as indeterminate/unreadable
-    rather than being confused with an absent database."""
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
     db_file = tmp_path / ".context_forge.db"
     db_file.write_text("CORRUPTED_GARBAGE_NOT_A_SQLITE_DATABASE\n", encoding="utf-8")
@@ -4954,7 +4936,6 @@ def test_corrupt_database_distinguished_from_absent_database(tmp_path: Path) -> 
     assert exc_info.value.__cause__ is not None
     assert isinstance(exc_info.value.__cause__, sqlite3.DatabaseError)
 
-    # Even with allow_refresh=True, an unreadable/corrupt database does NOT refresh or overwrite
     with (
         patch("context_forge.pipeline.freshness.ProjectAnalyzer") as mock_analyzer,
         pytest.raises(IndeterminateFreshnessError) as exc_info,
@@ -5001,8 +4982,6 @@ def test_all_commands_preserve_read_only_invariance_on_unanalyzed_repo(
     subcommand: list[str],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Real invocation of all substantive and reporting commands against an unanalyzed repo
-    verifying zero disk mutation and zero database creation."""
     (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
     initial_listing = set(tmp_path.rglob("*"))
 
@@ -5079,7 +5058,6 @@ def test_freshness_policy_matrix(
     target_file.write_text("x = 2\n", encoding="utf-8")
 
     if must_abort:
-        # With --no-refresh, substantive commands must abort on stale analysis
         with (
             patch.object(
                 sys, "argv", ["context-forge", *argv, str(tmp_path), "--no-refresh"]
@@ -5095,7 +5073,6 @@ def test_freshness_policy_matrix(
             "Repository analysis is stale; run 'context-forge analyze" in captured.err
         )
 
-        # Without --no-refresh, substantive commands automatically refresh and succeed!
         with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
             main()
 
@@ -5158,7 +5135,6 @@ def test_freshness_policy_matrix_incomplete(
         assert captured.out == ""
         assert "Repository analysis is incomplete" in captured.err
 
-        # Without --no-refresh, substantive commands auto-recover and succeed
         with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
             main()
 
@@ -5218,7 +5194,6 @@ def test_freshness_policy_matrix_indeterminate(
         assert captured.out == ""
         assert "Repository analysis freshness is indeterminate" in captured.err
 
-        # Without --no-refresh, substantive commands auto-recover and succeed
         with patch.object(sys, "argv", ["context-forge", *argv, str(tmp_path)]):
             main()
 
@@ -5637,7 +5612,6 @@ def test_cli_mode_reports_refresh_failure(
 
     source_file.write_text("x = 2\n", encoding="utf-8")
 
-    # In JSON mode
     with (
         patch(
             "context_forge.pipeline.analyzer.ProjectAnalyzer.analyze",
@@ -5667,7 +5641,6 @@ def test_cli_mode_reports_refresh_failure(
     )
     assert error_payload["diagnostics"][0]["code"] == "REFRESH_FAILED"
 
-    # In text mode
     with (
         patch(
             "context_forge.main.load_guarded_project",
@@ -6407,15 +6380,12 @@ def test_cli_logo_subcommand_and_flag_display_complete_logo_and_exit(
             main()
 
         captured = capsys.readouterr()
-        # Output exactly matches the logo followed by a newline
         assert captured.out.strip() == CLI_LOGO.strip()
-        # Verify both CONTEXT and FORGE sections are present
         assert "████████╗" in captured.out
         assert "███████╗" in captured.out
         assert captured.err == ""
         outputs.append(captured.out)
 
-    # All four invocations produce identical complete output
     assert len(set(outputs)) == 1
 
 
@@ -6529,7 +6499,6 @@ def test_unused_cli_command_text_and_json(
         main()
     capsys.readouterr()
 
-    # Test text output
     with patch.object(sys, "argv", ["context-forge", "unused", str(tmp_path)]):
         main()
     text_out = capsys.readouterr().out
@@ -6537,7 +6506,6 @@ def test_unused_cli_command_text_and_json(
     assert "unused_func" in text_out
     assert "Limitations & Caveats:" in text_out
 
-    # Test JSON output
     with patch.object(
         sys, "argv", ["context-forge", "unused", str(tmp_path), "--format", "json"]
     ):
@@ -6549,7 +6517,6 @@ def test_unused_cli_command_text_and_json(
     assert "unused_func" in candidate_names
     assert "used_func" not in candidate_names
 
-    # Test alias
     with patch.object(
         sys, "argv", ["context-forge", "find-unused", str(tmp_path), "--format", "json"]
     ):
@@ -6571,7 +6538,6 @@ def test_unused_cli_limit_and_kind_options(
         main()
     capsys.readouterr()
 
-    # Test --limit 1 in text mode: prints 'showing 1 of 3 candidate(s)'
     with patch.object(
         sys,
         "argv",
@@ -6589,7 +6555,6 @@ def test_unused_cli_limit_and_kind_options(
     text_out = capsys.readouterr().out
     assert "showing 1 of 3 candidate(s)" in text_out
 
-    # Test --limit 1 in JSON mode: truncated is True, candidates list has length 1, summary has candidates_count 3
     with patch.object(
         sys,
         "argv",
@@ -6612,7 +6577,6 @@ def test_unused_cli_limit_and_kind_options(
     assert len(json_data["candidates"]) == 1
     assert json_data["summary"]["candidates_count"] == 3
 
-    # Test --kind '*' works
     with patch.object(
         sys,
         "argv",
@@ -6622,7 +6586,6 @@ def test_unused_cli_limit_and_kind_options(
     json_star = json.loads(capsys.readouterr().out)
     assert json_star["summary"]["candidates_count"] >= 3
 
-    # Test invalid --kind is rejected
     with (
         patch.object(
             sys,
@@ -6991,11 +6954,9 @@ def test_cache_real_lifecycle_modified_added_deleted_json(
 def test_emit_json_strictly_raises_on_unsupported_objects() -> None:
     from context_forge.main import _emit_json
 
-    # Sets must not be silently converted to strings
     with pytest.raises(TypeError):
         _emit_json({"unsupported_set": {1, 2, 3}})
 
-    # Arbitrary objects must not be silently converted to strings
     class Unserializable:
         pass
 
@@ -7009,19 +6970,15 @@ def test_format_cache_paths_comprehensive_cases(tmp_path: Path) -> None:
     repo_root = tmp_path / "my_project"
     repo_root.mkdir()
 
-    # 1. Relative paths
     rel_paths = [Path("z.py"), Path("sub/b.py"), Path("a.py")]
     assert _format_cache_paths(rel_paths, repo_root) == ["a.py", "sub/b.py", "z.py"]
 
-    # 2. Absolute paths inside repository
     abs_inside = [repo_root / "src/b.py", repo_root / "a.py"]
     assert _format_cache_paths(abs_inside, repo_root) == ["a.py", "src/b.py"]
 
-    # 3. Absolute paths outside repository must not be silently relativized
     abs_outside = [Path("/outside/shared/lib.py")]
     assert _format_cache_paths(abs_outside, repo_root) == ["/outside/shared/lib.py"]
 
-    # 4. Non-path repository key (root_path is None or non-path identifier)
     assert _format_cache_paths(
         [Path("file1.py"), Path("file2.py")], root_path=None
     ) == [
@@ -7029,7 +6986,6 @@ def test_format_cache_paths_comprehensive_cases(tmp_path: Path) -> None:
         "file2.py",
     ]
 
-    # 5. Empty collections
     assert _format_cache_paths([], repo_root) == []
     assert _format_cache_paths(None, repo_root) == []
 
@@ -7037,49 +6993,41 @@ def test_format_cache_paths_comprehensive_cases(tmp_path: Path) -> None:
 def test_diagnostic_error_normalization_cross_platform_and_edge_cases() -> None:
     from context_forge.main import _normalize_diagnostic_error
 
-    # Unix absolute path
     res = _normalize_diagnostic_error("/repo/broken.py:12:4: invalid syntax")
     assert res.path == "/repo/broken.py"
     assert res.line == 12
     assert res.message == "invalid syntax"
 
-    # Windows drive-letter path with backslashes
     res = _normalize_diagnostic_error("C:\\repo\\broken.py:12:4: invalid syntax")
     assert res.path == "C:\\repo\\broken.py"
     assert res.line == 12
     assert res.message == "invalid syntax"
 
-    # Windows drive-letter path with forward slashes
     res = _normalize_diagnostic_error("C:/repo/broken.py:12:4: invalid syntax")
     assert res.path == "C:/repo/broken.py"
     assert res.line == 12
     assert res.message == "invalid syntax"
 
-    # Path containing spaces
     res = _normalize_diagnostic_error("src/my module.py:12:4: invalid syntax")
     assert res.path == "src/my module.py"
     assert res.line == 12
     assert res.message == "invalid syntax"
 
-    # Message containing additional colons
     res = _normalize_diagnostic_error('broken.py:10:2: SyntaxError: expected ":"')
     assert res.path == "broken.py"
     assert res.line == 10
     assert res.message == 'SyntaxError: expected ":"'
 
-    # General message with period/dot must remain unlocated
     res = _normalize_diagnostic_error("Failed reading config.json: cannot decode")
     assert res.path is None
     assert res.line is None
     assert res.message == "Failed reading config.json: cannot decode"
 
-    # General message with module dot syntax must remain unlocated
     res = _normalize_diagnostic_error("module.submodule: execution timed out")
     assert res.path is None
     assert res.line is None
     assert res.message == "module.submodule: execution timed out"
 
-    # Normal unlocated scanner error
     res = _normalize_diagnostic_error(
         "Inconsistent directory structure: parent directory 'foo' not found"
     )
@@ -7090,7 +7038,6 @@ def test_diagnostic_error_normalization_cross_platform_and_edge_cases() -> None:
         == "Inconsistent directory structure: parent directory 'foo' not found"
     )
 
-    # Parser-unavailable error with file path
     res = _normalize_diagnostic_error(
         "mod.py: no parser available for language 'unknown'"
     )
@@ -7098,7 +7045,6 @@ def test_diagnostic_error_normalization_cross_platform_and_edge_cases() -> None:
     assert res.line is None
     assert res.message == "no parser available for language 'unknown'"
 
-    # Windows parser-unavailable error
     res = _normalize_diagnostic_error(
         "C:\\repo\\mod.py: no parser available for language 'unknown'"
     )
@@ -7106,7 +7052,6 @@ def test_diagnostic_error_normalization_cross_platform_and_edge_cases() -> None:
     assert res.line is None
     assert res.message == "no parser available for language 'unknown'"
 
-    # Ambiguous colon-separated unlocated message must remain unlocated
     res = _normalize_diagnostic_error("Request failed:12:4: timeout")
     assert res.path is None
     assert res.line is None
@@ -7146,22 +7091,18 @@ def test_diagnostics_cli_with_cross_platform_and_unlocated_errors(
     data = json.loads(capsys.readouterr().out)
     assert len(data["errors"]) == 4
 
-    # Verify unlocated error stays unlocated
     unlocated = next(
         e for e in data["errors"] if "Failed reading config.json" in e["message"]
     )
     assert unlocated["path"] is None
     assert unlocated["line"] is None
 
-    # Verify Windows path correctly captured
     win_entry = next(e for e in data["errors"] if e["path"] == "C:\\repo\\broken.py")
     assert win_entry["line"] == 12
 
-    # Verify Unix path correctly captured
     unix_entry = next(e for e in data["errors"] if e["path"] == "/unix/broken.py")
     assert unix_entry["line"] == 5
 
-    # Verify parser-unavailable correctly captured
     no_parser = next(e for e in data["errors"] if e["path"] == "mod.py")
     assert no_parser["line"] is None
     assert "no parser available" in no_parser["message"]

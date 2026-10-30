@@ -1,5 +1,3 @@
-"""Validation package."""
-
 from task_mgmt.validation.rules import (
     ValidationError,
     validate_email,

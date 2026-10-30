@@ -31,16 +31,6 @@ from context_forge.reporting.contract import OperationStatus
 
 
 def create_multi_package_project(root: Path) -> Project:
-    """Fixture project containing multiple conventional packages and non-package files:
-
-    Packages:
-      - src/pkg_a (with __init__.py, mod_a.py)
-      - src/pkg_b (with __init__.py, mod_b.py)
-      - src/pkg_c (with __init__.py, mod_c.py)
-
-    Non-package:
-      - scripts/standalone.py (no __init__.py in scripts)
-    """
     project = Project(
         name="Multi-Package Test Project",
         root_path=root.resolve(),
@@ -67,7 +57,6 @@ def create_multi_package_project(root: Path) -> Project:
     for d in (d_src, d_pkg_a, d_pkg_b, d_pkg_c, d_scripts):
         project.add_directory(d)
 
-    # Initializers defining conventional packages
     init_a = File(
         project_id=project.id,
         path=Path("src/pkg_a/__init__.py"),
@@ -90,7 +79,6 @@ def create_multi_package_project(root: Path) -> Project:
         directory_id=d_pkg_c.id,
     )
 
-    # Modules
     mod_a = File(
         project_id=project.id,
         path=Path("src/pkg_a/mod_a.py"),
@@ -130,7 +118,6 @@ def create_multi_package_project(root: Path) -> Project:
     for f in (init_a, init_b, init_c, mod_a, mod_a2, mod_b, mod_c, standalone):
         project.add_file(f)
 
-    # Symbols
     sym_a = Symbol(
         file_id=mod_a.id,
         name="func_a",
@@ -150,7 +137,6 @@ def create_multi_package_project(root: Path) -> Project:
     project.add_symbol(sym_a)
     project.add_symbol(sym_b)
 
-    # 1. Internal dependency within pkg_a: mod_a2 -> mod_a
     project.add_relationship(
         Relationship(
             source_id=mod_a2.id,
@@ -159,7 +145,6 @@ def create_multi_package_project(root: Path) -> Project:
         )
     )
 
-    # 2. Cross-package dependency: pkg_a (mod_a) -> pkg_b (mod_b)
     project.add_relationship(
         Relationship(
             source_id=mod_a.id,
@@ -168,7 +153,6 @@ def create_multi_package_project(root: Path) -> Project:
         )
     )
 
-    # 3. Repeated cross-package dependency: pkg_a (sym_a) -> pkg_b (sym_b)
     project.add_relationship(
         Relationship(
             source_id=sym_a.id,
@@ -177,7 +161,6 @@ def create_multi_package_project(root: Path) -> Project:
         )
     )
 
-    # 4. Reverse cross-package dependency: pkg_b (mod_b) -> pkg_c (mod_c)
     project.add_relationship(
         Relationship(
             source_id=mod_b.id,
@@ -186,7 +169,6 @@ def create_multi_package_project(root: Path) -> Project:
         )
     )
 
-    # 5. Dependency involving standalone non-package file: standalone -> mod_a
     project.add_relationship(
         Relationship(
             source_id=standalone.id,
@@ -202,7 +184,6 @@ def test_01_internal_package_dependency_not_cross_package(tmp_path: Path) -> Non
     proj = create_multi_package_project(tmp_path)
     report = analyze_package_boundaries(proj)
 
-    # mod_a2 -> mod_a is internal to src/pkg_a
     assert report.internal_dependencies_count >= 1
     internal_pairs = [
         (d.source_package, d.target_package)
@@ -240,7 +221,6 @@ def test_03_dependency_direction_is_importer_to_imported(tmp_path: Path) -> None
 
 def test_04_dependencies_in_opposite_directions(tmp_path: Path) -> None:
     proj = create_multi_package_project(tmp_path)
-    # Add reverse edge: pkg_b -> pkg_a
     mod_b = next(f for f in proj.files if f.name == "mod_b.py")
     mod_a = next(f for f in proj.files if f.name == "mod_a.py")
     proj.add_relationship(
@@ -298,7 +278,6 @@ def test_08_repeated_cross_package_patterns_aggregation(tmp_path: Path) -> None:
 
     patterns = report.repeated_patterns
     assert len(patterns) >= 1
-    # Check that patterns are grouped by (source_package, target_package, relationship_type)
     for p in patterns:
         assert p.count == len(p.dependencies)
         assert p.count > 0
@@ -308,7 +287,6 @@ def test_09_repeated_patterns_correct_counts(tmp_path: Path) -> None:
     proj = create_multi_package_project(tmp_path)
     mod_a2 = next(f for f in proj.files if f.name == "mod_a2.py")
     mod_b = next(f for f in proj.files if f.name == "mod_b.py")
-    # Add a second imports relationship from pkg_a to pkg_b
     proj.add_relationship(
         Relationship(
             source_id=mod_a2.id,
@@ -332,7 +310,6 @@ def test_10_no_double_counting_of_same_relationship(tmp_path: Path) -> None:
     proj = create_multi_package_project(tmp_path)
     mod_a = next(f for f in proj.files if f.name == "mod_a.py")
     mod_b = next(f for f in proj.files if f.name == "mod_b.py")
-    # Add identical duplicate relationship
     proj.add_relationship(
         Relationship(
             source_id=mod_a.id,
@@ -342,7 +319,6 @@ def test_10_no_double_counting_of_same_relationship(tmp_path: Path) -> None:
     )
 
     report = analyze_package_boundaries(proj)
-    # The duplicate must be deduplicated
     pkg_a_to_b_imports = [
         d
         for d in report.cross_package_dependencies
@@ -357,7 +333,6 @@ def test_11_deterministic_aggregate_ordering(tmp_path: Path) -> None:
     proj = create_multi_package_project(tmp_path)
     report1 = analyze_package_boundaries(proj)
 
-    # Reverse relationships order in project
     proj.relationships.reverse()
     report2 = analyze_package_boundaries(proj)
 
@@ -443,7 +418,6 @@ def test_15_violation_identifies_rule_and_relationship_evidence(tmp_path: Path) 
 
 
 def test_16_invalid_policy_configuration_raises_error() -> None:
-    # Test invalid config dictionary
     with pytest.raises(
         ConfigurationValidationError, match="missing or invalid 'source'"
     ):
@@ -474,7 +448,6 @@ def test_17_missing_source_package_reported_as_unclassified(tmp_path: Path) -> N
     proj = create_multi_package_project(tmp_path)
     report = analyze_package_boundaries(proj)
 
-    # standalone.py -> mod_a: standalone.py is not in a package with __init__.py
     unclassified = [
         u
         for u in report.unclassified_dependencies
@@ -491,7 +464,6 @@ def test_18_missing_target_package_reported_as_unclassified(tmp_path: Path) -> N
     proj = create_multi_package_project(tmp_path)
     mod_a = next(f for f in proj.files if f.name == "mod_a.py")
     standalone = next(f for f in proj.files if f.name == "standalone.py")
-    # Add dependency pointing to standalone: mod_a -> standalone
     proj.add_relationship(
         Relationship(
             source_id=mod_a.id,
@@ -527,11 +499,9 @@ def test_20_unresolved_imports_excluded_from_confirmed_violations(
     tmp_path: Path,
 ) -> None:
     proj = create_multi_package_project(tmp_path)
-    # Even under strict deny-all policy, unclassified or unresolved imports do not produce violations
     policy = PackageBoundaryPolicy(rules=(), default_policy="deny")
     report = analyze_package_boundaries(proj, policy=policy)
 
-    # Violations must only be from resolved cross-package dependencies
     for v in report.policy_violations:
         assert v.source_package is not None
         assert v.target_package is not None
@@ -637,7 +607,6 @@ def test_28_conflicting_overlapping_wildcard_rules_reported_as_ambiguous(
     tmp_path: Path,
 ) -> None:
     proj = create_multi_package_project(tmp_path)
-    # Rule 1 allows src/* -> src/pkg_b; Rule 2 denies src/pkg_a -> *
     rule_allow = PackageDependencyRule(
         source_package="src/*",
         target_package="src/pkg_b",
@@ -652,12 +621,10 @@ def test_28_conflicting_overlapping_wildcard_rules_reported_as_ambiguous(
     )
     policy = PackageBoundaryPolicy(rules=(rule_allow, rule_deny))
 
-    # Evaluate directly
     status, matched_rule = policy.evaluate("src/pkg_a", "src/pkg_b")
     assert status == "ambiguous"
     assert matched_rule is None
 
-    # Run boundary analysis
     report = analyze_package_boundaries(proj, policy=policy)
     ambiguous_deps = [
         d for d in report.cross_package_dependencies if d.policy_status == "ambiguous"
@@ -689,17 +656,14 @@ def test_29_reversing_conflicting_wildcard_rules_produces_identical_ambiguity(
         rule_id="DENY_WILDCARD",
     )
 
-    # Order 1: allow first, deny second
     policy1 = PackageBoundaryPolicy(rules=(rule_allow, rule_deny))
     status1, _ = policy1.evaluate("src/pkg_a", "src/pkg_b")
     report1 = analyze_package_boundaries(proj, policy=policy1)
 
-    # Order 2: deny first, allow second
     policy2 = PackageBoundaryPolicy(rules=(rule_deny, rule_allow))
     status2, _ = policy2.evaluate("src/pkg_a", "src/pkg_b")
     report2 = analyze_package_boundaries(proj, policy=policy2)
 
-    # Reversing rule order must not change the outcome
     assert status1 == status2 == "ambiguous"
     assert [d.policy_status for d in report1.cross_package_dependencies] == [
         d.policy_status for d in report2.cross_package_dependencies
@@ -721,13 +685,11 @@ def test_30_agreeing_overlapping_wildcard_rules_apply_decision() -> None:
         rule_id="DENY_2",
     )
 
-    # Both wildcard rules agree on deny
     policy_deny = PackageBoundaryPolicy(rules=(rule_deny1, rule_deny2))
     status, matched_rule = policy_deny.evaluate("src/pkg_a", "src/pkg_b")
     assert status == "prohibited"
     assert matched_rule is not None
 
-    # Both wildcard rules agree on allow
     rule_allow1 = PackageDependencyRule(
         source_package="src/*",
         target_package="src/pkg_b",
@@ -759,7 +721,6 @@ def test_31_exact_match_precedence_over_conflicting_wildcards() -> None:
         policy="deny",
         rule_id="DENY_WILDCARD",
     )
-    # Exact match rule takes precedence
     rule_exact = PackageDependencyRule(
         source_package="src/pkg_a",
         target_package="src/pkg_b",

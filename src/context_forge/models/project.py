@@ -18,25 +18,6 @@ from context_forge.parser.result import (
 
 @dataclass
 class Project:
-    """Project entity model representing an analyzed codebase.
-
-    Mutation Contract:
-        Entities must be added via `add_file()`, `add_symbol()`, `add_reference()`,
-        `add_inheritance_reference()`, `add_import()`, and `add_relationship()` to
-        enforce relational integrity (such as project_id containment and valid symbol
-        ownership) and maintain internal membership caches.
-
-        Whole-collection reassignment (e.g., `project.files = new_files` or
-        `project.symbols = new_symbols`, as used during incremental project merges)
-        is supported and automatically invalidates internal membership caches.
-
-        Direct in-place indexed or slice mutation (such as `project.files[i] = ...` or
-        `project.files[:] = ...`) is outside the supported contract because it bypasses
-        project-id and file-id integrity validation. If callers perform manual in-place
-        modifications, `clear_membership_caches()` must be explicitly called to reset
-        internal membership caches.
-    """
-
     name: str
     root_path: Path
     id: UUID = field(default_factory=uuid4)
@@ -76,11 +57,6 @@ class Project:
         super().__setattr__(name, value)
 
     def clear_membership_caches(self) -> None:
-        """Reset internal file and symbol membership caches.
-
-        Invoked automatically upon collection reassignment and incremental merge,
-        and available if entity collections are modified outside supported `add_*` methods.
-        """
         object.__setattr__(self, "_cached_file_ids", None)
         object.__setattr__(self, "_cached_files_ref", None)
         object.__setattr__(self, "_cached_symbol_ids", None)

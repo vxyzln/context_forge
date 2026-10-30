@@ -1,5 +1,3 @@
-"""Services package."""
-
 from issues.services.issue_service import (
     ALLOWED_TRANSITIONS,
     IssueService,

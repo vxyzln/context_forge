@@ -506,7 +506,6 @@ def get_source_evidence(
             message=f"Failed to resolve source path '{rel_path_str}': {exc}",
         )
 
-    # Verify the target path stays within the repository root.
     if not full_path.is_relative_to(canonical_root):
         return SourceExcerpt(
             target_id=target_id,

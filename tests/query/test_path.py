@@ -47,7 +47,6 @@ def create_path_test_project(tmp_path: Path) -> Project:
         files[name] = f
         (root / "src" / name).write_text(f"# {name}\n", encoding="utf-8")
 
-    # Symbols
     sym_a = Symbol(
         file_id=files["a.py"].id,
         name="fn_a",
@@ -65,12 +64,6 @@ def create_path_test_project(tmp_path: Path) -> Project:
     project.add_symbol(sym_a)
     project.add_symbol(sym_b)
 
-    # Base graph:
-    # a.py -> imports -> b.py (line 10)
-    # b.py -> calls -> c.py (line 25)
-    # c.py -> references -> d.py (no line)
-    # d.py -> depends_on -> e.py
-    # Also a shortcut: a.py -> references -> c.py (length 2 vs length 3 path to d.py)
     project.add_relationship(
         Relationship(
             source_id=files["a.py"].id,
@@ -133,7 +126,7 @@ def test_02_multi_edge_path(tmp_path: Path) -> None:
     res = find_relationship_path(proj, "src/b.py", "src/e.py")
 
     assert res.path_found is True
-    assert res.length == 3  # b -> c -> d -> e
+    assert res.length == 3
     assert len(res.steps) == 3
     assert res.steps[0].to_name == "c.py"
     assert res.steps[1].to_name == "d.py"
@@ -142,9 +135,6 @@ def test_02_multi_edge_path(tmp_path: Path) -> None:
 
 def test_03_shortest_path_selected_when_multiple_exist(tmp_path: Path) -> None:
     proj = create_path_test_project(tmp_path)
-    # From a.py to d.py:
-    # Path 1: a -> b -> c -> d (length 3)
-    # Path 2: a -> c -> d (length 2)
     res = find_relationship_path(proj, "src/a.py", "src/d.py")
 
     assert res.path_found is True
@@ -157,7 +147,6 @@ def test_04_deterministic_tie_breaking_for_equal_length_paths(
     tmp_path: Path,
 ) -> None:
     proj = create_path_test_project(tmp_path)
-    # Add parallel edge from a to b of different type
     f_a = next(f for f in proj.files if f.path == Path("src/a.py"))
     f_b = next(f for f in proj.files if f.path == Path("src/b.py"))
     proj.add_relationship(
@@ -260,13 +249,11 @@ def test_11_disconnected_endpoints_exhaustive_search(tmp_path: Path) -> None:
     assert res.path_found is False
     assert res.is_exhaustive is True
     assert res.status == "no_path_found"
-    assert res.outcome.is_success is True  # Definitive negative outcome
+    assert res.outcome.is_success is True
 
 
 def test_12_depth_limited_search_inconclusive(tmp_path: Path) -> None:
     proj = create_path_test_project(tmp_path)
-    # Path from b.py to e.py is 3 hops: b -> c -> d -> e
-    # If max_depth=1, it cannot reach e.py and frontier is truncated
     res = find_relationship_path(proj, "src/b.py", "src/e.py", max_depth=1)
 
     assert res.path_found is False
@@ -295,7 +282,6 @@ def test_14_path_found_within_permitted_depth(tmp_path: Path) -> None:
 
 def test_15_expansion_limit_inconclusive(tmp_path: Path) -> None:
     proj = create_path_test_project(tmp_path)
-    # If max_expansions=1, expanding the start node exhausts limit before finding target
     res = find_relationship_path(
         proj, "src/a.py", "src/e.py", max_expansions=1, max_depth=10
     )
@@ -310,7 +296,6 @@ def test_16_cycle_handling(tmp_path: Path) -> None:
     proj = create_path_test_project(tmp_path)
     f_a = next(f for f in proj.files if f.path == Path("src/a.py"))
     f_b = next(f for f in proj.files if f.path == Path("src/b.py"))
-    # Add cycle b -> a
     proj.add_relationship(
         Relationship(
             source_id=f_b.id,
@@ -342,12 +327,9 @@ def test_17_self_loop_handling(tmp_path: Path) -> None:
 
 def test_18_directional_traversal_outgoing(tmp_path: Path) -> None:
     proj = create_path_test_project(tmp_path)
-    # Stored edge: a.py -> b.py
-    # Outgoing from a to b works:
     res = find_relationship_path(proj, "src/a.py", "src/b.py", direction="outgoing")
     assert res.path_found is True
 
-    # Outgoing from b to a should find NO path:
     res_rev = find_relationship_path(proj, "src/b.py", "src/a.py", direction="outgoing")
     assert res_rev.path_found is False
     assert res_rev.is_exhaustive is True
@@ -355,8 +337,6 @@ def test_18_directional_traversal_outgoing(tmp_path: Path) -> None:
 
 def test_19_directional_traversal_incoming(tmp_path: Path) -> None:
     proj = create_path_test_project(tmp_path)
-    # Stored edge: a.py -> b.py
-    # Incoming from b.py to a.py follows target -> source:
     res = find_relationship_path(proj, "src/b.py", "src/a.py", direction="incoming")
     assert res.path_found is True
     step = res.steps[0]
@@ -367,14 +347,12 @@ def test_19_directional_traversal_incoming(tmp_path: Path) -> None:
 
 def test_20_both_direction_traversal(tmp_path: Path) -> None:
     proj = create_path_test_project(tmp_path)
-    # Stored: a -> b and a -> c. In both direction, path between b and c exists via a:
     res = find_relationship_path(proj, "src/b.py", "src/c.py", direction="both")
     assert res.path_found is True
 
 
 def test_21_relationship_type_filtering(tmp_path: Path) -> None:
     proj = create_path_test_project(tmp_path)
-    # a.py -> b.py is IMPORTS
     res = find_relationship_path(
         proj, "src/a.py", "src/b.py", relationship_types={"imports"}
     )
@@ -383,7 +361,6 @@ def test_21_relationship_type_filtering(tmp_path: Path) -> None:
 
 def test_22_excluded_relationship_types_not_traversed(tmp_path: Path) -> None:
     proj = create_path_test_project(tmp_path)
-    # a.py -> b.py is IMPORTS; filter only CALLS
     res = find_relationship_path(
         proj, "src/a.py", "src/b.py", relationship_types={"calls"}
     )
@@ -400,7 +377,6 @@ def test_23_preservation_of_stored_relationship_direction(
 
     res = find_relationship_path(proj, "src/b.py", "src/a.py", direction="incoming")
     step = res.steps[0]
-    # Stored source must remain f_a.id, stored target must remain f_b.id!
     assert step.stored_source_id == f_a.id
     assert step.stored_target_id == f_b.id
     assert step.traversal_direction == "incoming"
@@ -423,7 +399,6 @@ def test_26_missing_source_line_metadata_handled_correctly(
     tmp_path: Path,
 ) -> None:
     proj = create_path_test_project(tmp_path)
-    # a.py -> c.py has no line in metadata
     res = find_relationship_path(
         proj, "src/a.py", "src/c.py", relationship_types={"references"}
     )
@@ -471,7 +446,6 @@ def test_31_empty_or_incomplete_graph(tmp_path: Path) -> None:
     proj.errors = ["Some parser error"]
 
     res = find_relationship_path(proj, "src/a.py", "src/b.py")
-    # Path is found in existing graph, but outcome should be incomplete/partial
     assert res.outcome.status == OperationStatus.INCOMPLETE
 
 
@@ -584,11 +558,9 @@ def test_37_project_query_method_and_traverse_regression(
     proj = create_path_test_project(tmp_path)
     pq = ProjectQuery(proj)
 
-    # find_relationship_path on ProjectQuery
     res = pq.find_relationship_path("src/a.py", "src/b.py")
     assert res.path_found is True
 
-    # Regression: traverse on ProjectQuery still works
     f_a = next(f for f in proj.files if f.path == Path("src/a.py"))
     traversed = pq.traverse(f_a.id, max_depth=1)
     assert len(traversed) > 0

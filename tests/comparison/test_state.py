@@ -101,7 +101,7 @@ def test_terminal_analysis_statuses_contract(
 
     p = make_sample_project("repo1", Path("/repo/a"), analysis_status=status or "")
     if status is None:
-        p.analysis_status = None  # type: ignore[assignment]
+        p.analysis_status = None
     state = ComparisonState.from_project(p, state_id="s1")
     assert state.is_complete is expected_complete
 
@@ -167,7 +167,6 @@ def test_all_freshness_states_explicitly(freshness: FreshnessState) -> None:
     val_res = validate_comparison_states(s1, s2)
     cmp_res = compare_states(s1, s2)
 
-    # Validation and comparison results must agree on completeness
     assert val_res.is_complete == cmp_res.is_complete
 
     if freshness == FreshnessState.CURRENT:
@@ -235,7 +234,6 @@ def test_historical_state_freshness_rules() -> None:
     p_hist = make_sample_project("repo1", Path("/repo/a"))
     p_curr = make_sample_project("repo1", Path("/repo/a"))
 
-    # Historical state permits STALE freshness without making it incomplete or warning
     s_hist_stale = ComparisonState.from_project(
         p_hist,
         state_id="commit-abc1234",
@@ -258,7 +256,6 @@ def test_historical_state_freshness_rules() -> None:
         for d in res.outcome.diagnostics
     )
 
-    # But historical state with INCOMPLETE freshness MUST still be incomplete and reported!
     s_hist_incomplete = ComparisonState.from_project(
         p_hist,
         state_id="commit-abc1234",

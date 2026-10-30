@@ -20,7 +20,7 @@ class TestIssueTracker(unittest.TestCase):
         self.assertIsNotNone(issue)
         self.assertEqual(issue.assignee, "backend_dev")
         events = self.app.repo.get_events("ISSUE-1")
-        self.assertEqual(len(events), 2)  # CREATED + ASSIGNED
+        self.assertEqual(len(events), 2)
 
     def test_valid_status_transition(self) -> None:
         issue = self.app.service.transition_status(

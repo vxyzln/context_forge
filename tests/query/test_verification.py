@@ -34,7 +34,6 @@ from context_forge.reporting.contract import DiagnosticItem
 
 
 def create_verification_fixture_project(root: Path) -> Project:
-    """Create a multi-file project with structural, heuristic, and unassociated tests."""
     project = Project(
         name="Verification Test Project",
         root_path=root.resolve(),
@@ -56,12 +55,6 @@ def create_verification_fixture_project(root: Path) -> Project:
     project.add_directory(src_dir)
     project.add_directory(tests_dir)
 
-    # Production files:
-    # 1. src/service.py - Has direct structural link from tests/test_service.py
-    # 2. src/helper.py - Also imported by tests/test_service.py (shared test)
-    # 3. src/calculator.py - Has NO structural link, but matches tests/test_calculator.py by naming convention
-    # 4. src/utils.py - Has symbol 'hash_token', matched by symbol in tests/test_misc.py
-    # 5. src/orphan.py - Has no test links or matching names whatsoever
     f_service = File(
         project_id=project.id,
         path=Path("src/service.py"),
@@ -98,7 +91,6 @@ def create_verification_fixture_project(root: Path) -> Project:
         directory_id=src_dir.id,
     )
 
-    # Test files:
     f_test_service = File(
         project_id=project.id,
         path=Path("tests/test_service.py"),
@@ -136,7 +128,6 @@ def create_verification_fixture_project(root: Path) -> Project:
     ):
         project.add_file(f)
 
-    # Physical files on disk
     (root / "src").mkdir(parents=True, exist_ok=True)
     (root / "tests").mkdir(parents=True, exist_ok=True)
 
@@ -162,7 +153,6 @@ def create_verification_fixture_project(root: Path) -> Project:
         "def test_hash_token(): pass\n", encoding="utf-8"
     )
 
-    # Add symbols
     sym_utils = Symbol(
         file_id=f_utils.id,
         name="hash_token",
@@ -181,9 +171,6 @@ def create_verification_fixture_project(root: Path) -> Project:
     )
     project.add_symbol(sym_test_misc)
 
-    # Relationships:
-    # 1. tests/test_service.py -> imports -> src/service.py
-    # 2. tests/test_service.py -> imports -> src/helper.py
     project.add_relationship(
         Relationship(
             source_id=f_test_service.id,
@@ -200,11 +187,6 @@ def create_verification_fixture_project(root: Path) -> Project:
     )
 
     return project
-
-
-# ==============================================================================
-# Part 1: Test-to-Code Evidence Model Tests
-# ==============================================================================
 
 
 def test_01_direct_structural_association_evidence(tmp_path: Path) -> None:
@@ -233,13 +215,11 @@ def test_02_direct_precedence_over_heuristic(tmp_path: Path) -> None:
     proj = create_verification_fixture_project(tmp_path)
     service_file = next(f for f in proj.files if f.name == "service.py")
 
-    # test_service.py matches both naming_convention AND has a direct imports relationship
     direct, heuristic, _unknown = identify_test_associations(
         proj,
         [(service_file.id, "service.py", "src/service.py", "root")],
     )
 
-    # Direct must take precedence; heuristic should NOT contain test_service.py
     assert len(direct) == 1
     assert direct[0].test_file_path == "tests/test_service.py"
     assert direct[0].classification == "direct"
@@ -330,11 +310,6 @@ def test_07_test_association_item_serialization() -> None:
     assert d["confidence"] == "high"
 
 
-# ==============================================================================
-# Part 2: Verification Checklist Generation Tests
-# ==============================================================================
-
-
 def test_08_checklist_category_partitioning(tmp_path: Path) -> None:
     proj = create_verification_fixture_project(tmp_path)
     chk = generate_verification_checklist(
@@ -342,37 +317,31 @@ def test_08_checklist_category_partitioning(tmp_path: Path) -> None:
         ["src/service.py", "src/calculator.py", "src/orphan.py"],
     )
 
-    # Category A: structural test (test_service.py)
     assert len(chk.detected_structural_tests) >= 1
     assert any(
         it.test_file_path == "tests/test_service.py"
         for it in chk.detected_structural_tests
     )
 
-    # Category B: heuristic test (test_calculator.py)
     assert len(chk.heuristic_tests) >= 1
     assert any(
         it.test_file_path == "tests/test_calculator.py" for it in chk.heuristic_tests
     )
 
-    # Category C: additional verification (orphan.py needs coverage)
     assert len(chk.additional_verifications) >= 1
     assert any("orphan.py" in it.action for it in chk.additional_verifications)
 
-    # Category D: unverified area noting orphan.py
     assert len(chk.unverified_areas) >= 1
     assert any("orphan.py" in it.rationale for it in chk.unverified_areas)
 
 
 def test_09_multi_file_changes_shared_test_deduplication(tmp_path: Path) -> None:
     proj = create_verification_fixture_project(tmp_path)
-    # Both service.py and helper.py are imported by tests/test_service.py
     chk = generate_verification_checklist(
         proj,
         ["src/service.py", "src/helper.py"],
     )
 
-    # Category A should have exactly ONE deduplicated item for tests/test_service.py
     service_items = [
         it
         for it in chk.detected_structural_tests
@@ -381,7 +350,6 @@ def test_09_multi_file_changes_shared_test_deduplication(tmp_path: Path) -> None
     assert len(service_items) == 1
     item = service_items[0]
 
-    # Target entities must include both files
     assert "service.py" in item.target_entities
     assert "helper.py" in item.target_entities
     assert len(item.supporting_evidence) == 2
@@ -419,7 +387,6 @@ def test_12_consolidated_test_run_suggestion(tmp_path: Path) -> None:
         ["src/service.py", "src/calculator.py"],
     )
 
-    # With 2 distinct test files, a consolidated command is in Category C
     consolidated = [
         it
         for it in chk.additional_verifications
@@ -464,7 +431,6 @@ def test_14_incomplete_project_status_reported_in_category_d(tmp_path: Path) -> 
 def test_15_stale_freshness_reported_in_category_d(tmp_path: Path) -> None:
     proj = create_verification_fixture_project(tmp_path)
 
-    # Mock WorkflowFreshnessGuard to return STALE
     mock_wf = WorkflowFreshness(
         state=FreshnessState.STALE,
         reason="modified_files",
@@ -517,7 +483,6 @@ def test_17_full_json_serialization(tmp_path: Path) -> None:
     assert "analysis_status" in data
     assert "freshness_state" in data
 
-    # Confirm JSON dumps cleanly
     json_str = json.dumps(data)
     assert len(json_str) > 0
 
@@ -529,11 +494,6 @@ def test_18_project_query_integration(tmp_path: Path) -> None:
     chk = pq.generate_verification_checklist(["src/service.py"])
     assert isinstance(chk, VerificationChecklist)
     assert len(chk.detected_structural_tests) == 1
-
-
-# ==============================================================================
-# Defect A: Freshness State Handling Regression Tests
-# ==============================================================================
 
 
 def test_23_freshness_current_state(tmp_path: Path) -> None:
@@ -549,7 +509,6 @@ def test_23_freshness_current_state(tmp_path: Path) -> None:
         chk = generate_verification_checklist(proj, ["src/service.py"])
 
     assert chk.freshness_state == "current"
-    # No freshness warning in Category D for CURRENT
     assert not any(
         it.item_id
         in {"stale_freshness", "incomplete_freshness", "indeterminate_freshness"}
@@ -618,7 +577,6 @@ def test_26_freshness_exception_during_assessment(tmp_path: Path) -> None:
 
 
 def test_27_freshness_missing_root_path() -> None:
-    # Project with nonexistent root path
     proj = Project(
         name="No Root Project",
         root_path=Path("/tmp/nonexistent_cf_path_12345"),
@@ -630,11 +588,6 @@ def test_27_freshness_missing_root_path() -> None:
         it for it in chk.unverified_areas if it.item_id == "indeterminate_freshness"
     ]
     assert len(ind_items) == 1
-
-
-# ==============================================================================
-# Defect B: Analysis Status Vocabulary Consistency Tests
-# ==============================================================================
 
 
 def test_28_canonical_status_analyzed(tmp_path: Path) -> None:
@@ -655,7 +608,6 @@ def test_29_canonical_status_completed(tmp_path: Path) -> None:
 
 def test_30_non_canonical_status_complete_is_incomplete(tmp_path: Path) -> None:
     proj = create_verification_fixture_project(tmp_path)
-    # "complete" is NOT canonical ("analyzed" and "completed" are)
     proj.analysis_status = "complete"
     chk = generate_verification_checklist(proj, ["src/service.py"])
     assert chk.analysis_status == "incomplete"
@@ -680,19 +632,11 @@ def test_32_status_not_analyzed_or_analyzing_or_failed(tmp_path: Path) -> None:
         assert any(it.item_id == "incomplete_analysis" for it in chk.unverified_areas)
 
 
-# ==============================================================================
-# Defect C: Truncation and Impact Scope Tests
-# ==============================================================================
-
-
 def test_33_truncation_preserves_omitted_downstream_test_associations(
     tmp_path: Path,
 ) -> None:
-    """When changeset display limit truncates items, checklist still reasons about full affected set."""
     proj = create_verification_fixture_project(tmp_path)
 
-    # helper.py is downstream of service.py in the graph
-    # Add a chain: service -> helper -> child
     src_dir = next(d for d in proj.directories if d.name == "src")
     f_child = File(
         project_id=proj.id,
@@ -706,7 +650,6 @@ def test_33_truncation_preserves_omitted_downstream_test_associations(
         "def child_fn(): pass\n", encoding="utf-8"
     )
 
-    # Add test for child.py: tests/test_child.py
     tests_dir = next(d for d in proj.directories if d.name == "tests")
     f_test_child = File(
         project_id=proj.id,
@@ -746,7 +689,6 @@ def test_33_truncation_preserves_omitted_downstream_test_associations(
         )
     )
 
-    # Analyze changeset with limit=1 to force truncation in displayed items
     res = analyze_changeset(
         proj,
         ["src/service.py"],
@@ -758,7 +700,6 @@ def test_33_truncation_preserves_omitted_downstream_test_associations(
     assert len(res.items) == 1
     assert res.total > 1
 
-    # Checklist must include tests for downstream child even though child was truncated from display
     chk = res.verification_checklist
     assert chk is not None
     test_files = [it.test_file_path for it in chk.detected_structural_tests]
@@ -769,10 +710,8 @@ def test_33_truncation_preserves_omitted_downstream_test_associations(
 def test_34_truncation_without_all_items_reports_partial_coverage(
     tmp_path: Path,
 ) -> None:
-    """When an external truncated result lacks _all_items, checklist honestly reports partial coverage."""
     proj = create_verification_fixture_project(tmp_path)
 
-    # Mock an impact result that was truncated and has NO _all_items
     mock_impact = ChangeSetImpactResult(
         status="success",
         supplied_paths=("src/service.py",),
@@ -801,7 +740,7 @@ def test_34_truncation_without_all_items_reports_partial_coverage(
         depth_reached=1,
         direction="both",
         relationship_types=("imports",),
-        _all_items=None,  # Not available!
+        _all_items=None,
     )
 
     chk = generate_verification_checklist(
@@ -811,19 +750,12 @@ def test_34_truncation_without_all_items_reports_partial_coverage(
     assert any(it.item_id == "truncated_impact_coverage" for it in chk.unverified_areas)
 
 
-# ==============================================================================
-# Defect D: Compatibility & Default Changeset Behavior Tests
-# ==============================================================================
-
-
 def test_35_changeset_default_does_not_generate_checklist(tmp_path: Path) -> None:
     proj = create_verification_fixture_project(tmp_path)
     res = analyze_changeset(proj, ["src/service.py"])
 
-    # Default call must NOT attach a checklist
     assert res.verification_checklist is None
 
-    # to_dict must NOT contain verification_checklist
     data = res.to_dict()
     assert "verification_checklist" not in data
 
@@ -850,13 +782,7 @@ def test_37_no_freshness_guard_called_when_checklist_not_requested(
     ) as mock_assess:
         res = analyze_changeset(proj, ["src/service.py"])
         assert res.verification_checklist is None
-        # Must not perform freshness guard checks on ordinary changeset query
         mock_assess.assert_not_called()
-
-
-# ==============================================================================
-# Defect E: Direct Association Deduplication Tests
-# ==============================================================================
 
 
 def test_38_exact_duplicate_relationships_deduplicated(tmp_path: Path) -> None:
@@ -864,7 +790,6 @@ def test_38_exact_duplicate_relationships_deduplicated(tmp_path: Path) -> None:
     service_file = next(f for f in proj.files if f.name == "service.py")
     test_service_file = next(f for f in proj.files if f.name == "test_service.py")
 
-    # Add an identical duplicate relationship
     proj.add_relationship(
         Relationship(
             source_id=test_service_file.id,
@@ -878,7 +803,6 @@ def test_38_exact_duplicate_relationships_deduplicated(tmp_path: Path) -> None:
         [(service_file.id, "service.py", "src/service.py", "root")],
     )
 
-    # Must produce exactly ONE direct association item, NOT two
     assert len(direct) == 1
     assert direct[0].test_file_path == "tests/test_service.py"
     assert direct[0].target_entity_name == "service.py"
@@ -891,7 +815,6 @@ def test_39_multiple_distinct_relationships_merged_deterministically(
     service_file = next(f for f in proj.files if f.name == "service.py")
     test_service_file = next(f for f in proj.files if f.name == "test_service.py")
 
-    # Add CALLS relationship in addition to IMPORTS
     proj.add_relationship(
         Relationship(
             source_id=test_service_file.id,
@@ -905,7 +828,6 @@ def test_39_multiple_distinct_relationships_merged_deterministically(
         [(service_file.id, "service.py", "src/service.py", "root")],
     )
 
-    # Must produce exactly ONE merged direct item, with both types and combined evidence
     assert len(direct) == 1
     item = direct[0]
     assert "calls" in item.relationship_type
@@ -919,7 +841,6 @@ def test_40_distinct_targets_with_same_name_remain_distinct(tmp_path: Path) -> N
     proj = create_verification_fixture_project(tmp_path)
     test_service_file = next(f for f in proj.files if f.name == "test_service.py")
 
-    # Two different targets with identical name "mod.py" in different directories
     f1 = File(
         project_id=proj.id,
         path=Path("src/pkg1/mod.py"),
@@ -958,7 +879,6 @@ def test_40_distinct_targets_with_same_name_remain_distinct(tmp_path: Path) -> N
         ],
     )
 
-    # Must produce 2 distinct items for the 2 distinct targets
     assert len(direct) == 2
     target_ids = {a.target_entity_id for a in direct}
     assert f1.id in target_ids
@@ -972,7 +892,6 @@ def test_41_multiple_test_files_for_same_target_remain_distinct(
     service_file = next(f for f in proj.files if f.name == "service.py")
     test_calc = next(f for f in proj.files if f.name == "test_calculator.py")
 
-    # test_calculator also imports service.py
     proj.add_relationship(
         Relationship(
             source_id=test_calc.id,
@@ -986,7 +905,6 @@ def test_41_multiple_test_files_for_same_target_remain_distinct(
         [(service_file.id, "service.py", "src/service.py", "root")],
     )
 
-    # 2 distinct test files -> 2 distinct items
     assert len(direct) == 2
     paths = {a.test_file_path for a in direct}
     assert "tests/test_service.py" in paths
@@ -1004,7 +922,6 @@ def test_42_reversing_relationship_order_produces_identical_output(
         [(service_file.id, "service.py", "src/service.py", "root")],
     )
 
-    # Reverse relationships list
     proj.relationships.reverse()
 
     direct2, _, _ = identify_test_associations(
@@ -1013,11 +930,6 @@ def test_42_reversing_relationship_order_produces_identical_output(
     )
 
     assert [d.to_dict() for d in direct1] == [d.to_dict() for d in direct2]
-
-
-# ==============================================================================
-# CLI Verification Checklist Tests
-# ==============================================================================
 
 
 def test_20_cli_changeset_with_checklist_flag(
@@ -1097,9 +1009,7 @@ def test_22_cli_changeset_without_checklist_flag_clean(
         )
 
     captured = capsys.readouterr()
-    # Without --checklist, "Verification checklist:" header should NOT be present
     assert "Verification checklist:" not in captured.out
-    # Standard changeset headers should be present
     assert "Change-set paths" in captured.out
     assert "Direct impact:" in captured.out
 

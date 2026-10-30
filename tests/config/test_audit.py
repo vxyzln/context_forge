@@ -330,6 +330,5 @@ database_path = "nested/dir/db.sqlite"
 
     audit_configuration(project_dir)
 
-    # Auditing must NOT create nested/dir or db.sqlite
     assert not (project_dir / "nested").exists()
     assert not (project_dir / "nested" / "dir" / "db.sqlite").exists()

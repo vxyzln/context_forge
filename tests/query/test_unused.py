@@ -79,7 +79,6 @@ def test_used_function_is_not_candidate(tmp_path: Path) -> None:
     )
     proj.symbols.append(used_fn)
 
-    # Reference from file_b to used_fn
     proj.relationships.append(
         Relationship(
             source_id=file_b.id,
@@ -111,7 +110,6 @@ def test_self_referencing_recursive_function(tmp_path: Path) -> None:
     )
     proj.symbols.append(recurse_fn)
 
-    # Reference within the same file AND within the function's own lines (line 22)
     proj.relationships.append(
         Relationship(
             source_id=file_a.id,
@@ -155,7 +153,6 @@ def test_same_file_call_from_another_function_is_not_self_reference(
     )
     proj.symbols.extend([target_fn, caller_fn])
 
-    # Reference from file_a at line 35 (inside caller_fn, outside target_fn)
     proj.relationships.append(
         Relationship(
             source_id=file_a.id,
@@ -190,19 +187,17 @@ def test_missing_or_malformed_reference_line_metadata_treated_conservatively(
     )
     proj.symbols.append(fn)
 
-    # Reference with missing or non-digit line metadata
     proj.relationships.append(
         Relationship(
             source_id=file_a.id,
             target_id=fn.id,
             relationship_type=RelationshipType.REFERENCES,
-            metadata={},  # missing line
+            metadata={},
         )
     )
 
     report = find_unused_candidates(proj, kind="function")
     candidate_names = [c.name for c in report.candidates]
-    # Missing line metadata cannot prove recursion; conservatively treated as external usage
     assert "some_func" not in candidate_names
 
 
@@ -225,7 +220,6 @@ def test_recursion_with_coexisting_external_call_in_same_file(
     )
     proj.symbols.append(target_fn)
 
-    # Graph builder deduplicated edge points to line 12 (recursive)
     proj.relationships.append(
         Relationship(
             source_id=file_a.id,
@@ -234,7 +228,6 @@ def test_recursion_with_coexisting_external_call_in_same_file(
             metadata={"line": "12"},
         )
     )
-    # But project.references records an additional call from line 45 (outside target_fn)
     proj.references.extend(
         [
             SymbolReference(file_id=file_a.id, name="recursive_but_called", line=12),
@@ -244,7 +237,6 @@ def test_recursion_with_coexisting_external_call_in_same_file(
 
     report = find_unused_candidates(proj, kind="function")
     candidate_names = [c.name for c in report.candidates]
-    # Because there is a reference from line 45 outside the function, it is NOT an unused candidate
     assert "recursive_but_called" not in candidate_names
 
 
@@ -273,7 +265,6 @@ def test_inherited_class_is_not_candidate(tmp_path: Path) -> None:
     )
     proj.symbols.extend([base_class, sub_class])
 
-    # sub_class inherits from base_class
     proj.relationships.append(
         Relationship(
             source_id=sub_class.id,
@@ -297,7 +288,6 @@ def test_standard_dunder_methods_excluded_but_arbitrary_dunder_names_reported(
     )
     proj.add_file(file_a)
 
-    # Standard data model method
     init_method = Symbol(
         file_id=file_a.id,
         name="__init__",
@@ -305,7 +295,6 @@ def test_standard_dunder_methods_excluded_but_arbitrary_dunder_names_reported(
         start_line=5,
         end_line=8,
     )
-    # Arbitrary double-underscore method not part of Python data model
     custom_dunder_method = Symbol(
         file_id=file_a.id,
         name="__custom_internal_op__",
@@ -313,7 +302,6 @@ def test_standard_dunder_methods_excluded_but_arbitrary_dunder_names_reported(
         start_line=10,
         end_line=14,
     )
-    # Arbitrary double-underscore function (not a method)
     custom_dunder_fn = Symbol(
         file_id=file_a.id,
         name="__custom_helper__",
@@ -361,11 +349,9 @@ def test_main_function_entry_point_distinction(tmp_path: Path) -> None:
     proj.symbols.extend([entry_main, arbitrary_main])
 
     report = find_unused_candidates(proj, kind="function")
-    # main in main.py is recognized as an application entry point
     assert not any(
         c.name == "main" and c.path == "src/main.py" for c in report.candidates
     )
-    # main in calc.py has no entry-point or caller evidence and is reported
     assert any(
         c.name == "main" and c.path == "src/utils/calc.py" for c in report.candidates
     )
@@ -395,7 +381,6 @@ def test_test_file_discovery_conventions(tmp_path: Path) -> None:
         start_line=18,
         end_line=28,
     )
-    # An uncalled helper function or fixture_ naming without caller evidence is not exempted
     helper_fn = Symbol(
         file_id=test_file.id,
         name="fixture_app_state",
@@ -410,7 +395,6 @@ def test_test_file_discovery_conventions(tmp_path: Path) -> None:
     assert "test_something.py" not in candidate_names
     assert "test_feature_works" not in candidate_names
     assert "TestFeatureSuite" not in candidate_names
-    # fixture_app_state has no caller or verified decorator metadata, so reported
     assert "fixture_app_state" in candidate_names
 
 
@@ -444,7 +428,6 @@ def test_used_file_is_not_candidate(tmp_path: Path) -> None:
     proj.add_file(file_a)
     proj.add_file(file_b)
 
-    # a.py imports b.py
     proj.relationships.append(
         Relationship(
             source_id=file_a.id,
@@ -491,14 +474,12 @@ def test_analysis_error_attribution_with_shared_basename(tmp_path: Path) -> None
     )
     proj.symbols.extend([sym_a, sym_b])
 
-    # Error specifically references src/a/config.py
     proj.errors.append("SyntaxError in src/a/config.py: unexpected EOF")
 
     report = find_unused_candidates(proj)
     unassessable_paths = [u.path for u in report.unassessable]
 
     assert "src/a/config.py" in unassessable_paths
-    # tests/b/config.py must NOT be marked unassessable merely because it shares a basename!
     assert "tests/b/config.py" not in unassessable_paths
 
     candidate_names = [c.name for c in report.candidates]
@@ -532,7 +513,6 @@ def test_deterministic_sorting_and_truncation(tmp_path: Path) -> None:
     assert report.truncated is True
     assert len(report.candidates) == 2
     assert report.summary.candidates_count == 3
-    # Check deterministic ordering: src/a.py line 5, then src/a.py line 20
     assert report.candidates[0].name == "a1_func"
     assert report.candidates[1].name == "a2_func"
 
@@ -607,7 +587,6 @@ def test_multiple_references_and_relationship_types(tmp_path: Path) -> None:
     )
     proj.symbols.extend([service_cls, unused_cls])
 
-    # Multiple incoming usage relationships: CALLS and REFERENCES
     proj.relationships.append(
         Relationship(
             source_id=file_b.id,
@@ -623,7 +602,6 @@ def test_multiple_references_and_relationship_types(tmp_path: Path) -> None:
         )
     )
 
-    # Containment/structural relationship from file_a to unused_cls does NOT count as usage
     proj.relationships.append(
         Relationship(
             source_id=file_a.id,
@@ -656,7 +634,6 @@ def test_unresolved_imports_do_not_fabricate_dependencies(tmp_path: Path) -> Non
         start_line=10,
         end_line=15,
     )
-    # Import symbol in file_b importing external/unresolved module 'tax_lib'
     unresolved_import = Symbol(
         file_id=file_b.id,
         name="tax_lib",
@@ -666,10 +643,8 @@ def test_unresolved_imports_do_not_fabricate_dependencies(tmp_path: Path) -> Non
     )
     proj.symbols.extend([sym, unresolved_import])
 
-    # No resolved relationship is created for unresolved import
     report = find_unused_candidates(proj, kind="function")
     candidate_names = [c.name for c in report.candidates]
-    # calculate_tax is not falsely assumed to be used by tax_lib
     assert "calculate_tax" in candidate_names
 
 
@@ -707,14 +682,12 @@ def test_analysis_error_attribution_overlapping_path_fragments(tmp_path: Path) -
     )
     proj.symbols.extend([sym_short, sym_long])
 
-    # Error specifically mentions sub/src/a.py
     proj.errors.append("SyntaxError in sub/src/a.py: unexpected EOF")
 
     report = find_unused_candidates(proj)
     unassessable_paths = [u.path for u in report.unassessable]
 
     assert "sub/src/a.py" in unassessable_paths
-    # src/a.py and src/a.py.bak must NOT be attributed merely because they are overlapping substrings
     assert "src/a.py" not in unassessable_paths
     assert "src/a.py.bak" not in unassessable_paths
 
@@ -748,7 +721,6 @@ def test_analysis_error_attribution_shared_basename_ambiguity(tmp_path: Path) ->
     )
     proj.symbols.extend([sym_a, sym_b])
 
-    # Error mentions only the basename, but multiple files share it: AMBIGUOUS
     proj.errors.append("SyntaxError in config.py: invalid syntax")
 
     report = find_unused_candidates(proj)
@@ -756,11 +728,9 @@ def test_analysis_error_attribution_shared_basename_ambiguity(tmp_path: Path) ->
         u.path for u in report.unassessable if "encountered analysis error" in u.reason
     ]
 
-    # Neither file should be falsely marked as containing the error
     assert "src/a/config.py" not in unassessable_err_paths
     assert "tests/b/config.py" not in unassessable_err_paths
 
-    # Ambiguity should be preserved in diagnostics and outcome
     assert report.outcome.status == OperationStatus.PARTIAL
     assert any(
         "could not be unambiguously attributed" in d.message for d in report.diagnostics
@@ -838,21 +808,18 @@ def test_same_file_same_named_functions_reference_ambiguity(tmp_path: Path) -> N
     )
     proj.symbols.extend([fn1, fn2])
 
-    # Graph builder deduplication edge for fn1
     proj.relationships.append(
         Relationship(
             source_id=file_a.id,
             target_id=fn1.id,
             relationship_type=RelationshipType.REFERENCES,
-            metadata={"line": "12"},  # internal recursion
+            metadata={"line": "12"},
         )
     )
-    # A reference to 'compute' at line 50 without qualified_name cannot be safely attributed
     proj.references.append(SymbolReference(file_id=file_a.id, name="compute", line=50))
 
     report = find_unused_candidates(proj, kind="function")
     unassessable_names = [u.name for u in report.unassessable]
-    # Because there are two same-named functions and the reference is ambiguous, classified as cannot_assess_reliably
     assert "compute" in unassessable_names
     item = next(u for u in report.unassessable if u.entity_id == str(fn1.id))
     assert "Multiple same-named symbols" in item.reason
@@ -885,7 +852,6 @@ def test_same_file_same_named_functions_with_qualified_name_disambiguation(
     )
     proj.symbols.extend([method1, method2])
 
-    # Reference at line 60 specifically targets ClassB.helper
     proj.references.append(
         SymbolReference(
             file_id=file_a.id,
@@ -896,9 +862,7 @@ def test_same_file_same_named_functions_with_qualified_name_disambiguation(
     )
 
     report = find_unused_candidates(proj, kind="method")
-    # ClassA.helper has no caller and is an apparent unused candidate
     assert any(c.qualified_name == "ClassA.helper" for c in report.candidates)
-    # ClassB.helper is used and not in candidates
     assert not any(c.qualified_name == "ClassB.helper" for c in report.candidates)
 
 
@@ -922,7 +886,6 @@ def test_graph_builder_realistic_relationship_types_and_ids(tmp_path: Path) -> N
     )
     proj.symbols.append(func_target)
 
-    # Actual graph builder format: source_id is file_b.id (UUID), target_id is func_target.id (UUID)
     proj.relationships.append(
         Relationship(
             source_id=file_b.id,
@@ -955,7 +918,6 @@ def test_file_level_internal_references_only_remains_unused(tmp_path: Path) -> N
     )
     proj.symbols.extend([fn1, fn2])
 
-    # Internal reference within file_a: f1 calls f2
     proj.relationships.append(
         Relationship(
             source_id=file_a.id,
@@ -967,7 +929,6 @@ def test_file_level_internal_references_only_remains_unused(tmp_path: Path) -> N
 
     report = find_unused_candidates(proj, kind="file")
     candidate_names = [c.name for c in report.candidates]
-    # Isolated file with only internal references remains an unused file candidate
     assert "isolated.py" in candidate_names
 
 
@@ -985,7 +946,6 @@ def test_file_level_structural_relationships_do_not_count_as_usage(
     )
     proj.symbols.append(fn)
 
-    # DEFINES and CONTAINS are structural and do NOT count as usage
     proj.relationships.append(
         Relationship(
             source_id=file_a.id,
@@ -1010,9 +970,9 @@ def test_limit_validation_rejects_non_positive_and_invalid(tmp_path: Path) -> No
     proj = _create_test_project(tmp_path)
     import pytest
 
-    for invalid_limit in [0, -1, -50, True, False, "50"]:  # type: ignore[list-item]
+    for invalid_limit in [0, -1, -50, True, False, "50"]:
         with pytest.raises(ValueError, match="Report limit must be a positive integer"):
-            find_unused_candidates(proj, limit=invalid_limit)  # type: ignore[arg-type]
+            find_unused_candidates(proj, limit=invalid_limit)
 
 
 def test_limit_none_returns_unlimited(tmp_path: Path) -> None:
@@ -1050,38 +1010,31 @@ def test_outcome_status_for_different_project_states(tmp_path: Path) -> None:
         Symbol(file_id=file_a.id, name="fn", kind="function", start_line=1, end_line=5)
     )
 
-    # 1. Clean analyzed project -> SUCCESS
     report_clean = find_unused_candidates(proj)
     assert report_clean.outcome.status == OperationStatus.SUCCESS
 
-    # 2. Not analyzed project -> INCOMPLETE
     proj.analysis_status = "not_analyzed"
     report_not_analyzed = find_unused_candidates(proj)
     assert report_not_analyzed.outcome.status == OperationStatus.INCOMPLETE
 
-    # 3. Partial / failed project -> PARTIAL
     proj.analysis_status = "failed"
     report_failed = find_unused_candidates(proj)
     assert report_failed.outcome.status == OperationStatus.PARTIAL
 
 
 def test_normalize_kind_filter_validation(tmp_path: Path) -> None:
-    # 1. Invalid kinds raise ValueError
     for invalid in ["invalid_kind", "foo", "module", "packages", "attr"]:
         with pytest.raises(ValueError, match="Unsupported kind filter"):
             _normalize_kind_filter(invalid)
 
-    # 2. find_unused_candidates raises ValueError on invalid kind
     proj = _create_test_project(tmp_path)
     with pytest.raises(ValueError, match="Unsupported kind filter"):
         find_unused_candidates(proj, kind="bogus_kind")
 
-    # 3. Whitespace handling and case insensitivity
     assert _normalize_kind_filter("  function  ") == {"function"}
     assert _normalize_kind_filter("FUNCTION") == {"function"}
     assert _normalize_kind_filter("\tMETHOD\n") == {"method"}
 
-    # 4. Singular and plural entity kinds
     assert _normalize_kind_filter("function") == {"function"}
     assert _normalize_kind_filter("functions") == {"function"}
     assert _normalize_kind_filter("method") == {"method"}
@@ -1095,7 +1048,6 @@ def test_normalize_kind_filter_validation(tmp_path: Path) -> None:
     assert _normalize_kind_filter("symbol") == {"symbol"}
     assert _normalize_kind_filter("symbols") == {"symbol"}
 
-    # 5. Wildcards and empty/None values
     assert _normalize_kind_filter("all") == {"all"}
     assert _normalize_kind_filter("*") == {"all"}
     assert _normalize_kind_filter("") == {"all"}
@@ -1124,18 +1076,14 @@ def test_analysis_error_attribution_multiple_files_identifiable_location(
     )
     proj.symbols.extend([sym_a, sym_b])
 
-    # Error message mentions both files, but src/a.py is the primary error location prefix
     proj.errors.append("src/a.py:10: cannot import name 'helper' from src/b.py")
 
     report = find_unused_candidates(proj, kind="function")
     unassessable_paths = [u.path for u in report.unassessable]
     candidate_names = [c.name for c in report.candidates]
 
-    # Exactly src/a.py is attributed as containing the error
     assert "src/a.py" in unassessable_paths
-    # src/b.py is NOT attributed merely because it was mentioned in the message
     assert "src/b.py" not in unassessable_paths
-    # fn_b remains assessable and reported as candidate
     assert "fn_b" in candidate_names
     assert "fn_a" not in candidate_names
 
@@ -1161,28 +1109,23 @@ def test_analysis_error_attribution_multiple_files_ambiguous_location(
     )
     proj.symbols.extend([sym_a, sym_b])
 
-    # Error mentions both files with no identifiable location prefix
     proj.errors.append("Circular import conflict between src/a.py and src/b.py")
 
     report = find_unused_candidates(proj, kind="function")
     unassessable_paths = [u.path for u in report.unassessable]
     candidate_names = [c.name for c in report.candidates]
 
-    # Neither file should be falsely blamed
     assert "src/a.py" not in unassessable_paths
     assert "src/b.py" not in unassessable_paths
-    # Ambiguity preserved in outcome status and diagnostics
     assert report.outcome.status == OperationStatus.PARTIAL
     assert any(
         "could not be unambiguously attributed" in d.message for d in report.diagnostics
     )
-    # Both functions are assessed as candidates
     assert "fn_a" in candidate_names
     assert "fn_b" in candidate_names
 
 
 def test_analysis_error_attribution_path_variants(tmp_path: Path) -> None:
-    # 1. Dot-slash relative path: ./src/a.py
     proj1 = _create_test_project(tmp_path / "p1")
     f1 = File(project_id=proj1.id, path=Path("src/a.py"), name="a.py", extension=".py")
     proj1.add_file(f1)
@@ -1194,7 +1137,6 @@ def test_analysis_error_attribution_path_variants(tmp_path: Path) -> None:
     r1 = find_unused_candidates(proj1)
     assert any(u.path == "src/a.py" for u in r1.unassessable)
 
-    # 2. Windows backslash: src\a.py
     proj2 = _create_test_project(tmp_path / "p2")
     f2 = File(project_id=proj2.id, path=Path("src/a.py"), name="a.py", extension=".py")
     proj2.add_file(f2)
@@ -1206,7 +1148,6 @@ def test_analysis_error_attribution_path_variants(tmp_path: Path) -> None:
     r2 = find_unused_candidates(proj2)
     assert any(u.path == "src/a.py" for u in r2.unassessable)
 
-    # 3. Windows dot-slash backslash: .\src\a.py
     proj3 = _create_test_project(tmp_path / "p3")
     f3 = File(project_id=proj3.id, path=Path("src/a.py"), name="a.py", extension=".py")
     proj3.add_file(f3)
@@ -1218,7 +1159,6 @@ def test_analysis_error_attribution_path_variants(tmp_path: Path) -> None:
     r3 = find_unused_candidates(proj3)
     assert any(u.path == "src/a.py" for u in r3.unassessable)
 
-    # 4. Absolute path
     proj4 = _create_test_project(tmp_path / "p4")
     f4 = File(project_id=proj4.id, path=Path("src/a.py"), name="a.py", extension=".py")
     proj4.add_file(f4)
@@ -1233,7 +1173,6 @@ def test_analysis_error_attribution_path_variants(tmp_path: Path) -> None:
 
 
 def test_report_limit_contract_sections(tmp_path: Path) -> None:
-    # Build project with 5 candidate functions and 5 unassessable functions
     proj = _create_test_project(tmp_path)
     file_good = File(
         project_id=proj.id, path=Path("src/good.py"), name="good.py", extension=".py"
@@ -1264,10 +1203,8 @@ def test_report_limit_contract_sections(tmp_path: Path) -> None:
                 end_line=i * 5 + 4,
             )
         )
-    # Error in bad.py makes all 5 symbols in bad.py unassessable
     proj.errors.append("src/bad.py:1: syntax error")
 
-    # Scenario 1: limit=3 (both candidates (5) and unassessable (5) exceed limit)
     rep_both = find_unused_candidates(proj, kind="function", limit=3)
     assert rep_both.truncated is True
     assert rep_both.limit == 3
@@ -1276,8 +1213,6 @@ def test_report_limit_contract_sections(tmp_path: Path) -> None:
     assert rep_both.summary.candidates_count == 5
     assert rep_both.summary.unassessable_count == 5
 
-    # Scenario 2: limit=4 with candidates=5, unassessable=3
-    # Remove 2 unassessable symbols
     proj.symbols = [
         s for s in proj.symbols if s.name not in ("unassess_3", "unassess_4")
     ]
@@ -1289,8 +1224,6 @@ def test_report_limit_contract_sections(tmp_path: Path) -> None:
     assert rep_cand_only.summary.candidates_count == 5
     assert rep_cand_only.summary.unassessable_count == 3
 
-    # Scenario 3: limit=4 with candidates=2, unassessable=5
-    # Remove 3 candidate symbols and restore unassessable
     proj.symbols = [
         s for s in proj.symbols if s.name not in ("cand_2", "cand_3", "cand_4")
     ]
@@ -1320,7 +1253,6 @@ def test_report_limit_contract_sections(tmp_path: Path) -> None:
     assert rep_unassess_only.summary.candidates_count == 2
     assert rep_unassess_only.summary.unassessable_count == 5
 
-    # Scenario 4: limit=10 (neither exceeds limit)
     rep_neither = find_unused_candidates(proj, kind="function", limit=10)
     assert rep_neither.truncated is False
     assert rep_neither.limit == 10
@@ -1329,7 +1261,6 @@ def test_report_limit_contract_sections(tmp_path: Path) -> None:
     assert rep_neither.summary.candidates_count == 2
     assert rep_neither.summary.unassessable_count == 5
 
-    # Scenario 5: limit=None (unlimited)
     rep_unlimited = find_unused_candidates(proj, kind="function", limit=None)
     assert rep_unlimited.truncated is False
     assert rep_unlimited.limit is None

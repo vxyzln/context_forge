@@ -2086,7 +2086,6 @@ def test_existing_database_remains_compatible_with_execution_history(
     tmp_path: Path,
 ) -> None:
     db_file = tmp_path / "legacy.db"
-    # Create a database with only the projects table
     with sqlite3.connect(db_file) as conn:
         conn.execute(
             """
@@ -2104,7 +2103,6 @@ def test_existing_database_remains_compatible_with_execution_history(
             "INSERT INTO projects VALUES ('p1', 'proj', '/tmp', 'analyzed', '2026-01-01', '2026-01-01')"
         )
 
-    # Initialize should upgrade schema non-destructively
     db = Database(db_file)
     db.initialize()
 
@@ -2126,7 +2124,6 @@ def test_execution_history_records_independent_runs_and_outcomes(
     db = Database(tmp_path / "test.db")
     repo = ProjectRepository(db)
 
-    # Run 1: success
     id1 = repo.record_execution_start("analyze", tmp_path)
     repo.record_execution_finish(
         execution_id=id1,
@@ -2135,7 +2132,6 @@ def test_execution_history_records_independent_runs_and_outcomes(
         finished_at="2026-10-28T10:00:02+00:00",
     )
 
-    # Run 2: failed
     id2 = repo.record_execution_start("refresh", tmp_path)
     repo.record_execution_finish(
         execution_id=id2,
@@ -2146,13 +2142,11 @@ def test_execution_history_records_independent_runs_and_outcomes(
         error_message="corrupt AST",
     )
 
-    # Run 3: incomplete (process terminated before finish)
     id3 = repo.record_execution_start("analyze", tmp_path)
 
     history = repo.get_execution_history(repository_path=tmp_path, limit=10)
     assert len(history) == 3
 
-    # All three executions are retained independently
     ids = {rec.id for rec in history}
     assert ids == {id1, id2, id3}
 
@@ -2206,7 +2200,6 @@ def test_execution_history_deterministic_ordering(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.db")
     repo = ProjectRepository(db)
 
-    # Insert executions with distinct and tied timestamps
     id_old = repo.record_execution_start(
         "analyze",
         tmp_path,
@@ -2235,7 +2228,6 @@ def test_execution_history_deterministic_ordering(tmp_path: Path) -> None:
     history = repo.get_execution_history(repository_path=tmp_path, limit=10)
     returned_ids = [r.id for r in history]
 
-    # Newest first; on timestamp tie, deterministic id tie-break (DESC)
     assert returned_ids == [id_new, id_mid2, id_mid1, id_old]
 
 
@@ -2250,7 +2242,7 @@ def test_execution_history_invalid_limit(tmp_path: Path) -> None:
         repo.get_execution_history(limit=-5)
 
     with pytest.raises(ValueError, match="History limit must be a positive integer"):
-        repo.get_execution_history(limit=True)  # type: ignore[arg-type]
+        repo.get_execution_history(limit=True)
 
 
 def test_execution_history_read_only_does_not_create_database(
@@ -2262,7 +2254,6 @@ def test_execution_history_read_only_does_not_create_database(
     db = Database(non_existent)
     repo = ProjectRepository(db)
 
-    # Calling get_execution_history must return empty list without creating the database file
     history = repo.get_execution_history(repository_path=tmp_path)
     assert history == []
     assert not non_existent.exists()
@@ -2297,7 +2288,6 @@ def test_record_execution_finish_nonexistent_id_and_invalid_outcome(
     with pytest.raises(KeyError, match="Execution record not found"):
         repo.record_execution_finish("nonexistent-id", outcome="success")
 
-    # Valid execution must remain untouched in incomplete state
     history = repo.get_execution_history(repository_path=tmp_path)
     assert len(history) == 1
     assert history[0].id == valid_id
@@ -2319,7 +2309,6 @@ def test_get_execution_history_legacy_database_without_table_is_read_only(
     history = repo.get_execution_history(repository_path=tmp_path)
     assert history == []
 
-    # Verify no execution_history table was created
     with sqlite3.connect(db_file) as conn:
         tables = {
             row[0]

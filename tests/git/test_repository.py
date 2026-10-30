@@ -627,7 +627,6 @@ def test_repository_handles_malformed_iso_timezone_offset(
 ) -> None:
     repository = GitRepository(tmp_path)
 
-    # Simulate git log output with a malformed ISO timestamp (+518:00) alongside a normal commit
     log_output = (
         "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8\x1f"
         "Malformed Author\x1f"
@@ -681,7 +680,6 @@ def test_repository_handles_malformed_iso_timezone_offset(
 
     assert len(commits) == 2
 
-    # Malformed timestamp commit falls back to epoch converted to UTC
     malformed_commit = commits[0]
     assert malformed_commit.hash == "5e6ecdad9f69b1ff789a17733b8edc6fd7091bd8"
     assert malformed_commit.timestamp.tzinfo is not None
@@ -690,7 +688,6 @@ def test_repository_handles_malformed_iso_timezone_offset(
     assert int(malformed_commit.timestamp.timestamp()) == 1313584730
     assert malformed_commit.timestamp.isoformat() == "2011-08-17T12:38:50+00:00"
 
-    # Normal commit remains properly parsed and converted to UTC
     valid_commit = commits[1]
     assert valid_commit.hash == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     assert valid_commit.timestamp.isoformat() == "2023-01-01T12:00:00+00:00"

@@ -1,5 +1,3 @@
-"""Domain models for task management."""
-
 from task_mgmt.models.enums import ProjectStatus, TaskPriority, TaskStatus
 from task_mgmt.models.project import Project
 from task_mgmt.models.task import Task

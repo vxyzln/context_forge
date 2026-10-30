@@ -42,19 +42,6 @@ from context_forge.reporting.contract import (
 
 
 def create_risk_fixture_project(root: Path) -> Project:
-    """Fixture project containing:
-
-    - Package 'src/core' with __init__.py, service.py, calculator.py, util.py
-    - Package 'src/api' with __init__.py, routes.py
-    - Tests:
-      - tests/test_service.py (direct imports of service.py)
-      - tests/test_calculator.py (naming match for calculator.py)
-      - src/core/util.py has NO tests (unassociated)
-    - Relationships:
-      - routes.py imports service.py (downstream impact: routes -> service)
-      - service.py imports util.py (service -> util)
-      - tests/test_service.py imports service.py (test association)
-    """
     project = Project(
         name="Risk Fixture Project",
         root_path=root.resolve(),
@@ -83,7 +70,6 @@ def create_risk_fixture_project(root: Path) -> Project:
     for d in (d_src, d_core, d_api, d_tests):
         project.add_directory(d)
 
-    # Initializers
     init_core = File(
         project_id=project.id,
         path=Path("src/core/__init__.py"),
@@ -99,7 +85,6 @@ def create_risk_fixture_project(root: Path) -> Project:
         directory_id=d_api.id,
     )
 
-    # Production files
     f_service = File(
         project_id=project.id,
         path=Path("src/core/service.py"),
@@ -136,7 +121,6 @@ def create_risk_fixture_project(root: Path) -> Project:
         directory_id=d_api.id,
     )
 
-    # Test files
     f_test_service = File(
         project_id=project.id,
         path=Path("tests/test_service.py"),
@@ -167,7 +151,6 @@ def create_risk_fixture_project(root: Path) -> Project:
     ):
         project.add_file(f)
 
-    # Symbols
     s_srv = Symbol(
         file_id=f_service.id,
         name="do_work",
@@ -185,7 +168,6 @@ def create_risk_fixture_project(root: Path) -> Project:
     project.add_symbol(s_srv)
     project.add_symbol(s_route)
 
-    # Direct test relationship: test_service.py -> service.py
     project.add_relationship(
         Relationship(
             source_id=f_test_service.id,
@@ -194,7 +176,6 @@ def create_risk_fixture_project(root: Path) -> Project:
         )
     )
 
-    # Direct impact relationship: routes.py -> service.py (depth 1)
     project.add_relationship(
         Relationship(
             source_id=f_routes.id,
@@ -203,7 +184,6 @@ def create_risk_fixture_project(root: Path) -> Project:
         )
     )
 
-    # Downstream impact relationship: client.py -> routes.py (depth 2 from service.py)
     project.add_relationship(
         Relationship(
             source_id=f_client.id,
@@ -212,7 +192,6 @@ def create_risk_fixture_project(root: Path) -> Project:
         )
     )
 
-    # Outgoing relationship: service.py -> util.py (depth 1)
     project.add_relationship(
         Relationship(
             source_id=f_service.id,
@@ -277,7 +256,6 @@ def test_04_overlapping_paths_to_same_affected_entity_deduplicated(
     f_calc = next(f for f in proj.files if f.name == "calculator.py")
     f_routes = next(f for f in proj.files if f.name == "routes.py")
 
-    # Add second path: routes also imports calculator
     proj.add_relationship(
         Relationship(
             source_id=f_routes.id,
@@ -286,12 +264,10 @@ def test_04_overlapping_paths_to_same_affected_entity_deduplicated(
         )
     )
 
-    # Change both service.py and calculator.py -> routes is reached via both roots
     report = generate_change_risk_report(
         proj, ["src/core/service.py", "src/core/calculator.py"]
     )
 
-    # routes.py must appear as a downstream fact only ONCE
     downstream_routes = [
         f
         for f in report.observed_facts
@@ -375,7 +351,6 @@ def test_09_missing_or_unknown_test_associations(tmp_path: Path) -> None:
     assert len(unassociated_facts) == 1
     assert report.unassociated_targets_count >= 1
 
-    # Inferred concern must exist for unverified area
     assert any(
         c.category == RiskConcernCategory.UNVERIFIED_AREA.value
         for c in report.inferred_concerns
@@ -386,10 +361,8 @@ def test_10_suggested_verification_versus_observed_execution(tmp_path: Path) -> 
     proj = create_risk_fixture_project(tmp_path)
     report = generate_change_risk_report(proj, ["src/core/service.py"])
 
-    # Report must not claim tests were executed
     for c in report.inferred_concerns:
         assert "executed" not in c.summary.lower()
-    # Disclaimer present
     assert report.disclaimer == RISK_REPORT_DISCLAIMER
 
 
@@ -473,7 +446,6 @@ def test_15_observed_facts_clearly_distinguishable_from_inferred_concerns(
     assert len(report.observed_facts) > 0
     assert len(report.inferred_concerns) > 0
 
-    # Ensure types are distinct
     for f in report.observed_facts:
         assert isinstance(f, ObservedFact)
         assert f.statement
@@ -488,13 +460,11 @@ def test_16_every_inference_has_supporting_evidence(tmp_path: Path) -> None:
     report = generate_change_risk_report(proj, ["src/core/service.py"])
 
     for c in report.inferred_concerns:
-        # Every concern must point to at least one supporting fact ID or evidence
         assert len(c.supporting_fact_ids) > 0 or len(c.supporting_evidence) > 0
 
 
 def test_17_missing_evidence_reported_honestly(tmp_path: Path) -> None:
     proj = create_risk_fixture_project(tmp_path)
-    # When util.py has no tests, missing evidence item is created
     report = generate_change_risk_report(proj, ["src/core/util.py"])
 
     assert any(m.category == "test_associations" for m in report.missing_evidence)
@@ -505,7 +475,6 @@ def test_18_no_unsupported_risk_probability_or_defect_score(tmp_path: Path) -> N
     report = generate_change_risk_report(proj, ["src/core/service.py"])
 
     d = report.to_dict()
-    # Check that no arbitrary probability or risk score exists
     assert "risk_score" not in d
     assert "defect_probability" not in d
     assert "failure_rate" not in d
@@ -526,7 +495,6 @@ def test_20_deterministic_ordering(tmp_path: Path) -> None:
         proj, ["src/core/service.py", "src/core/calculator.py"]
     )
 
-    # Reverse paths and project relationships
     proj.relationships.reverse()
     report2 = generate_change_risk_report(
         proj, ["src/core/calculator.py", "src/core/service.py"]
@@ -542,7 +510,6 @@ def test_20_deterministic_ordering(tmp_path: Path) -> None:
 
 def test_21_cross_package_impact_detected(tmp_path: Path) -> None:
     proj = create_risk_fixture_project(tmp_path)
-    # service.py (in src/core) has downstream routes.py (in src/api)
     report = generate_change_risk_report(proj, ["src/core/service.py"])
 
     assert report.cross_package_impact_count >= 1
@@ -554,7 +521,6 @@ def test_21_cross_package_impact_detected(tmp_path: Path) -> None:
 
 def test_22_package_policy_violation_in_risk_report(tmp_path: Path) -> None:
     proj = create_risk_fixture_project(tmp_path)
-    # Prohibit api from importing core
     policy = PackageBoundaryPolicy(
         rules=(
             PackageDependencyRule(
@@ -686,8 +652,6 @@ def test_29_cli_changeset_json_with_risk_flag(tmp_path: Path) -> None:
 
 def test_30_ambiguous_package_policy_concern(tmp_path: Path) -> None:
     proj = create_risk_fixture_project(tmp_path)
-    # routes.py is in src/api, service.py is in src/core
-    # routes.py -> service.py crosses src/api -> src/core
     rule_allow = PackageDependencyRule(
         source_package="src/*",
         target_package="src/core",

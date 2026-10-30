@@ -425,7 +425,6 @@ def test_parse_porcelain_copy_missing_and_empty_original_path() -> None:
 
 
 def test_parse_porcelain_valid_rename_and_copy() -> None:
-    # Verify rename records require a valid source path.
     entries = GitRepository._parse_porcelain_z("R  new.py\0old.py\0")
     assert len(entries) == 1
     assert entries[0].path == "new.py"

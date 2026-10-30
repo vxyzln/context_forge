@@ -1161,7 +1161,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     if argv and _is_likely_project_path(argv[0], recognized_commands):
-        # Default a bare repository path to the status command.
         argv = ["status", *argv]
 
     return parser.parse_args(argv)
@@ -1602,8 +1601,6 @@ def _normalize_diagnostic_error(item: Any) -> _DiagnosticSummaryRecord:
     location_match = _LOCATION_ERROR_RE.match(raw)
     if location_match:
         candidate_path = location_match.group("path").strip()
-        # Ensure candidate_path is plausibly a file path (has slashes, backslashes, or a file extension)
-        # to avoid misinterpreting messages like 'Request failed:12:4: timeout'
         if (
             "/" in candidate_path
             or "\\" in candidate_path

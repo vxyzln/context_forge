@@ -41,7 +41,6 @@ def test_integration_analyzer_comparison(
         is_historical=True,
     )
 
-    # Modify alpha.py and add gamma.py
     (sample_workspace / "src" / "alpha.py").write_text(
         "def hello(name: str, shout: bool = False) -> str:\n    return f'Hello, {name}!'\n",
         encoding="utf-8",
@@ -66,19 +65,15 @@ def test_integration_analyzer_comparison(
     assert result.outcome.is_success is True
     assert result.has_structural_changes is True
 
-    # Check added files
     added_paths = [f.path for f in result.added_files]
     assert "src/gamma.py" in added_paths
 
-    # Check modified symbols (hello signature changed)
     mod_sym_names = [s.name for s in result.modified_symbols]
     assert "hello" in mod_sym_names
 
-    # Check affected components: beta.py imports alpha.py, so beta.py should be affected!
     affected_paths = [a.path for a in result.affected_components]
     assert "src/beta.py" in affected_paths
 
-    # Test serialization
     payload = result.to_dict()
     assert isinstance(payload, dict)
     assert json.loads(json.dumps(payload)) == payload

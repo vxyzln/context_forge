@@ -212,7 +212,6 @@ def test_scanner_handles_disappearing_file_gracefully(tmp_path: Path) -> None:
 
     def iter_files_and_delete() -> list[Path]:
         files = original_iter_files()
-        # Delete transient file between file discovery and file scanning
         if transient_file.exists():
             transient_file.unlink()
         return files
@@ -234,7 +233,6 @@ def test_scanner_reports_inconsistent_directory_structure(tmp_path: Path) -> Non
     f.write_text("x = 1")
 
     scanner = RepositoryScanner(tmp_path)
-    # Simulate an inconsistent scan where parent directory 'src' is missing from directory discovery
     scanner._iter_directories = lambda: [child]
     project = scanner.scan()
 
@@ -250,10 +248,6 @@ def test_scanner_reports_inconsistent_directory_structure(tmp_path: Path) -> Non
 def test_scanner_traversal_and_globally_sorted_contracts(
     tmp_path: Path,
 ) -> None:
-    # Nested fixture designed to distinguish depth-first traversal from globally sorted output.
-    # root_z.py and root_a.py are at depth 0.
-    # In depth-first traversal (_iter_files), root files are discovered before descending into subdirectories.
-    # In globally sorted output (project.files), files are sorted by normalized relative POSIX path.
     (tmp_path / "beta" / "sub").mkdir(parents=True)
     (tmp_path / "alpha").mkdir(parents=True)
 
@@ -265,7 +259,6 @@ def test_scanner_traversal_and_globally_sorted_contracts(
 
     scanner = RepositoryScanner(tmp_path)
 
-    # 1. Assert exact expected depth-first traversal order
     iter_files = [
         p.relative_to(scanner.root_path).as_posix() for p in scanner._iter_files()
     ]
@@ -288,7 +281,6 @@ def test_scanner_traversal_and_globally_sorted_contracts(
     ]
     assert iter_dirs == expected_iter_dirs
 
-    # 2. Assert exact expected globally sorted output in project.files and project.directories
     project = scanner.scan()
     project_files = [f.path.as_posix() for f in project.files]
     expected_project_files = [
@@ -309,7 +301,6 @@ def test_scanner_traversal_and_globally_sorted_contracts(
     ]
     assert project_dirs == expected_project_dirs
 
-    # 3. Assert repeated scan equality
     second_scanner = RepositoryScanner(tmp_path)
     second_project = second_scanner.scan()
     assert [f.path.as_posix() for f in second_project.files] == expected_project_files

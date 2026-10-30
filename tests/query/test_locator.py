@@ -282,7 +282,7 @@ def test_locate_symbol_invalid_requests(sample_project: Project) -> None:
     assert res_empty.is_resolved is False
     assert res_empty.outcome.is_success is False
 
-    res_type = locate_symbol(sample_project, 123)  # type: ignore[arg-type]
+    res_type = locate_symbol(sample_project, 123)
     assert res_type.status == "invalid"
 
     res_bad_file = locate_symbol(sample_project, "Calculator", file_path="   ")

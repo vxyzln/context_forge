@@ -432,7 +432,7 @@ def test_resolve_rejects_empty_or_whitespace_target(tmp_path: Path) -> None:
 def test_resolve_rejects_invalid_type(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
     with pytest.raises(TypeError, match="Target must be a str, File, or Symbol"):
-        resolve_impact_target(project, 123)  # type: ignore[arg-type]
+        resolve_impact_target(project, 123)
 
 
 def test_find_direct_impact_file_incoming(tmp_path: Path) -> None:
@@ -687,7 +687,7 @@ def test_find_direct_impact_invalid_limit(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Limit must be a positive integer"):
         find_direct_impact(project, "User", limit=-5)
     with pytest.raises(ValueError, match="Limit must be a positive integer"):
-        find_direct_impact(project, "User", limit=True)  # type: ignore[arg-type]
+        find_direct_impact(project, "User", limit=True)
 
 
 def test_find_direct_impact_determinism_across_permutations(tmp_path: Path) -> None:
@@ -862,10 +862,9 @@ def test_find_impact_invalid_depth_rejection(tmp_path: Path) -> None:
         find_impact(project, "src/pkg/models.py", max_depth=-1)
 
     with pytest.raises(ValueError, match="positive integer"):
-        find_impact(project, "src/pkg/models.py", max_depth=True)  # type: ignore[arg-type]
+        find_impact(project, "src/pkg/models.py", max_depth=True)
 
 
-# TODO: expand test cases for circular dependency graph traversal depths
 def test_find_impact_cycle_and_self_loop_termination(tmp_path: Path) -> None:
     project = Project(name="Cycle Test", root_path=tmp_path, analysis_status="analyzed")
     f_a = File(project_id=project.id, path=Path("a.py"), name="a.py", extension=".py")
@@ -1156,7 +1155,6 @@ def test_impact_outcome_incomplete_analysis_and_zero_impact(tmp_path: Path) -> N
     assert "outcome" in res.to_dict()
     assert res.to_dict()["outcome"]["status"] == "incomplete"
 
-    # For an isolated entity with 0 impact edges on an incomplete project
     from context_forge.models.symbol import Symbol
 
     isolated_sym = Symbol(
@@ -1178,7 +1176,6 @@ def test_impact_outcome_incomplete_analysis_and_zero_impact(tmp_path: Path) -> N
 
 def test_impact_outcome_depth_limited(tmp_path: Path) -> None:
     project = create_impact_test_project(tmp_path)
-    # models.py has incoming import from service.py, which has incoming import from client.py
     res = find_impact(project, "src/pkg/models.py", direction="incoming", max_depth=1)
     assert res.depth_limited is True
     assert res.outcome.is_partial
@@ -1191,7 +1188,6 @@ def test_impact_outcome_combined_limitations(tmp_path: Path) -> None:
     project.analysis_status = "failed"
     project.errors = ["SyntaxError in service.py"]
 
-    # Add a second incoming import to models.py so total direct hits > 1
     extra_file = File(
         project_id=project.id,
         path=Path("src/pkg/extra.py"),
@@ -1202,13 +1198,11 @@ def test_impact_outcome_combined_limitations(tmp_path: Path) -> None:
     project.add_relationship(
         Relationship(
             source_id=extra_file.id,
-            target_id=project.files[1].id,  # models_file
+            target_id=project.files[1].id,
             relationship_type=RelationshipType.IMPORTS,
         )
     )
 
-    # models.py has 2 direct incoming edges and 1 indirect incoming edge (client.py via service.py)
-    # With max_depth=1 and limit=1 on an incomplete project:
     res = find_impact(
         project,
         "src/pkg/models.py",

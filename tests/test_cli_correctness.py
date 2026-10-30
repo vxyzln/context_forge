@@ -1,7 +1,3 @@
-"""Comprehensive regression test suite for Context Forge CLI correctness,
-exit codes, error handling, target resolution, and output consistency.
-"""
-
 from __future__ import annotations
 
 import json
@@ -16,11 +12,9 @@ from context_forge.main import main, parse_args
 
 @pytest.fixture
 def sample_project(tmp_path: Path) -> Path:
-    """Create a sample multi-package project for end-to-end CLI testing."""
     root = tmp_path / "repo"
     root.mkdir()
 
-    # Package A: defines process_data and Service
     pkg_a = root / "pkg_a"
     pkg_a.mkdir()
     (pkg_a / "__init__.py").write_text("", encoding="utf-8")
@@ -33,7 +27,6 @@ def sample_project(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
 
-    # Package B: imports process_data and uses it
     pkg_b = root / "pkg_b"
     pkg_b.mkdir()
     (pkg_b / "__init__.py").write_text("", encoding="utf-8")
@@ -44,7 +37,6 @@ def sample_project(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
 
-    # Package C: defines Config (candidate 1)
     pkg_c = root / "pkg_c"
     pkg_c.mkdir()
     (pkg_c / "__init__.py").write_text("", encoding="utf-8")
@@ -53,7 +45,6 @@ def sample_project(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
 
-    # Package D: defines Config (candidate 2)
     pkg_d = root / "pkg_d"
     pkg_d.mkdir()
     (pkg_d / "__init__.py").write_text("", encoding="utf-8")
@@ -62,26 +53,18 @@ def sample_project(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
 
-    # Standalone file with no references
     (root / "orphan.py").write_text(
         "def standalone() -> None:\n    pass\n",
         encoding="utf-8",
     )
 
-    # Analyze the project so that intelligence DB and cache are populated
     with patch.object(sys, "argv", ["context-forge", "analyze", str(root)]):
         main()
 
     return root
 
 
-# =========================================================================
-# 1. Unknown Commands, Subcommands, and Bare Paths
-# =========================================================================
-
-
 def test_unknown_command_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
-    """An unknown top-level command must be rejected with exit code 2."""
     with (
         patch.object(sys, "argv", ["cf", "anlyze"]),
         pytest.raises(SystemExit) as exc_info,
@@ -94,7 +77,6 @@ def test_unknown_command_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_unknown_subcommand_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
-    """An unknown memory subcommand must be rejected with exit code 2."""
     with (
         patch.object(sys, "argv", ["cf", "memory", "foobar"]),
         pytest.raises(SystemExit) as exc_info,
@@ -107,7 +89,6 @@ def test_unknown_subcommand_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_unknown_flag_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
-    """An unknown flag must be rejected with exit code 2."""
     with (
         patch.object(sys, "argv", ["cf", "--unrecognized-option"]),
         pytest.raises(SystemExit) as exc_info,
@@ -118,7 +99,6 @@ def test_unknown_flag_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_bare_path_status_detection(sample_project: Path) -> None:
-    """Bare directory path defaults to the status command."""
     args = parse_args([str(sample_project)])
     assert args.command == "status"
     assert args.path == Path(str(sample_project))
@@ -131,7 +111,6 @@ def test_bare_path_status_detection(sample_project: Path) -> None:
 def test_bare_path_nonexistent_fails_with_exit_1(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A bare explicit path that does not exist fails as a validation error (exit 1)."""
     with (
         patch.object(sys, "argv", ["cf", "/nonexistent/test/directory/path"]),
         pytest.raises(SystemExit) as exc_info,
@@ -143,15 +122,9 @@ def test_bare_path_nonexistent_fails_with_exit_1(
     assert "Project path does not exist" in captured.err
 
 
-# =========================================================================
-# 2. cf impact Correctness & Exit Codes
-# =========================================================================
-
-
 def test_impact_missing_target_text(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Missing impact target in text mode prints not found and exits with 1."""
     with (
         patch.object(
             sys, "argv", ["cf", "impact", "nonexistent_target", str(sample_project)]
@@ -169,7 +142,6 @@ def test_impact_missing_target_text(
 def test_impact_missing_target_json(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Missing impact target in JSON mode emits structured JSON and exits with 1."""
     with (
         patch.object(
             sys,
@@ -197,7 +169,6 @@ def test_impact_missing_target_json(
 def test_impact_ambiguous_target_text(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Ambiguous impact target in text mode prints candidates and exits with 1."""
     with (
         patch.object(sys, "argv", ["cf", "impact", "Config", str(sample_project)]),
         pytest.raises(SystemExit) as exc_info,
@@ -213,7 +184,6 @@ def test_impact_ambiguous_target_text(
 def test_impact_ambiguous_target_json(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Ambiguous impact target in JSON mode emits candidates and exits with 1."""
     with (
         patch.object(
             sys,
@@ -234,7 +204,6 @@ def test_impact_ambiguous_target_json(
 def test_impact_valid_target_with_zero_impact_exits_0(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A valid resolved target with zero incoming/outgoing impact exits with 0."""
     with patch.object(sys, "argv", ["cf", "impact", "orphan.py", str(sample_project)]):
         main()
 
@@ -246,7 +215,6 @@ def test_impact_valid_target_with_zero_impact_exits_0(
 def test_impact_valid_target_with_impact_exits_0(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A valid resolved target with impacted components exits with 0."""
     with patch.object(
         sys, "argv", ["cf", "impact", "pkg_a/service.py", str(sample_project)]
     ):
@@ -260,7 +228,6 @@ def test_impact_valid_target_with_impact_exits_0(
 def test_impact_empty_target_exits_1(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Empty or whitespace target raises validation error and exits with 1."""
     with (
         patch.object(sys, "argv", ["cf", "impact", "   ", str(sample_project)]),
         pytest.raises(SystemExit) as exc_info,
@@ -272,15 +239,9 @@ def test_impact_empty_target_exits_1(
     assert "Target cannot be empty" in captured.err
 
 
-# =========================================================================
-# 3. cf memory file Correctness & Exit Codes
-# =========================================================================
-
-
 def test_memory_file_missing_text(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Missing file query in text mode prints not found and exits with 1."""
     with (
         patch.object(
             sys, "argv", ["cf", "memory", "file", "nonexistent.py", str(sample_project)]
@@ -297,7 +258,6 @@ def test_memory_file_missing_text(
 def test_memory_file_missing_json(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Missing file query in JSON mode emits JSON and exits with 1."""
     with (
         patch.object(
             sys,
@@ -326,7 +286,6 @@ def test_memory_file_missing_json(
 def test_memory_file_valid_relative_path(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Resolving a valid file by relative path succeeds with exit code 0."""
     with patch.object(
         sys,
         "argv",
@@ -343,8 +302,6 @@ def test_memory_file_valid_relative_path(
 def test_memory_file_resolves_dot_slash_and_absolute_paths(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """File query handles ./ prefixes and absolute repository paths."""
-    # Test ./ prefix
     with patch.object(
         sys,
         "argv",
@@ -365,7 +322,6 @@ def test_memory_file_resolves_dot_slash_and_absolute_paths(
     assert data["file"] is not None
     assert data["file"]["path"] == "pkg_a/service.py"
 
-    # Test absolute path inside repository
     abs_file = sample_project / "pkg_a" / "service.py"
     with patch.object(
         sys,
@@ -388,16 +344,9 @@ def test_memory_file_resolves_dot_slash_and_absolute_paths(
     assert data_abs["file"]["path"] == "pkg_a/service.py"
 
 
-# =========================================================================
-# 4. cf locate & cf memory symbol Correctness & Disambiguation
-# =========================================================================
-
-
 def test_memory_symbol_missing_exits_1(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Missing symbol in memory symbol exits with 1 in text and JSON modes."""
-    # Text mode
     with (
         patch.object(
             sys,
@@ -411,7 +360,6 @@ def test_memory_symbol_missing_exits_1(
     captured = capsys.readouterr()
     assert "No matching symbol found." in captured.out
 
-    # JSON mode
     with (
         patch.object(
             sys,
@@ -437,7 +385,6 @@ def test_memory_symbol_missing_exits_1(
 def test_memory_symbol_ambiguous_exits_1_without_excerpt(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Ambiguous symbol exits with 1 and does not print an excerpt."""
     with (
         patch.object(
             sys,
@@ -457,7 +404,6 @@ def test_memory_symbol_ambiguous_exits_1_without_excerpt(
 def test_memory_symbol_disambiguation_with_file_filter(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Filtering by file disambiguates Config and succeeds with exit code 0."""
     with patch.object(
         sys,
         "argv",
@@ -481,8 +427,6 @@ def test_memory_symbol_disambiguation_with_file_filter(
 def test_symbol_imported_disambiguation_prefers_definition(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Symbols imported in other files resolve to the function definition when unfiltered."""
-    # memory symbol process_data
     with patch.object(
         sys, "argv", ["cf", "memory", "symbol", "process_data", str(sample_project)]
     ):
@@ -496,7 +440,6 @@ def test_symbol_imported_disambiguation_prefers_definition(
     )
     assert "pkg_a/service.py" in captured.out
 
-    # locate process_data
     with patch.object(
         sys, "argv", ["cf", "locate", "process_data", str(sample_project)]
     ):
@@ -510,8 +453,6 @@ def test_symbol_imported_disambiguation_prefers_definition(
 def test_locate_and_memory_symbol_file_filter_selects_import_candidate(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A file filter selects the import symbol in that file without suppression by definitions."""
-    # cf locate process_data --file pkg_b/pipeline.py
     with patch.object(
         sys,
         "argv",
@@ -531,7 +472,6 @@ def test_locate_and_memory_symbol_file_filter_selects_import_candidate(
     assert "Target: [import]" in locate_out
     assert "pkg_b/pipeline.py" in locate_out
 
-    # cf memory symbol process_data --file pkg_b/pipeline.py
     with patch.object(
         sys,
         "argv",
@@ -556,8 +496,6 @@ def test_locate_and_memory_symbol_file_filter_selects_import_candidate(
 def test_locate_and_memory_symbol_file_filter_selects_definition_candidate(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A file filter selecting the defining file returns the definition symbol."""
-    # cf locate process_data --file pkg_a/service.py
     with patch.object(
         sys,
         "argv",
@@ -577,7 +515,6 @@ def test_locate_and_memory_symbol_file_filter_selects_definition_candidate(
     assert "Target: [function]" in locate_out
     assert "pkg_a/service.py" in locate_out
 
-    # cf memory symbol process_data --file pkg_a/service.py
     with patch.object(
         sys,
         "argv",
@@ -602,8 +539,6 @@ def test_locate_and_memory_symbol_file_filter_selects_definition_candidate(
 def test_locate_and_memory_symbol_type_filter_import(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Explicit --type import selects import symbols across files."""
-    # cf locate process_data --type import
     with patch.object(
         sys,
         "argv",
@@ -616,7 +551,6 @@ def test_locate_and_memory_symbol_type_filter_import(
     assert "Target: [import]" in locate_out
     assert "pkg_b/pipeline.py" in locate_out
 
-    # cf memory symbol process_data --type import
     with patch.object(
         sys,
         "argv",
@@ -641,7 +575,6 @@ def test_locate_and_memory_symbol_type_filter_import(
 def test_locate_and_memory_symbol_type_filter_mismatch_exits_1(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Incompatible type filter yields not found with exit code 1."""
     with (
         patch.object(
             sys,
@@ -680,7 +613,6 @@ def test_locate_and_memory_symbol_type_filter_mismatch_exits_1(
 def test_locate_and_memory_symbol_qualified_name_resolution(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Qualified symbol names resolve directly to their definition."""
     with patch.object(
         sys,
         "argv",
@@ -718,7 +650,6 @@ def test_locate_and_memory_symbol_qualified_name_resolution(
 def test_locate_and_memory_symbol_fully_qualified_class_method(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Class methods resolve when query includes containing scope (Service.run)."""
     with patch.object(
         sys,
         "argv",
@@ -758,7 +689,6 @@ def test_locate_and_memory_symbol_fully_qualified_class_method(
 def test_locate_and_memory_symbol_method_not_matched_by_simple_module_qualifier(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Querying pkg_a.service.run must NOT match Service.run because run is a method."""
     with (
         patch.object(
             sys,
@@ -807,7 +737,6 @@ def test_locate_and_memory_symbol_method_not_matched_by_simple_module_qualifier(
 def test_module_path_resolution_with_nested_src_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Module-path resolution must not treat internal 'src' directories as import roots."""
     root = tmp_path / "repo_nested_src"
     root.mkdir()
     nested = root / "tools" / "src"
@@ -823,7 +752,6 @@ def test_module_path_resolution_with_nested_src_directory(
         main()
     capsys.readouterr()
 
-    # Querying with full module path tools.src.helpers.compute_hash must succeed
     with patch.object(
         sys,
         "argv",
@@ -857,7 +785,6 @@ def test_module_path_resolution_with_nested_src_directory(
     assert "compute_hash" in imp_out
     assert "tools/src/helpers.py" in imp_out
 
-    # Erroneous query assuming 'src' was the root must fail
     with (
         patch.object(
             sys,
@@ -895,7 +822,6 @@ def test_module_path_resolution_with_nested_src_directory(
 def test_module_path_resolution_with_src_layout_and_nested_class(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Verify src-layout package resolution and nested class method qualified name scoping."""
     root = tmp_path / "repo_src_layout"
     root.mkdir()
     src_pkg = root / "src" / "pkg_src"
@@ -913,7 +839,6 @@ def test_module_path_resolution_with_src_layout_and_nested_class(
         main()
     capsys.readouterr()
 
-    # Fully qualified nested method in src-layout resolves across locate, memory symbol, and impact
     with patch.object(
         sys,
         "argv",
@@ -941,7 +866,6 @@ def test_module_path_resolution_with_src_layout_and_nested_class(
         in capsys.readouterr().out
     )
 
-    # Incomplete queries that bypass containing scopes must be rejected
     for incomplete in ["pkg_src.service.execute", "pkg_src.service.Inner.execute"]:
         with (
             patch.object(sys, "argv", ["cf", "locate", incomplete, str(root)]),
@@ -967,15 +891,9 @@ def test_module_path_resolution_with_src_layout_and_nested_class(
         assert exc_i.value.code == 1
 
 
-# =========================================================================
-# 5. cf memory references Correctness & Exit Codes
-# =========================================================================
-
-
 def test_memory_references_missing_symbol_exits_1(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Missing symbol in memory references exits with 1 in text and JSON."""
     with (
         patch.object(
             sys,
@@ -993,7 +911,6 @@ def test_memory_references_missing_symbol_exits_1(
 def test_memory_references_ambiguous_symbol_exits_1(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Ambiguous symbol in memory references exits with 1."""
     with (
         patch.object(
             sys,
@@ -1011,7 +928,6 @@ def test_memory_references_ambiguous_symbol_exits_1(
 def test_memory_references_resolves_and_finds_incoming_reference(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """process_data uniquely resolves and identifies call from pipeline.py."""
     with patch.object(
         sys,
         "argv",
@@ -1038,7 +954,6 @@ def test_memory_references_resolves_and_finds_incoming_reference(
 def test_memory_references_valid_zero_references_exits_0(
     sample_project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A valid resolved symbol with 0 incoming references succeeds with exit 0."""
     with patch.object(
         sys,
         "argv",

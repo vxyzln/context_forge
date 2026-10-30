@@ -1,5 +1,3 @@
-"""Repositories package."""
-
 from task_mgmt.repositories.base import BaseRepository
 from task_mgmt.repositories.project_repo import ProjectRepository
 from task_mgmt.repositories.task_repo import TaskRepository

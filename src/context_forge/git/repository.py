@@ -444,7 +444,6 @@ class GitRepository:
         if not output:
             return []
 
-        # Git porcelain -z uses NUL bytes as record delimiters.
         tokens = output.split("\0")
         entries: list[GitStatusEntry] = []
         i = 0

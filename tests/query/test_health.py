@@ -386,7 +386,7 @@ def test_build_health_report_bounded_limit(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="positive integer"):
         build_health_report(project=project, limit=-1)
     with pytest.raises(ValueError, match="positive integer"):
-        build_health_report(project=project, limit=True)  # type: ignore[arg-type]
+        build_health_report(project=project, limit=True)
 
 
 def test_build_health_report_determinism(tmp_path: Path) -> None:

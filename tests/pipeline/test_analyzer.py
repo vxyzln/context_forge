@@ -1850,7 +1850,6 @@ def test_current_fingerprints_handles_disappearing_file(tmp_path: Path) -> None:
     project = RepositoryScanner(tmp_path).scan()
     assert len(project.files) == 2
 
-    # b.py disappears right after scan
     b.unlink()
 
     fps = current_fingerprints(project)
@@ -1878,19 +1877,16 @@ def test_large_project_analysis_incremental_and_warm_correctness(
     db_path = tmp_path / ".context_forge.db"
     analyzer = ProjectAnalyzer(tmp_path, database_path=db_path)
 
-    # 1. Cold analysis
     project_cold = analyzer.analyze()
     assert project_cold.analysis_status == "analyzed"
     assert len(project_cold.files) == 18
     assert len(project_cold.symbols) >= 30
 
-    # 2. Warm analysis produces identical structure
     analyzer_warm = ProjectAnalyzer(tmp_path, database_path=db_path)
     project_warm = analyzer_warm.analyze()
     assert len(project_warm.files) == len(project_cold.files)
     assert len(project_warm.symbols) == len(project_cold.symbols)
 
-    # 3. Modify single file
     target_file = src / "pkg_0" / "mod_0.py"
     target_file.write_text(
         "class Service_0_0:\n"
@@ -1937,7 +1933,6 @@ def test_incremental_analysis_same_length_entity_replacement_preserves_membershi
     assert "AlphaService" in names_1
     assert "BetaService" in names_1
 
-    # Modify alpha.py by replacing AlphaService with GammaService (same number of classes and methods)
     file_a.write_text(
         "class GammaService:\n"
         "    def execute_gamma(self) -> str:\n"
@@ -1949,20 +1944,16 @@ def test_incremental_analysis_same_length_entity_replacement_preserves_membershi
     project_2 = analyzer_inc.analyze()
     assert project_2.analysis_status == "analyzed"
 
-    # New entity recognized
     names_2 = {s.name for s in project_2.symbols}
     assert "GammaService" in names_2
     assert "execute_gamma" in names_2
 
-    # Removed entity not treated as current
     assert "AlphaService" not in names_2
     assert "run" not in names_2
 
-    # Unchanged entities retained
     assert "BetaService" in names_2
     assert "execute" in names_2
 
-    # Membership validation on merged project: can add valid new symbol for alpha.py
     file_a_entity = next(f for f in project_2.files if f.path == Path("src/alpha.py"))
     new_symbol = Symbol(
         file_id=file_a_entity.id,
@@ -1988,21 +1979,17 @@ def test_analyzer_fresh_cache_with_incomplete_or_failed_status_triggers_full_rea
     db_path = tmp_path / ".context_forge.db"
     analyzer = ProjectAnalyzer(tmp_path, database_path=db_path)
 
-    # 1. Initial complete analysis
     first_project = analyzer.analyze()
     assert first_project.analysis_status == "analyzed"
 
-    # 2. Corrupt/mark status as 'failed' in SQLite projects table while fingerprints remain fresh
     conn = sqlite3.connect(db_path)
     conn.execute("UPDATE projects SET analysis_status = 'failed'")
     conn.commit()
     conn.close()
 
-    # 3. Analyze again with unchanged files
     second_analyzer = ProjectAnalyzer(tmp_path, database_path=db_path)
     second_project = second_analyzer.analyze()
 
-    # Must not return the failed project; must reanalyze fully to 'analyzed'
     assert second_project.analysis_status == "analyzed"
     names = {s.name for s in second_project.symbols}
     assert "Original" in names
